@@ -1,0 +1,465 @@
+package dev.shieldvpn.vpn
+
+import android.app.Application
+import android.net.Uri
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import dev.shieldvpn.APP_NAME
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class VpnViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val _state = MutableStateFlow(VpnUiState())
+    val state: StateFlow<VpnUiState> = _state.asStateFlow()
+
+    private val app: Application get() = getApplication()
+
+    // The tunnel's state, from the VPN's own process.
+    private val link = VpnLink.Client(application)
+
+    init {
+        link.open()
+        _state.update { it.copy(settings = SettingsStore.load(app), speeds = SpeedTest.load(app)) }
+        refresh(preferActive = SettingsStore.activeConnection(app))
+        viewModelScope.launch { VpnController.status.collect { onStatus(it) } }
+        viewModelScope.launch { VpnController.log.collect { log -> _state.update { it.copy(log = log) } } }
+        viewModelScope.launch { VpnController.tunnel.collect { t -> _state.update { it.copy(tunnel = t) } } }
+        viewModelScope.launch { VpnController.pausedUntil.collect { until -> _state.update { it.copy(pausedUntil = until) } } }
+    }
+
+    // ---- The tunnel ---------------------------------------------------------
+
+    /**
+     * Connects [id]. A [login] typed in the sign-in sheet is saved first when [remember]
+     * is on, or used just this once. Returns false when the profile still needs a login.
+     * The caller has made sure Android allows the VPN.
+     */
+    fun connect(id: String, login: CredentialStore.Credentials? = null, remember: Boolean = true): Boolean {
+        setActive(id)
+        if (login != null && remember) {
+            CredentialStore.save(app, id, login.username.trim(), login.password)
+            refresh()
+        }
+        return when (val plan = Tunnels.plan(app, id, login?.takeIf { !remember })) {
+            is Tunnels.Plan.Ready -> {
+                Tunnels.start(app, plan)
+                true
+            }
+            is Tunnels.Plan.NeedsLogin -> false
+            is Tunnels.Plan.Fails -> {
+                failEarly(id, plan.message)
+                true
+            }
+        }
+    }
+
+    fun disconnect() {
+        Tunnels.stop(app)
+    }
+
+    /** Turns the tunnel off for 15 minutes. The service brings it back, even with the app closed. */
+    fun pause() {
+        Tunnels.pause(app, System.currentTimeMillis() + PAUSE_MILLIS)
+    }
+
+    fun pauseMore() {
+        val until = _state.value.pausedUntil ?: return
+        Tunnels.pause(app, until + PAUSE_MILLIS)
+    }
+
+    fun resume() {
+        val id = _state.value.activeId ?: return
+        connect(id)
+    }
+
+    /** A connect that fails before any tunnel starts. It must not disturb a tunnel that is still up. */
+    private fun failEarly(id: String, message: String) {
+        if (_state.value.status.isActive) {
+            ConnectionStore.update(app, id) { it.copy(lastError = message) }
+            refresh()
+        } else {
+            VpnController.update(VpnStatus.Failed(id, message))
+        }
+    }
+
+    private fun onStatus(status: VpnStatus) {
+        _state.update { it.copy(status = status) }
+        // Each profile remembers why it last failed, until it connects again.
+        when (status) {
+            is VpnStatus.Failed -> status.connectionId?.let { id ->
+                if (_state.value.connection(id)?.lastError != status.message) {
+                    ConnectionStore.update(app, id) { it.copy(lastError = status.message) }
+                    refresh()
+                }
+            }
+            is VpnStatus.Connected -> {
+                ConnectionStore.update(app, status.connectionId) { it.copy(lastError = null, lastUsed = System.currentTimeMillis()) }
+                refresh()
+            }
+            else -> Unit
+        }
+    }
+
+    /** Keeps [r] as the last speed test of profile [key], or of the connection without the VPN. */
+    fun saveSpeed(key: String, r: SpeedTest.Result) {
+        SpeedTest.save(app, key, r)
+        _state.update { it.copy(speeds = it.speeds + (key to r)) }
+    }
+
+    // ---- Profiles -------------------------------------------------------------
+
+    fun rename(id: String, name: String) {
+        val clean = name.trim()
+        if (clean.isEmpty()) return
+        ConnectionStore.update(app, id) { it.copy(name = clean) }
+        refresh()
+    }
+
+    fun saveLogin(id: String, username: String, password: String) {
+        CredentialStore.save(app, id, username.trim(), password)
+        refresh()
+    }
+
+    fun forgetPassword(id: String) {
+        CredentialStore.save(app, id, CredentialStore.load(app, id).username, "")
+        if (_state.value.settings.startupId == id) changeSettings { it.copy(startupId = null, boot = false) }
+        refresh()
+    }
+
+    fun setServer(id: String, host: String, port: Int) {
+        val server = ownServer(id) ?: return
+        ServerStore.update(app, server.copy(host = host.trim(), port = port))
+        refresh()
+    }
+
+    fun resetServer(id: String) {
+        val server = ownServer(id) ?: return
+        ServerStore.resetToFile(app, server.id)
+        refresh()
+    }
+
+    /**
+     * The server file profile [id] can change alone. Profiles made with Duplicate share one; the
+     * first change gives this profile its own copy, so the others keep their address and protocol.
+     */
+    private fun ownServer(id: String): Server? {
+        val c = ConnectionStore.list(app).firstOrNull { it.id == id } ?: return null
+        val server = ServerStore.list(app).firstOrNull { it.id == c.serverId } ?: return null
+        if (ConnectionStore.list(app).none { it.id != id && it.serverId == c.serverId }) return server
+        val raw = ServerStore.rawConfig(app, server.id) ?: return server
+        val own = ServerStore.add(app, raw)
+        ServerStore.update(app, own.copy(host = server.host, port = server.port, protocol = server.protocol))
+        ConnectionStore.update(app, id) { it.copy(serverId = own.id) }
+        refresh()
+        return ServerStore.list(app).first { it.id == own.id }
+    }
+
+    /** "From file", "UDP" or "TCP". */
+    fun setProtocol(id: String, value: String) {
+        val c = _state.value.connection(id) ?: return
+        val server = ownServer(id) ?: return
+        val protocol = when (value) {
+            "UDP" -> Protocol.UDP
+            "TCP" -> Protocol.TCP
+            else -> _state.value.infoOf(c)?.fileProtocol ?: server.protocol
+        }
+        ServerStore.update(app, server.copy(protocol = protocol))
+        refresh()
+    }
+
+    fun setKillMode(id: String, value: String) = changeConnection(id) { it.copy(killMode = value) }
+
+    fun setDnsMode(id: String, value: String) = changeConnection(id) { it.copy(dnsMode = value) }
+
+    fun setOrder(id: String, value: String) = changeConnection(id) { it.copy(order = value) }
+
+    fun setPinned(id: String, pinned: Boolean) = changeConnection(id) { it.copy(pinned = pinned) }
+
+    /** The icon and colour shown for the profile; null for both picks them from its name again. */
+    fun setLook(id: String, icon: String?, colour: Int?) = changeConnection(id) { it.copy(lookIcon = icon, lookColour = colour) }
+
+    /** The profile that connects when the TV starts, or null for none. */
+    fun setStartup(id: String?) = changeSettings { it.copy(startupId = id, boot = id != null) }
+
+    private fun changeConnection(id: String, change: (Connection) -> Connection) {
+        ConnectionStore.update(app, id, change)
+        refresh()
+    }
+
+    /** Makes a copy right after the original, with the same login. Returns the copy. */
+    fun duplicate(id: String): Connection? {
+        val source = _state.value.connection(id) ?: return null
+        val copy = source.copy(
+            id = java.util.UUID.randomUUID().toString(),
+            name = "${source.name} (copy)",
+            pinned = false,
+            lastError = null,
+            lastUsed = null,
+        )
+        ConnectionStore.insertAfter(app, id, copy)
+        CredentialStore.copy(app, id, copy.id)
+        refresh()
+        return copy
+    }
+
+    fun delete(id: String) {
+        val state = _state.value
+        val connection = state.connection(id) ?: return
+        if (state.status.connectionId == id) {
+            if (state.status.isActive) Tunnels.stop(app) else VpnController.update(VpnStatus.Disconnected)
+        }
+        ConnectionStore.delete(app, id)
+        CredentialStore.remove(app, id)
+        // A server goes with its last profile, and so does a key Tunnel kept for it.
+        if (ConnectionStore.list(app).none { it.serverId == connection.serverId }) ServerStore.delete(app, connection.serverId)
+        connection.keyAlias?.let(::releaseKey)
+        SpeedTest.forget(app, id)
+        _state.update { it.copy(speeds = it.speeds - id) }
+        if (state.settings.startupId == id) changeSettings { it.copy(startupId = null, boot = false) }
+        refresh()
+    }
+
+    fun rawConfig(serverId: String): String = ServerStore.displayConfig(app, serverId)
+
+    // ---- Importing ------------------------------------------------------------
+
+    /** A file picked on the TV: a profile opens its review, a backup asks for its passphrase. */
+    fun review(uri: Uri) {
+        val name = runCatching { ServerStore.fileNameOf(app, uri) }.getOrDefault("")
+        val bytes = runCatching { app.contentResolver.openInputStream(uri)?.use { ServerStore.readLimited(it) } }.getOrNull()
+        val problem = if (bytes == null) "${APP_NAME} could not open this file." else receive(name, bytes)
+        if (problem != null) {
+            _state.update { it.copy(review = ImportReview(name, "", "", "", 0, Protocol.UDP, false, "", "", emptyList(), problem)) }
+        }
+    }
+
+    fun noFilePicker() {
+        _state.update {
+            it.copy(review = ImportReview("", "", "", "", 0, Protocol.UDP, false, "", "", emptyList(), "This TV has no file picker, so ${APP_NAME} can’t open files from Downloads or USB. Send the file from your phone instead."))
+        }
+    }
+
+    fun cancelReview() {
+        _state.update { it.copy(review = null) }
+    }
+
+    fun renameReview(name: String) {
+        if (name.isBlank()) return
+        _state.update { it.copy(review = it.review?.copy(name = name.trim())) }
+    }
+
+    /**
+     * A file or text from a phone or a link. A backup waits for its passphrase; anything else
+     * opens the review. Returns what is wrong, for the phone to show, or null when it arrived.
+     */
+    fun receive(name: String, bytes: ByteArray): String? {
+        if (Backup.isBackup(bytes)) {
+            _state.update { it.copy(pendingRestore = bytes) }
+            return null
+        }
+        if (Certificates.isPkcs12(name, bytes)) {
+            _state.update { it.copy(pendingP12 = bytes) }
+            return null
+        }
+        val review = ServerStore.review(name.ifBlank { "pasted.ovpn" }, bytes)
+        if (review.problem != null) return review.problem
+        _state.update { it.copy(review = review) }
+        return null
+    }
+
+    /** Downloads a profile from [url], with a login when the link needs one. Returns what went wrong, or null. */
+    suspend fun download(url: String, username: String?, password: String?): String? = withContext(Dispatchers.IO) {
+        val clean = url.trim()
+        // Only https: a profile holds keys, and Android refuses plain http anyway.
+        if (clean.startsWith("http://")) return@withContext "Use an https:// link. ${APP_NAME} won’t download a profile without encryption."
+        if (!clean.startsWith("https://")) return@withContext "The link must start with https://"
+        runCatching {
+            val headers = if (username.isNullOrEmpty()) emptyMap() else mapOf(
+                "Authorization" to "Basic " + android.util.Base64.encodeToString("$username:${password.orEmpty()}".toByteArray(), android.util.Base64.NO_WRAP),
+            )
+            val r = Http.get(clean, headers, timeoutMs = 10_000)
+            when (r.code) {
+                200 -> r.body ?: ByteArray(0)
+                401, 403 -> return@withContext "The link needs a username and password, or they are wrong."
+                404 -> return@withContext "Nothing was found at that link."
+                else -> return@withContext "The server answered ${r.code}."
+            }
+        }.fold(
+            onSuccess = { bytes ->
+                val name = clean.substringAfterLast('/').substringBefore('?').ifBlank { "download.ovpn" }
+                withContext(Dispatchers.Main) { receive(name, bytes) }
+            },
+            onFailure = { "${APP_NAME} could not download it: ${it.message ?: "no answer"}." },
+        )
+    }
+
+    /** Opens the waiting .p12 with [password]; null when it opens, or what is wrong. */
+    fun checkP12(password: String): String? {
+        val bytes = _state.value.pendingP12 ?: return "There is no certificate waiting."
+        return (Certificates.readPkcs12(bytes, password) as? Certificates.Read.Problem)?.message
+    }
+
+    /** Puts the waiting .p12's certificate and key into profile [id]'s file. Returns the problem, or null. */
+    fun attachP12(password: String, id: String): String? {
+        val bytes = _state.value.pendingP12 ?: return "There is no certificate waiting."
+        val bundle = when (val r = Certificates.readPkcs12(bytes, password)) {
+            is Certificates.Read.Done -> r.bundle
+            is Certificates.Read.Problem -> return r.message
+        }
+        val c = _state.value.connection(id) ?: return "That profile is gone."
+        val config = ServerStore.rawConfig(app, c.serverId) ?: return "The profile's file is missing."
+        ServerStore.replaceConfig(app, c.serverId, Certificates.attach(config, bundle))
+        // The file's own certificate is used again.
+        ConnectionStore.update(app, id) { it.copy(keyAlias = null) }
+        _state.update { it.copy(pendingP12 = null) }
+        refresh()
+        return null
+    }
+
+    /** Moves the waiting .p12's key into Android's keystore. Returns the alias, or null. */
+    fun keepP12(password: String): String? {
+        val bytes = _state.value.pendingP12 ?: return null
+        val alias = Certificates.keepInKeystore(bytes, password) ?: return null
+        _state.update { it.copy(pendingP12 = null) }
+        return alias
+    }
+
+    fun cancelP12() {
+        _state.update { it.copy(pendingP12 = null) }
+    }
+
+    /** Uses a certificate installed on the TV for profile [id], or the file's own again with null. */
+    fun setKeyAlias(id: String, alias: String?) {
+        val before = _state.value.connection(id)?.keyAlias
+        changeConnection(id) { it.copy(keyAlias = alias) }
+        if (before != null && before != alias) releaseKey(before)
+    }
+
+    /** Forgets a key Tunnel kept once no profile uses it. */
+    private fun releaseKey(alias: String) {
+        if (ConnectionStore.list(app).none { it.keyAlias == alias }) Certificates.forget(alias)
+    }
+
+    fun cancelRestore() {
+        _state.update { it.copy(pendingRestore = null) }
+    }
+
+    /** Restores the waiting backup. Returns a line for the user. */
+    suspend fun restore(passphrase: String): Backup.Restored {
+        val bytes = _state.value.pendingRestore ?: return Backup.Restored.Problem("There is no backup to restore.")
+        val result = withContext(Dispatchers.Default) { Backup.restore(app, bytes, passphrase) }
+        if (result is Backup.Restored.Done) {
+            _state.update { it.copy(pendingRestore = null, settings = SettingsStore.load(app)) }
+            refresh()
+        }
+        return result
+    }
+
+    fun setBackupPassphrase(passphrase: String?) {
+        CredentialStore.putSecret(app, BACKUP_SECRET, passphrase?.takeIf { it.isNotEmpty() })
+        refresh()
+    }
+
+    /** The encrypted backup to send to a phone, or null until a passphrase is set. */
+    suspend fun backupFile(): ByteArray? {
+        val passphrase = CredentialStore.secret(app, BACKUP_SECRET) ?: return null
+        return withContext(Dispatchers.Default) { Backup.create(app, passphrase) }
+    }
+
+    /** A profile's .ovpn file to send to a phone. The saved password is not in it. */
+    fun profileFile(id: String): ByteArray? {
+        val c = _state.value.connection(id) ?: return null
+        return ServerStore.effectiveConfig(app, c.serverId)?.toByteArray()
+    }
+
+    fun logText(): String = _state.value.log.joinToString("\n") { "${it.time}  ${it.text}" }
+
+    fun setPin(pin: String?) {
+        SettingsStore.setPin(app, pin)
+        if (pin == null) changeSettings { it.copy(pinMode = "Off") }
+        refresh()
+    }
+
+    fun checkPin(pin: String): Boolean = SettingsStore.checkPin(app, pin)
+
+    /** Saves the reviewed file as a new profile and returns its id. */
+    fun saveReview(): String? {
+        val review = _state.value.review ?: return null
+        if (review.problem != null) return null
+        val server = ServerStore.add(app, review.text)
+        val connection = ConnectionStore.add(app, review.name, server.id)
+        if (review.username.isNotEmpty()) CredentialStore.save(app, connection.id, review.username, review.password)
+        _state.update { it.copy(review = null) }
+        refresh()
+        if (_state.value.activeId == null) setActive(connection.id)
+        return connection.id
+    }
+
+    // ---- Settings ---------------------------------------------------------------
+
+    fun changeSettings(change: (AppSettings) -> AppSettings) {
+        val next = change(_state.value.settings)
+        SettingsStore.save(app, next)
+        _state.update { it.copy(settings = next) }
+    }
+
+    fun clearLog() = link.clearLog()
+
+    override fun onCleared() {
+        link.close()
+    }
+
+    /** Deletes every profile, password and setting. */
+    fun resetAll() {
+        disconnect()
+        ConnectionStore.list(app).mapNotNull { it.keyAlias }.distinct().forEach(Certificates::forget)
+        ConnectionStore.clear(app)
+        ServerStore.clear(app)
+        CredentialStore.clear(app)
+        SpeedTest.forget(app, null)
+        _state.update { it.copy(speeds = emptyMap()) }
+        changeSettings { AppSettings() }
+        VpnController.update(VpnStatus.Disconnected)
+        refresh()
+    }
+
+    // ---- Loading ------------------------------------------------------------------
+
+    private fun setActive(id: String) {
+        _state.update { it.copy(activeId = id) }
+        SettingsStore.setActiveConnection(app, id)
+    }
+
+    /** Re-reads profiles, servers and logins, and keeps the active profile pointing at one that exists. */
+    private fun refresh(preferActive: String? = null) {
+        val connections = ConnectionStore.list(app)
+        val servers = ServerStore.list(app).associateBy { it.id }
+        val logins = connections.associate { c ->
+            val login = CredentialStore.load(app, c.id)
+            c.id to Login(login.username, login.password.isNotEmpty())
+        }
+        val infos = servers.keys.mapNotNull { id -> ServerStore.info(app, id)?.let { id to it } }.toMap()
+        val hasPassphrase = CredentialStore.secret(app, BACKUP_SECRET) != null
+        val hasPin = SettingsStore.hasPin(app)
+        _state.update { s ->
+            val wanted = preferActive ?: s.activeId
+            val active = connections.firstOrNull { it.id == wanted } ?: connections.firstOrNull()
+            s.copy(
+                connections = connections, servers = servers, logins = logins, infos = infos, activeId = active?.id,
+                hasBackupPassphrase = hasPassphrase, hasPin = hasPin,
+            )
+        }
+        SettingsStore.setActiveConnection(app, _state.value.activeId)
+    }
+
+    companion object {
+        private const val PAUSE_MILLIS = 15 * 60 * 1000L
+        private const val BACKUP_SECRET = "backup"
+    }
+}

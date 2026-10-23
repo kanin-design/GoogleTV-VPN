@@ -1,0 +1,9 @@
+/* Only the JNI entry points leave libshieldvpn.so; everything else stays inside, so the
+   linker can drop the OpenSSL and OpenVPN code nothing uses. */
+{
+  global:
+    JNI_OnLoad;
+    Java_*;
+  local:
+    *;
+};

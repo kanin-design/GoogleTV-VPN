@@ -1,0 +1,18 @@
+[submodule "third_party/openvpn3"]
+	path = third_party/openvpn3
+	url = https://github.com/OpenVPN/openvpn3.git
+[submodule "third_party/openssl"]
+	path = third_party/openssl
+	url = https://github.com/openssl/openssl.git
+[submodule "third_party/asio-1.30.2"]
+	path = third_party/asio-1.30.2
+	url = https://github.com/chriskohlhoff/asio.git
+[submodule "third_party/fmt"]
+	path = third_party/fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "third_party/lz4"]
+	path = third_party/lz4
+	url = https://github.com/lz4/lz4.git
+[submodule "third_party/xxhash"]
+	path = third_party/xxhash
+	url = https://github.com/Cyan4973/xxHash.git

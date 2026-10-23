@@ -1,0 +1,28 @@
+build/
+.gradle/
+.kotlin/
+.cxx/
+local.properties
+.idea/
+*.iml
+.DS_Store
+*.log
+
+# The native library's build output (ndk-build writes it next to the sources).
+app/src/main/cpp/obj/
+app/src/main/cpp/libs/
+
+# The libraries are submodules; OpenSSL is built into openssl-install (third_party/OPENSSL-BUILD.md).
+third_party/openssl-install/
+third_party/openssl-install.full/
+third_party/asio/
+
+# Profiles, keys and backups never belong in the repository.
+*.ovpn
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.tunnelbackup
