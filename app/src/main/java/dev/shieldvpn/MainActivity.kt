@@ -118,7 +118,8 @@ class MainActivity : ComponentActivity(), TunnelActions {
      * Debug builds only, for testing: `am start ... --ez autoconnect true` presses Connect,
      * `--ez simulatedrop true` ends the tunnel after a delay, `--ez dumpthreads true` logs threads,
      * `--ei pauseseconds N` pauses the tunnel for N seconds instead of 15 minutes,
-     * `--ei closeafterseconds N` closes the screens N seconds after they leave instead of 10 minutes.
+     * `--ei closeafterseconds N` closes the screens N seconds after they leave instead of 10 minutes,
+     * `--ez demo true` shows a made-up connected tunnel for screenshots; nothing connects.
      */
     private fun debugExtras(intent: Intent) {
         if (isDebuggable()) {
@@ -127,6 +128,11 @@ class MainActivity : ComponentActivity(), TunnelActions {
             }
             if (intent.getBooleanExtra(EXTRA_SIMULATE_DROP, false)) {
                 window.decorView.postDelayed({ startService(ShieldVpnService.simulateDropIntent(this)) }, 12_000)
+            }
+            if (intent.getBooleanExtra("demo", false)) {
+                // After the link has reported the real state, which is then left alone while idle.
+                window.decorView.postDelayed({ viewModel.showDemo() }, 1500)
+                intent.removeExtra("demo")
             }
             intent.getIntExtra("closeafterseconds", 0).takeIf { it > 0 }?.let { seconds ->
                 closeAfterMs = seconds * 1000L

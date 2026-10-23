@@ -106,6 +106,21 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Debug builds, for screenshots: the active profile looks connected, with addresses from the
+     * ranges kept for documentation. Nothing connects, and the next real change replaces it.
+     */
+    fun showDemo() {
+        val id = _state.value.activeId ?: return
+        VpnController.setTunnel(
+            TunnelInfo(
+                address = "10.8.0.6/30", dns = listOf("10.8.0.1"), routes = listOf("All traffic"), mtu = 1500,
+                remote = "198.51.100.20", publicIp = "198.51.100.20",
+            ),
+        )
+        VpnController.update(VpnStatus.Connected(id, System.currentTimeMillis() - (3 * 3600 + 17 * 60) * 1000L))
+    }
+
     /** Keeps [r] as the last speed test of profile [key], or of the connection without the VPN. */
     fun saveSpeed(key: String, r: SpeedTest.Result) {
         SpeedTest.save(app, key, r)
