@@ -21,9 +21,17 @@ android {
         resValue("string", "app_name", appName)
         buildConfigField("String", "APP_NAME", "\"$appName\"")
 
-        // The vendored OpenSSL is built for the Shield's arm64 chip only.
-        ndk {
-            abiFilters += listOf("arm64-v8a")
+    }
+
+    // One APK per ABI, so each carries only its own native library: 64-bit ARM (the Shield and
+    // most TVs) and 32-bit ARM (TVs and sticks with a 32-bit Android, such as the Chromecast with
+    // Google TV). OpenSSL is built for each (third_party/OPENSSL-BUILD.md).
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
         }
     }
 

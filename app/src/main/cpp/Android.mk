@@ -4,7 +4,12 @@ LOCAL_PATH := $(call my-dir)
 ROOT := $(LOCAL_PATH)/../../../..
 TP   := $(ROOT)/third_party
 OVPN := $(TP)/openvpn3
+# OpenSSL is built once per ABI (third_party/OPENSSL-BUILD.md).
+ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
+OSSL := $(TP)/openssl-install-armeabi-v7a
+else
 OSSL := $(TP)/openssl-install
+endif
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := crypto_static

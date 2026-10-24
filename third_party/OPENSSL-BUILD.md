@@ -25,4 +25,18 @@ DES and 3DES, Blowfish and RC2 (old `.p12` files), MD4, MD5, SHA-1 and SHA-2, RS
 Ed25519/Ed448, DH and PKCS#12. With `no-dso` the legacy provider is built into libcrypto,
 so "Allow legacy ciphers" (BF-CBC) works.
 
+## 32-bit ARM
+
+`openssl-install-armeabi-v7a/` is the same build for 32-bit ARM, which `Android.mk` picks for the `armeabi-v7a` APK. The source tree above is configured for arm64, so it is built from a clean copy of the submodule:
+
+```
+git -C openssl archive HEAD | tar -x -C /tmp/openssl-armv7
+cd /tmp/openssl-armv7
+perl ./Configure android-arm -D__ANDROID_API__=28 --prefix=$PWD/../openssl-install-armeabi-v7a \
+  (the same options as above)
+make -j8 build_libs && make install_dev
+```
+
+with `--prefix` pointing at `third_party/openssl-install-armeabi-v7a`.
+
 `openssl-install.full/` is the earlier full build, kept only as a fallback. It can be deleted.

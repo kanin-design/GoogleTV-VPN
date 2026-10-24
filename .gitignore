@@ -14,6 +14,7 @@ app/src/main/cpp/libs/
 
 # The libraries are submodules; OpenSSL is built into openssl-install (third_party/OPENSSL-BUILD.md).
 third_party/openssl-install/
+third_party/openssl-install-armeabi-v7a/
 third_party/openssl-install.full/
 third_party/asio/
 

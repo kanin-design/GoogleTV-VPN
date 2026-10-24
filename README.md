@@ -41,7 +41,7 @@ Download the APK from [Releases](https://github.com/kanin-design/GoogleTV-VPN/re
 adb install tunnel-0.1.0-beta-arm64.apk
 ```
 
-It needs Android TV or Google TV on Android 9 or newer, on 64-bit ARM (arm64-v8a), such as the NVIDIA Shield. Some Google TV devices, the Chromecast with Google TV among them, run 32-bit Android, which this build does not support yet.
+It needs Android TV or Google TV on Android 9 or newer, on ARM. There is one APK for each kind of chip: `arm64` for 64-bit Android, such as the NVIDIA Shield, and `armv7` for 32-bit Android, which some Google TV devices run, the Chromecast with Google TV among them. If you are not sure, `adb shell getprop ro.product.cpu.abi` says which: `arm64-v8a` or `armeabi-v7a`.
 
 This is a beta, signed with a development key. A later build signed with a release key will need the beta uninstalled first. Back up your profiles before that (Settings › Backup).
 
