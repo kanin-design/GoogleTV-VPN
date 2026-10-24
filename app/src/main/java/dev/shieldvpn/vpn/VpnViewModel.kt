@@ -5,7 +5,10 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.shieldvpn.APP_NAME
+import dev.shieldvpn.BuildConfig
+import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,6 +34,59 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { VpnController.log.collect { log -> _state.update { it.copy(log = log) } } }
         viewModelScope.launch { VpnController.tunnel.collect { t -> _state.update { it.copy(tunnel = t) } } }
         viewModelScope.launch { VpnController.pausedUntil.collect { until -> _state.update { it.copy(pausedUntil = until) } } }
+        viewModelScope.launch {
+            Updates.installFailure.collect { why -> if (why != null) _state.update { it.copy(update = UpdateState.Failed(why)) } }
+        }
+        // An update that was installed leaves its APK behind; then, once a day, look for the next.
+        File(app.cacheDir, UPDATE_APK).delete()
+        if (_state.value.settings.autoUpdate && System.currentTimeMillis() - SettingsStore.updateCheckedAt(app) > DAY_MS) {
+            viewModelScope.launch {
+                delay(5_000)
+                checkUpdate(daily = true)
+            }
+        }
+    }
+
+    // ---- Updates ------------------------------------------------------------
+
+    /** Looks on GitHub for a newer build. The [daily] check says nothing unless it finds one. */
+    fun checkUpdate(daily: Boolean = false) {
+        when (_state.value.update) {
+            UpdateState.Checking, is UpdateState.Downloading, is UpdateState.Installing -> return
+            else -> Unit
+        }
+        if (!daily) _state.update { it.copy(update = UpdateState.Checking) }
+        viewModelScope.launch {
+            val found = withContext(Dispatchers.IO) { runCatching { Updates.newest() } }
+            if (found.isSuccess) SettingsStore.setUpdateCheckedAt(app, System.currentTimeMillis())
+            val next = found.fold(
+                onSuccess = { b -> if (b != null && b.number > BuildConfig.VERSION_CODE) UpdateState.Available(b, found = daily) else UpdateState.UpToDate },
+                onFailure = { UpdateState.Failed("GitHub didn't answer. Try again later.") },
+            )
+            // The daily check only reports what it found; a failure or no news waits for the next day.
+            if (!daily || next is UpdateState.Available) _state.update { it.copy(update = next) }
+        }
+    }
+
+    /** Downloads the newer build, checks it and hands it to Android's installer. */
+    fun installUpdate() {
+        val build = (_state.value.update as? UpdateState.Available)?.build ?: return
+        _state.update { it.copy(update = UpdateState.Downloading(build, 0)) }
+        viewModelScope.launch {
+            val file = File(app.cacheDir, UPDATE_APK)
+            val problem = withContext(Dispatchers.IO) {
+                Updates.download(build, file) { percent -> _state.update { it.copy(update = UpdateState.Downloading(build, percent)) } }
+            }
+            if (problem != null) {
+                file.delete()
+                _state.update { it.copy(update = UpdateState.Failed(problem)) }
+                return@launch
+            }
+            _state.update { it.copy(update = UpdateState.Installing(build)) }
+            withContext(Dispatchers.IO) { runCatching { Updates.install(app, file) } }.onFailure { e ->
+                _state.update { it.copy(update = UpdateState.Failed("Android could not start the install: ${e.message}")) }
+            }
+        }
     }
 
     // ---- The tunnel ---------------------------------------------------------
@@ -490,6 +546,8 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val PAUSE_MILLIS = 15 * 60 * 1000L
+        private const val DAY_MS = 24 * 60 * 60 * 1000L
+        private const val UPDATE_APK = "update.apk"
         private const val BACKUP_SECRET = "backup"
     }
 }

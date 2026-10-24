@@ -1,158 +1,168 @@
-"""Draws the Android TV banner: the app's lit tunnel on the right, the mark and the app's name on the left.
+"""Draws the placeholder Android TV banner and launcher icon: "VPN" on a teal gradient.
 
-The name is appName in gradle.properties; run this again after changing it. The tunnel uses the same
-geometry as ui/tv/Tunnel.kt (1280 x 720 design canvas), in its connected green, frozen at one moment.
-Rendered at 2x and scaled down into app/src/main/res/drawable-xhdpi and drawable-xxxhdpi.
+As TV cards such as Plex's do it: a dark card and one heavy wordmark. The card fades from deep teal
+at the top left to near-black at the bottom right. A placeholder until the app has a real logo.
+The other looks (a flat card, a spotlight, a lit line, the Connect screen's network) stay for
+comparing with --out.
 
-usage: python3 tools/banner.py FONT
-FONT is Roboto, the TV's own font: adb pull /system/fonts/Roboto-Regular.ttf
+Writes the banner into app/src/main/res/drawable-xhdpi and drawable-xxxhdpi, and the launcher
+icon's layers into drawable-xxxhdpi. Drawn at 4x and scaled down.
+
+usage: python3 tools/banner.py FONT [--look flat|spotlight|teal|line|web] [--out DIR]
+FONT is a heavy, wide face, such as Archivo Expanded Black (SIL Open Font License).
+--out writes the banner alone to DIR/banner-LOOK.png, to compare looks, and leaves the app alone.
 """
 import math
 import pathlib
+import random
 import sys
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 FONT = sys.argv[1]
+def arg(name, default):
+    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
+LOOK = arg("--look", "teal")
+OUT = arg("--out", None)
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-NAME = next(line.split("=", 1)[1].strip() for line in (ROOT / "gradle.properties").read_text().splitlines() if line.startswith("appName="))
 RES = ROOT / "app/src/main/res"
-SS = 2                      # supersampling
-W, H = 1280 * SS, 720 * SS
-VX, VY, U = 1030 * SS, 360 * SS, 250 * SS
-N, SP = 18, 0.75
-ZMAX = N * SP
-TONE = np.array([96, 240, 190], float) / 255
-CORE = TONE + (1 - TONE) * 0.45
-
-img = np.zeros((H, W, 3), float)
-img[:] = np.array([3, 5, 8], float) / 255
+MINT = np.array([75, 227, 161], float) / 255
+CORE = MINT + (1 - MINT) * 0.5
 
 
-def smooth(a, b, x):
-    t = min(max((x - a) / (b - a), 0), 1)
-    return t * t * (3 - 2 * t)
+def field(w, h):
+    """The card: deep teal at the top left to near-black, with mint light low on the right."""
+    yy, xx = np.mgrid[0:h, 0:w].astype(float)
+    t = np.clip((xx / w * 0.55 + yy / h * 0.45), 0, 1)[..., None]
+    img = np.array([15, 43, 42], float) / 255 * (1 - t) + np.array([3, 7, 10], float) / 255 * t
+    glow = np.clip(1 - np.hypot(xx - w * 0.78, yy - h * 0.62) / (w * 0.6), 0, 1) ** 2
+    return img + glow[..., None] * MINT * 0.16
 
 
-def add(mask_img, color, alpha):
-    m = np.asarray(mask_img, float) / 255
-    img[:] += m[..., None] * color * alpha
+def add(img, layer, color, alpha):
+    img += (np.asarray(layer, float) / 255)[..., None] * color * alpha
 
 
-def radial(x, y, r, color, alpha):
-    yy, xx = np.ogrid[:H, :W]
-    d = np.sqrt((xx - x) ** 2 + (yy - y) ** 2) / r
-    g = np.clip(1 - d, 0, 1)
-    img[:] += g[..., None] * color * alpha
+def web(img, w, h, seed):
+    """Nodes and links like the Connect screen's, and the lit route across them."""
+    rnd = random.Random(seed)
+    nodes = []
+    while len(nodes) < 46:
+        p = (rnd.uniform(-0.05, 1.05) * w, rnd.uniform(-0.05, 1.05) * h)
+        if all(math.dist(p, q) > w * 0.085 for q in nodes):
+            nodes.append(p)
+    reach = w * 0.2
+    links = Image.new("L", (w, h))
+    d = ImageDraw.Draw(links)
+    for i, a in enumerate(nodes):
+        for b in nodes[i + 1:]:
+            dist = math.dist(a, b)
+            if dist < reach:
+                d.line([a, b], fill=int(255 * (1 - dist / reach)), width=max(1, w // 640))
+    add(img, links, MINT, 0.22)
+    dots = Image.new("L", (w, h))
+    d = ImageDraw.Draw(dots)
+    r = w / 400
+    for x, y in nodes:
+        d.ellipse([x - r, y - r, x + r, y + r], fill=255)
+    add(img, dots, CORE, 0.55)
+    # The route: in at the left, up through the VPN at the top, out at the right.
+    route = [(0.06, 0.74), (0.2, 0.66), (0.33, 0.47), (0.47, 0.3), (0.5, 0.22), (0.62, 0.33), (0.78, 0.44), (0.9, 0.62), (0.98, 0.7)]
+    pts = [(x * w, y * h) for x, y in route]
+    for width, blur, color, alpha in ((w / 70, w / 90, MINT, 0.22), (w / 260, 0, CORE, 0.7)):
+        layer = Image.new("L", (w, h))
+        ImageDraw.Draw(layer).line(pts, fill=255, width=max(1, int(width)), joint="curve")
+        if blur:
+            layer = layer.filter(ImageFilter.GaussianBlur(blur))
+        add(img, layer, color, alpha)
+    for x, y in pts[2::3]:
+        layer = Image.new("L", (w, h))
+        ImageDraw.Draw(layer).ellipse([x - w / 70, y - w / 70, x + w / 70, y + w / 70], fill=255)
+        add(img, layer.filter(ImageFilter.GaussianBlur(w / 110)), MINT, 0.5)
 
 
-radial(VX, VY, 640 * SS, TONE, 0.2)
-radial(VX, VY, 260 * SS, TONE, 0.32)
-
-# The floor: a faint band at the horizon that darkens toward the bottom.
-yy = np.arange(H)[:, None]
-t = np.clip((yy - (VY - 6 * SS)) / (H - (VY - 6 * SS)), 0, 1)
-floor = np.where(t < 0.04, t / 0.04 * 0.05, np.where(t < 0.3, 0.05 * (1 - (t - 0.04) / 0.26), 0))
-img[:] += floor[..., None] * TONE
-dark = np.clip((t - 0.3) / 0.7, 0, 1) * 0.9 * (yy > VY)
-img[:] *= (1 - dark[..., None] * 0.9)
+def sheen(img, w, h):
+    """A soft light across the top left of the card, as on a glossy TV card."""
+    yy, xx = np.mgrid[0:h, 0:w].astype(float)
+    s = np.clip(1 - (xx / w + yy / h) / 0.9, 0, 1) ** 2 * 0.1
+    img += s[..., None]
 
 
-def arch(draw, s, w, mirror):
-    half = 1.15 * s * U
-    floor_y = VY + 0.95 * s * U
-    wall = s * U
-    cy = floor_y + wall if mirror else floor_y - wall
-    top = floor_y if mirror else floor_y - wall
-    for x in (VX - half, VX + half):
-        draw.line([(x, top), (x, top + wall)], fill=255, width=max(1, int(round(w))))
-    box = [VX - half, cy - half, VX + half, cy + half]
-    draw.arc(box, 0 if mirror else 180, 180 if mirror else 360, fill=255, width=max(1, int(round(w))))
+def wordmark(base, w, h, size):
+    """'VPN', white fading to mint at the foot, over a soft shadow so it reads on any card."""
+    font = ImageFont.truetype(FONT, size)
+    text = "VPN"
+    box = ImageDraw.Draw(base).textbbox((0, 0), text, font=font)
+    x = (w - (box[2] - box[0])) / 2 - box[0]
+    y = (h - (box[3] - box[1])) / 2 - box[1]
+    mask = Image.new("L", (w, h))
+    ImageDraw.Draw(mask).text((x, y), text, font=font, fill=255)
+    shadow = mask.filter(ImageFilter.GaussianBlur(size / 14))
+    base = Image.composite(Image.new("RGB", (w, h), (2, 5, 7)), base, shadow.point(lambda v: int(v * 0.75)))
+    yy = np.linspace(0, 1, h)[:, None, None]
+    top, foot = np.array([255, 255, 255], float), np.array([168, 244, 212], float)
+    t = np.clip((yy - (y + box[1]) / h) / ((box[3] - box[1]) / h), 0, 1)
+    fill = Image.fromarray((top * (1 - t) + foot * t).repeat(w, axis=1).astype(np.uint8), "RGB")
+    return Image.composite(fill, base, mask)
 
 
-for i in range(N):
-    z = 0.5 + i * SP + 0.3          # a moment of the drift
-    zn = z / ZMAX
-    alpha = smooth(0.42, 1.25, z) * (1 - smooth(0.72, 1, zn)) * (0.22 + 0.78 * zn ** 0.75)
-    if alpha < 0.005:
-        continue
-    s = 1 / z
-    lw = min(max(0.012 * s * U, 0.6 * SS), 7 * SS)
-    for mirror, k in ((True, 0.2), (False, 1.0)):
-        for width, color, a in ((lw * 7, TONE, 0.045), (lw * 2.6, TONE, 0.16), (lw, CORE, 0.85)):
-            m = Image.new("L", (W, H), 0)
-            arch(ImageDraw.Draw(m), s, width, mirror)
-            if width > lw:
-                m = m.filter(ImageFilter.GaussianBlur(width / 3))
-            add(m, color, a * alpha * k)
-
-# The two rays along the floor.
-for side in (-1, 1):
-    m = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(m).line([(VX, VY), (VX + side * 1.15 * 3 * U, VY + 0.95 * 3 * U)], fill=255, width=2 * SS)
-    yy2, xx2 = np.ogrid[:H, :W]
-    fade = np.clip(1 - np.sqrt((xx2 - VX) ** 2 + (yy2 - VY) ** 2) / (3.5 * U), 0, 1)
-    add(Image.fromarray((np.asarray(m, float) * fade).astype(np.uint8)), TONE, 0.22)
-
-radial(VX, VY - 4 * SS, 90 * SS, CORE, 0.55)
-radial(VX, VY - 4 * SS, 26 * SS, np.ones(3), 0.85)
-
-# Vignette, then the hero scrim on the left so the name reads.
-yy3, xx3 = np.ogrid[:H, :W]
-d = np.sqrt((xx3 - W / 2) ** 2 + (yy3 - H / 2) ** 2)
-vig = np.clip((d - 300 * SS) / (520 * SS), 0, 1) * 0.55
-img[:] *= (1 - vig[..., None])
-xs = np.arange(W)[None, :] / W
-scrim = np.where(xs < 0.4, 0.6 - (0.6 - 0.18) * xs / 0.4, np.where(xs < 0.6, 0.18 * (1 - (xs - 0.4) / 0.2), 0))
-img[:] = img * (1 - scrim[..., None]) + np.array([2, 3, 7], float) / 255 * scrim[..., None]
-
-out = Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), "RGB").convert("RGBA")
-
-# The mark: a rounded square with the logo's two arches, then the name.
-ms = 136 * SS
-mx, my = 92 * SS, (720 * SS - ms) // 2
-glass = Image.new("RGBA", out.size, (0, 0, 0, 0))
-ImageDraw.Draw(glass).rounded_rectangle([mx, my, mx + ms, my + ms], radius=int(ms * 0.31), fill=(255, 255, 255, 24), outline=(255, 255, 255, 38), width=3 * SS)
-out = Image.alpha_composite(out, glass)
-draw = ImageDraw.Draw(out)
-k = ms / 24 * 0.62
-ox, oy = mx + (ms - 24 * k) / 2, my + (ms - 24 * k) / 2
+def plain(w, h, top, bottom):
+    """A near-flat card: [top] fading to [bottom] down its height."""
+    t = np.linspace(0, 1, h)[:, None, None]
+    return (np.array(top, float) * (1 - t) + np.array(bottom, float) * t).repeat(w, axis=1) / 255
 
 
-def logo_arch(x0, x1, top, bottom, r):
-    """One arch of the logo as a single round brush stroke: up a wall, over the half circle, down."""
-    w = 2.1 * k
-    cx, cy = (x0 + x1) / 2, top + r
-    path = [(x0, bottom), (x0, cy)]
-    path += [(cx - r * math.cos(math.pi * i / 96), cy - r * math.sin(math.pi * i / 96)) for i in range(1, 96)]
-    path += [(x1, cy), (x1, bottom)]
-    # Dabs every quarter of a pixel along the path make a stroke with round caps and joins.
-    for (xa, ya), (xb, yb) in zip(path, path[1:]):
-        steps = max(1, int(math.hypot(xb - xa, yb - ya) * k * 4))
-        for i in range(steps + 1):
-            x = ox + (xa + (xb - xa) * i / steps) * k
-            y = oy + (ya + (yb - ya) * i / steps) * k
-            draw.ellipse([x - w / 2, y - w / 2, x + w / 2, y + w / 2], fill="white")
+def card(w, h, seed=7):
+    if LOOK == "flat":
+        img = plain(w, h, (12, 16, 20), (5, 7, 10))
+    elif LOOK == "spotlight":
+        img = plain(w, h, (8, 11, 14), (4, 6, 8))
+        yy, xx = np.mgrid[0:h, 0:w].astype(float)
+        glow = np.clip(1 - np.hypot((xx - w / 2) / (w * 0.42), (yy - h * 0.52) / (h * 0.5)), 0, 1) ** 2
+        img += glow[..., None] * MINT * 0.22
+    elif LOOK == "teal":
+        yy, xx = np.mgrid[0:h, 0:w].astype(float)
+        t = np.clip(xx / w * 0.6 + yy / h * 0.4, 0, 1)[..., None]
+        img = np.array([18, 58, 54], float) / 255 * (1 - t) + np.array([4, 9, 12], float) / 255 * t
+    elif LOOK == "line":
+        img = plain(w, h, (10, 13, 17), (5, 7, 10))
+        pts = [(0.0, 0.78), (0.22, 0.78), (0.3, 0.7), (0.7, 0.7), (0.78, 0.78), (1.0, 0.78)]
+        pts = [(x * w, y * h) for x, y in pts]
+        for width, blur, color, alpha in ((w / 90, w / 120, MINT, 0.3), (max(2, w / 400), 0, CORE, 0.85)):
+            layer = Image.new("L", (w, h))
+            ImageDraw.Draw(layer).line(pts, fill=255, width=max(1, int(width)), joint="curve")
+            if blur:
+                layer = layer.filter(ImageFilter.GaussianBlur(blur))
+            add(img, layer, color, alpha)
+    else:
+        img = field(w, h)
+        web(img, w, h, seed)
+        sheen(img, w, h)
+    return Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), "RGB")
 
 
-logo_arch(4, 20, 3, 20, 8)        # M4 20v-9a8 8 0 0 1 16 0v9
-logo_arch(8.5, 15.5, 8.5, 20, 3.5)  # M8.5 20v-8a3.5 3.5 0 0 1 7 0v8
+# The banner: 320 x 180 at xhdpi, 640 x 360 at xxxhdpi.
+W, H = 1280, 720
+banner = wordmark(card(W, H), W, H, 330)
+if OUT:
+    banner.resize((640, 360), Image.LANCZOS).save(pathlib.Path(OUT) / f"banner-{LOOK}.png")
+    sys.exit(0)
+for folder, size in (("drawable-xhdpi", (320, 180)), ("drawable-xxxhdpi", (640, 360))):
+    banner.resize(size, Image.LANCZOS).save(RES / folder / "banner.png")
 
-# The name, as large as fits before the tunnel's light.
-tx = mx + ms + 40 * SS
-size = 132
-while True:
-    font = ImageFont.truetype(FONT, size * SS)
-    font.set_variation_by_name("Bold")
-    box = draw.textbbox((0, 0), NAME, font=font)
-    if tx + box[2] <= 800 * SS or size <= 48:
-        break
-    size -= 4
-ty = (720 * SS - (box[3] - box[1])) // 2 - box[1]
-draw.text((tx, ty), NAME, font=font, fill="white")
-
-out = out.convert("RGB")
-for density, size in (("xhdpi", (320, 180)), ("xxxhdpi", (640, 360))):
-    out.resize(size, Image.LANCZOS).save(RES / f"drawable-{density}" / "banner.png")
-print(f"Banner for {NAME} written to drawable-xhdpi and drawable-xxxhdpi")
+# The launcher icon: a 108 dp adaptive icon, 432 px at xxxhdpi; the word inside its 66 dp safe zone.
+S = 1728
+background = card(S, S, seed=11)
+background.resize((432, 432), Image.LANCZOS).save(RES / "drawable-xxxhdpi/ic_launcher_bg.png")
+font = ImageFont.truetype(FONT, 400)
+box = ImageDraw.Draw(background).textbbox((0, 0), "VPN", font=font)
+size = int(400 * (S * 0.5) / (box[2] - box[0]))
+mask = Image.new("L", (S, S))
+font = ImageFont.truetype(FONT, size)
+box = ImageDraw.Draw(mask).textbbox((0, 0), "VPN", font=font)
+ImageDraw.Draw(mask).text(((S - (box[2] - box[0])) / 2 - box[0], (S - (box[3] - box[1])) / 2 - box[1]), "VPN", font=font, fill=255)
+fg = Image.new("RGBA", (S, S), (255, 255, 255, 0))
+fg.putalpha(mask)
+fg.resize((432, 432), Image.LANCZOS).save(RES / "drawable-xxxhdpi/ic_launcher_fg.png")
+print("banner and launcher icon written")

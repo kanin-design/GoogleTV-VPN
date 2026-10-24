@@ -172,11 +172,26 @@ data class AppSettings(
     val searchDomains: List<String> = emptyList(),
     /** Let other apps connect and disconnect Tunnel with intents. */
     val automation: Boolean = false,
+    /** Look for a newer build on GitHub once a day. */
+    val autoUpdate: Boolean = true,
 ) {
     companion object {
         const val APPS_SKIP = "Selected apps skip the VPN"
         const val APPS_ONLY = "Only selected apps use it"
     }
+}
+
+/** Settings › About › Updates: where looking for, fetching and installing a newer build stands. */
+sealed interface UpdateState {
+    data object Idle : UpdateState
+    data object Checking : UpdateState
+    data object UpToDate : UpdateState
+
+    /** [found]: the daily check found it, so the screens mention it once. */
+    data class Available(val build: Updates.Published, val found: Boolean = false) : UpdateState
+    data class Downloading(val build: Updates.Published, val percent: Int) : UpdateState
+    data class Installing(val build: Updates.Published) : UpdateState
+    data class Failed(val message: String) : UpdateState
 }
 
 data class VpnUiState(
@@ -201,6 +216,7 @@ data class VpnUiState(
     val hasPin: Boolean = false,
     /** The last speed test of each profile, and [SpeedTest.DIRECT] for one without the VPN. */
     val speeds: Map<String, SpeedTest.Result> = emptyMap(),
+    val update: UpdateState = UpdateState.Idle,
 ) {
     val active: Connection? get() = connections.firstOrNull { it.id == activeId }
 

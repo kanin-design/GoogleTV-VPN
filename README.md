@@ -16,6 +16,7 @@ An OpenVPN client for Android TV and Google TV, made for the remote. ("Tunnel" i
 - **Speed test.** Ping, download and upload through the VPN, on a speedometer, with whether it is fast enough for 4K or HD and how much of your plain connection the VPN keeps.
 - **Everyday controls.** Pause for 15 minutes, connect when the device starts, and reconnect by itself after Wi-Fi changes. There are a connection test, a connection log and connection details.
 - **Backups.** One encrypted file (PBKDF2 and AES-GCM) moves every profile, saved password and setting to a new device through your phone.
+- **Updates.** Once a day it looks on GitHub for a newer build, by build number, so a build republished under the same version counts too. Settings › About downloads the APK for the device, checks its SHA-256 and installs it; Android asks you to confirm.
 - **PIN lock** for settings or the whole app, and **automation intents** for home automation apps and ADB.
 - **Remote, keyboard or mouse.** Everything works with the remote; a keyboard types into fields, and a mouse can click anything.
 - **Light on the device.** The VPN runs in its own small process (about 15 MB, measured on the Android TV emulator). The screens close themselves ten minutes after you leave them, so the device gets that memory back while you watch.
@@ -43,6 +44,8 @@ adb install tunnel-0.1.0-beta-arm64.apk
 
 It needs Android TV or Google TV on Android 9 or newer, on ARM. There is one APK for each kind of chip: `arm64` for 64-bit Android, such as the NVIDIA Shield, and `armv7` for 32-bit Android, which some Google TV devices run, the Chromecast with Google TV among them. If you are not sure, `adb shell getprop ro.product.cpu.abi` says which: `arm64-v8a` or `armeabi-v7a`.
 
+Later builds install from the app, in Settings › About › Updates. The first time, Android asks you to allow Tunnel to install apps.
+
 This is a beta, signed with a development key. A later build signed with a release key will need the beta uninstalled first. Back up your profiles before that (Settings › Backup).
 
 ## Build
@@ -60,12 +63,22 @@ The libraries are submodules in `third_party/`, pinned to the commits the app is
 JAVA_HOME=/path/to/jdk-17 ./gradlew assembleRelease
 ```
 
-The APK is `app/build/outputs/apk/release/app-release.apk`. Release builds are shrunk with R8 and signed with your debug key, so they install over a debug build without losing profiles.
+The APKs are `app-arm64-v8a-release.apk` and `app-armeabi-v7a-release.apk` in `app/build/outputs/apk/release/`. Release builds are shrunk with R8 and signed with your debug key, so they install over a debug build without losing profiles.
 
-To rename the app, change `appName` in `gradle.properties`. Every screen, the notification and the home-screen label read it. The TV banner has the name drawn in, so render it again:
+Each build is numbered by the commits on its branch (`git rev-list --count HEAD`). The number is the APKs' `versionCode`, Settings › About shows it, and the update check compares it. To publish a release, from a clean checkout:
 
 ```
-python3 tools/banner.py Roboto-Regular.ttf
+tools/release.sh v0.1.0-beta
+```
+
+It builds both APKs, writes `update.json` (the version, build number, commit, and each APK's name, size and SHA-256) and uploads all three to that GitHub release with `gh`. `--dry-run` builds without uploading. The app finds updates through `update.json`, so every release needs it.
+
+To rename the app, change `appName` in `gradle.properties`. Every screen, the notification and the home-screen label read it.
+
+The TV banner and the launcher icon are a placeholder, "VPN" on a teal gradient, drawn by `tools/banner.py` with a heavy wide face such as Archivo Expanded Black (SIL Open Font License):
+
+```
+python3 tools/banner.py Archivo-ExpandedBlack.ttf
 ```
 
 ## How it is built
@@ -84,7 +97,8 @@ What leaves the device:
 - the VPN traffic itself, to the servers named in your profiles;
 - while connected, one request through the tunnel to api.ipify.org (or icanhazip.com), to show the address sites see;
 - files you send to or from your phone, which stay on your home network;
-- a speed test, only when you start one: data to and from speed.cloudflare.com.
+- a speed test, only when you start one: data to and from speed.cloudflare.com;
+- once a day, unless you turn it off in Settings › About: a look at this app's releases on GitHub (api.github.com) for a newer build, and the build itself when you choose to install it.
 
 No accounts, no analytics, no ads.
 

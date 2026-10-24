@@ -47,8 +47,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.shieldvpn.APP_NAME
+import dev.shieldvpn.BuildConfig
 import dev.shieldvpn.vpn.AppSettings
 import dev.shieldvpn.vpn.LogKind
+import dev.shieldvpn.vpn.UpdateState
 import dev.shieldvpn.vpn.VpnStatus
 import dev.shieldvpn.vpn.VpnUiState
 import kotlinx.coroutines.Dispatchers
@@ -346,6 +348,8 @@ What leaves the device
   (or icanhazip.com) to show the address sites see.
   Files you send to or from your phone, which stay on your home network.
   A speed test, only when you start one: data to and from speed.cloudflare.com.
+  Once a day, unless you turn it off in About, a look at this app's releases on GitHub
+  (api.github.com) for a newer build, and the build itself when you choose to install it.
 
 No accounts, no analytics, no ads."""
 
@@ -363,7 +367,7 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
         Category.OpenVpn -> "OpenVPN" to "Applied on top of every profile. A setting inside the .ovpn file wins unless noted."
         Category.Dns -> "DNS" to "Where name lookups go while the tunnel is up."
         Category.Automation -> "Automation" to "For home automation apps and ADB. Off until you turn it on."
-        Category.About -> "About" to "${APP_NAME} only talks to the servers named in your profiles."
+        Category.About -> "About" to "The version, updates, and what ${APP_NAME} keeps and sends."
     }
     PanelHeading(null, title, sub)
     val scope = PanelScope(state, nav, actions, req)
@@ -564,7 +568,27 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                 }
             }
             Category.About -> {
-                value(scope, "s-ver", "Version", "${APP_NAME} and its OpenVPN core", "${actions.versionName} · OpenVPN 3") {}
+                value(scope, "s-ver", "Version", "${APP_NAME} and its OpenVPN core", "${actions.versionName} · build ${BuildConfig.VERSION_CODE} · OpenVPN 3") {}
+                val update = state.update
+                val (updateSub, updateValue) = when (update) {
+                    UpdateState.Idle -> "Look on GitHub for a newer build" to "Check"
+                    UpdateState.Checking -> "Looking on GitHub…" to "Checking"
+                    UpdateState.UpToDate -> "This is the newest build" to "Check"
+                    is UpdateState.Available -> "Build ${update.build.number} is ready (${update.build.version}, ${update.build.size / 100_000 / 10f} MB)" to "Update"
+                    is UpdateState.Downloading -> "Downloading build ${update.build.number}… ${update.percent}%" to "Wait"
+                    is UpdateState.Installing -> "Installing build ${update.build.number}. Confirm it when Android asks" to "Wait"
+                    is UpdateState.Failed -> update.message to "Try again"
+                }
+                value(scope, "s-upd", "Updates", updateSub, updateValue) {
+                    when (update) {
+                        is UpdateState.Available -> actions.installUpdate()
+                        UpdateState.Checking, is UpdateState.Downloading, is UpdateState.Installing -> Unit
+                        else -> actions.checkUpdate()
+                    }
+                }
+                toggle(scope, "s-autoupd", "Check for updates by itself", "Once a day, when ${APP_NAME} opens", s.autoUpdate) {
+                    actions.changeSettings { it.copy(autoUpdate = !it.autoUpdate) }
+                }
                 value(scope, "s-priv", "What ${APP_NAME} stores", "Profiles and passwords, encrypted on this device. No accounts, no analytics", "Details") {
                     nav.overlay = Overlay.File("About", "What ${APP_NAME} stores", PRIVACY, plain = true)
                 }

@@ -409,15 +409,21 @@ Keep it this way: no cached full-screen bitmaps, no per-item thumbnails, small a
 
 ## The app's name
 
-"Tunnel" is a working name. It lives in one place, `appName` in `gradle.properties`. The build makes it the home-screen label (`app_name`) and `BuildConfig.APP_NAME`, which code reads as `APP_NAME` (`AppName.kt`): every sentence that names the app, the notification, the VPN session Android shows, the phone page, and exported files (`APP_FILE_NAME`: `tunnel-log.txt`, `tunnel.tunnelbackup`). The banner has the name drawn in, so render it again after a change:
+"Tunnel" is a working name. It lives in one place, `appName` in `gradle.properties`. The build makes it the home-screen label (`app_name`) and `BuildConfig.APP_NAME`, which code reads as `APP_NAME` (`AppName.kt`): every sentence that names the app, the notification, the VPN session Android shows, the phone page, and exported files (`APP_FILE_NAME`: `tunnel-log.txt`, `tunnel.tunnelbackup`). The TV banner and the launcher icon don't carry the name: until the app has a real logo they are a placeholder, "VPN" on a teal gradient, drawn by:
 
 ```
-python3 tools/banner.py Roboto-Regular.ttf
+python3 tools/banner.py Archivo-ExpandedBlack.ttf
 ```
 
-(Roboto is the TV's own font: `adb pull /system/fonts/Roboto-Regular.ttf`. A long name is drawn smaller so it ends before the tunnel's light.)
+(Any heavy, wide face works; Archivo is under the SIL Open Font License.)
 
 Two internal identifiers keep the old word on purpose, because existing data depends on them: a backup's `format` field (`tunnel-backup`; backups are recognised by it, not by the file extension) and the `tunnel:` prefix of keys kept in Android's keystore. "Tunnel IP", "Tunnel MTU" and "Tunnel is up" are about the VPN tunnel, not the app, and stay as they are. Code names such as `TunnelApp` are not shown to anyone.
+
+## Updates
+
+Builds are numbered by the commits on their branch (`git rev-list --count HEAD`), and the number is the APKs' `versionCode`, so a build republished under the same version (as the beta is) is still newer. Each GitHub release carries `update.json` beside its APKs, written by `tools/release.sh`: the version, build number, commit, and each APK's name, size and SHA-256 by ABI. The app (`vpn/Updates.kt`) reads the newest release that has one, picks the APK for the device's ABI, and offers it when its build is higher than its own: Settings › About › Updates, and once a day by itself (it can be turned off), which then says so once in a toast. Installing downloads the APK, checks its size and SHA-256, and hands it to Android's package installer. Android asks to confirm, and the first time asks to allow the app to install apps. It only accepts an APK signed with the same key as the installed app.
+
+Tested on the emulator against a local copy of a release (debug builds take `--es updatesource URL`, and may use plain HTTP to the emulator's host): build 6 found build 7 (by itself and with Check), downloaded it and checked its SHA-256. Android's installer first asked to allow Tunnel to install apps; once that was on, it installed build 7 over build 6, kept the profiles and settings, and the VPN came back by itself.
 
 ## Beta build
 

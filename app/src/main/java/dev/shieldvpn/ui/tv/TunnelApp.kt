@@ -59,6 +59,7 @@ import dev.shieldvpn.APP_NAME
 import dev.shieldvpn.vpn.AppSettings
 import dev.shieldvpn.vpn.Backup
 import dev.shieldvpn.vpn.Connection
+import dev.shieldvpn.vpn.UpdateState
 import dev.shieldvpn.vpn.VpnStatus
 import dev.shieldvpn.vpn.VpnUiState
 import dev.shieldvpn.vpn.isActive
@@ -132,6 +133,12 @@ interface TunnelActions {
     fun openVpnSettings(): Boolean
     fun exit()
     val versionName: String
+
+    /** Looks on GitHub for a newer build (Settings › About). */
+    fun checkUpdate()
+
+    /** Downloads and installs the newer build found. */
+    fun installUpdate()
 }
 
 /** An app on the TV's home screen. */
@@ -350,6 +357,11 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
     }
     LaunchedEffect(state.pendingP12) {
         if (state.pendingP12 != null) nav.overlay = Overlay.P12
+    }
+    // The daily check found a newer build: say so once; Settings › About installs it.
+    LaunchedEffect(state.update) {
+        val u = state.update
+        if (u is UpdateState.Available && u.found) nav.toast("Build ${u.build.number} is ready: Settings › About")
     }
 
     BackHandler { if (!back(nav, state, actions)) actions.exit() }

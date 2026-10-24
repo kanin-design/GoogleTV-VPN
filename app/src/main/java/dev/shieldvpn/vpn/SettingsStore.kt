@@ -37,6 +37,7 @@ object SettingsStore {
             customDns = p.getString("customDns", "")?.split(' ')?.filter { it.isNotBlank() } ?: emptyList(),
             searchDomains = p.getString("searchDomains", "")?.split(' ')?.filter { it.isNotBlank() } ?: emptyList(),
             automation = p.getBoolean("automation", d.automation),
+            autoUpdate = p.getBoolean("autoUpdate", d.autoUpdate),
         )
     }
 
@@ -66,7 +67,15 @@ object SettingsStore {
             .putString("customDns", s.customDns.joinToString(" "))
             .putString("searchDomains", s.searchDomains.joinToString(" "))
             .putBoolean("automation", s.automation)
+            .putBoolean("autoUpdate", s.autoUpdate)
             .apply()
+    }
+
+    /** When GitHub was last asked for a newer build, in milliseconds. */
+    fun updateCheckedAt(context: Context): Long = prefs(context).getLong("updateCheckedAt", 0L)
+
+    fun setUpdateCheckedAt(context: Context, at: Long) {
+        prefs(context).edit().putLong("updateCheckedAt", at).apply()
     }
 
     /** The profile Connect shows. */

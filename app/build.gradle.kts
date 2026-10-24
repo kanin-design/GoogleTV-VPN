@@ -4,6 +4,15 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// The build number: the commits on the checked-out branch, so every published build is higher than
+// the one before, even under the same version name. It is the versionCode, and updates compare it.
+// -PbuildNumber=N overrides it, to test an update.
+fun git(vararg args: String): String? = runCatching {
+    providers.exec { commandLine("git", *args) }.standardOutput.asText.get().trim().ifEmpty { null }
+}.getOrNull()
+val buildNumber = providers.gradleProperty("buildNumber").orNull?.toInt() ?: git("rev-list", "--count", "HEAD")?.toInt() ?: 1
+val buildCommit = git("rev-parse", "--short=7", "HEAD") ?: "unknown"
+
 android {
     namespace = "dev.shieldvpn"
     compileSdk = 34
@@ -13,8 +22,9 @@ android {
         applicationId = "dev.shieldvpn"
         minSdk = 28
         targetSdk = 34
-        versionCode = 1
+        versionCode = buildNumber
         versionName = "0.1.0"
+        buildConfigField("String", "COMMIT", "\"$buildCommit\"")
 
         // The name people see: appName in gradle.properties. Code reads it as APP_NAME (AppName.kt).
         val appName = providers.gradleProperty("appName").get()

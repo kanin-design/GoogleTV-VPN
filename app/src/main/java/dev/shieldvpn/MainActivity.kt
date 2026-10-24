@@ -33,6 +33,7 @@ import dev.shieldvpn.vpn.VpnController
 import dev.shieldvpn.vpn.VpnStatus
 import dev.shieldvpn.vpn.SpeedTest
 import dev.shieldvpn.vpn.Tunnels
+import dev.shieldvpn.vpn.Updates
 import dev.shieldvpn.vpn.VpnViewModel
 
 class MainActivity : ComponentActivity(), TunnelActions {
@@ -126,7 +127,8 @@ class MainActivity : ComponentActivity(), TunnelActions {
      * (`--es demostate Busy`, `Off` or `Blocked` shows connecting, not connected or the kill
      * switch blocking traffic instead),
      * `--es hover "X,Y X,Y"` glides a mouse pointer through those points in screen pixels, resting
-     * 1.5 s at each, and `--es hover off` takes it away.
+     * 1.5 s at each, and `--es hover off` takes it away,
+     * `--es updatesource URL` looks for updates in that list of releases instead of GitHub's.
      */
     private fun debugExtras(intent: Intent) {
         if (isDebuggable()) {
@@ -149,6 +151,11 @@ class MainActivity : ComponentActivity(), TunnelActions {
             intent.getIntExtra("pauseseconds", 0).takeIf { it > 0 }?.let { seconds ->
                 Tunnels.pause(this, System.currentTimeMillis() + seconds * 1000L)
                 intent.removeExtra("pauseseconds")
+            }
+            intent.getStringExtra("updatesource")?.let { url ->
+                Updates.source = url
+                viewModel.checkUpdate()
+                intent.removeExtra("updatesource")
             }
             // The emulator has no mouse (its clicks arrive as touches), so hover is tested with this.
             intent.getStringExtra("hover")?.let { at ->
@@ -375,6 +382,10 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override val versionName: String
         get() = packageManager.getPackageInfo(packageName, 0).versionName ?: ""
+
+    override fun checkUpdate() = viewModel.checkUpdate()
+
+    override fun installUpdate() = viewModel.installUpdate()
 
     companion object {
         private const val EXTRA_AUTOCONNECT = "autoconnect"
