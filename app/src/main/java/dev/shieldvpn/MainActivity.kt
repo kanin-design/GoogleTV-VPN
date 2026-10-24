@@ -294,14 +294,16 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override fun launcherApps(): List<LauncherApp> {
         val pm = packageManager
+        // The icons are drawn 40 design units wide: 60 pixels in Android TV's 1080p window, 120 in a 4K one.
+        val iconPx = (40 * resources.displayMetrics.widthPixels / 1280f).toInt().coerceAtLeast(40)
         val found = LinkedHashMap<String, LauncherApp>()
         for (category in listOf(Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER)) {
             val intent = Intent(Intent.ACTION_MAIN).addCategory(category)
             pm.queryIntentActivities(intent, 0).forEach { info ->
                 val pkg = info.activityInfo.packageName
                 if (pkg == packageName || pkg in found) return@forEach
-                // Small icons only: 96 pixels is plenty for a 40-unit row, and keeps memory down.
-                val icon = runCatching { info.loadIcon(pm).toBitmap(96, 96).asImageBitmap() }.getOrNull()
+                // Exactly the size they are shown at: sharp, and no bigger than that in memory.
+                val icon = runCatching { info.loadIcon(pm).toBitmap(iconPx, iconPx).asImageBitmap() }.getOrNull()
                 found[pkg] = LauncherApp(pkg, info.loadLabel(pm).toString(), icon)
             }
         }

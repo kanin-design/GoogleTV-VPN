@@ -71,7 +71,8 @@ python3 tools/banner.py Roboto-Regular.ttf
 ## How it is built
 
 - The [OpenVPN 3](https://github.com/OpenVPN/openvpn3) core in C++ with OpenSSL 3.5, through JNI (`app/src/main/cpp`).
-- Jetpack Compose on Compose's foundation only, without the Material library. The design is a 1280 × 720 canvas, scaled sharply to 1080p and 4K.
+- Jetpack Compose on Compose's foundation only, without the Material library.
+- Drawn at the screen's full resolution, never upscaled. Android TV gives every app a 1920 × 1080 window, even on a 4K TV, and the TV scales that to 4K, as it does the home screen and every other app. Tunnel fills that window pixel for pixel, and a 4K window if a TV offers one. Its layout is measured in design units, 1280 × 720 of them to the screen, but units aren't pixels: 1.5 pixels a unit at 1080p, 3 at 4K.
 - The VPN service runs in its own process (`:vpn`) and tells the screens about the tunnel over a Binder (`vpn/VpnLink.kt`).
 - [docs/use-cases.md](docs/use-cases.md) has the behaviour, test notes and measurements of memory and CPU.
 

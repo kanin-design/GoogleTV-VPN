@@ -98,9 +98,10 @@ object TvType {
 }
 
 /**
- * Lays the app out on the design's 1280 × 720 canvas and scales it to the screen, so one
- * design renders sharp at 4K (3 pixels per design pixel) and shrinks cleanly to 1080p and
- * 720p. Inside, 1.dp is one design pixel.
+ * Measures the layout in the design's units: 1280 × 720 of them fill the screen, and inside,
+ * 1.dp is one unit. They are units, not pixels. Text, icons and the tunnel are drawn at the
+ * window's own resolution: 1.5 pixels a unit in the 1920 × 1080 window Android TV gives every
+ * app, even on a 4K screen, and 3 a unit in a 4K window. Nothing is drawn small and scaled up.
  */
 @Composable
 fun TvStage(content: @Composable BoxScope.() -> Unit) {

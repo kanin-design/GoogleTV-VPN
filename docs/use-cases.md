@@ -257,7 +257,7 @@ These are assumptions in this document. Each needs confirming before the rebuild
 ## Test notes
 
 - The emulator's Android TV image has no file picker. Import (UC-02) has to be tested on the Shield.
-- The UI is laid out on a 1280x720 design canvas and scaled to the screen's pixels (`TvStage`), so it looks the same at every size. Google TV caps an app's UI at 1920x1080 (`config_maxUiWidth`) and the TV upscales it to 4K; the Shield runs 1920x1080 at 320 dpi. A native 4K surface would get 3 pixels per design unit. Checked on the emulator at 1920x1080 and 1280x720 (2026-10-23).
+- The UI is laid out on a 1280x720 design canvas and scaled to the screen's pixels (`TvStage`), so it looks the same at every size. Google TV caps an app's UI at 1920x1080 (`config_maxUiWidth`) and the TV upscales it to 4K; the Shield runs 1920x1080 at 320 dpi. A native 4K surface would get 3 pixels per design unit. Checked on the emulator at 1920x1080 and 1280x720 (2026-10-23). Checked again 2026-10-24: the Shield reports a 3840x2160 screen and a 1920x1080 app window, and an emulator with a 4K screen keeps apps at 1920x1080 even after `wm size reset` and a forced size. The only bitmaps the app makes, the app icons in Settings › Apps, are made at the size they are shown (60 px at 1080p, 120 px in a 4K window).
 - `adb shell input keyevent` sends keys from a virtual device. Compose text fields only move focus out on D-pad presses from a real remote, so with adb, leave a field with Done (Enter) or Back.
 
 ### Checked on the emulator (2026-10-23)
@@ -292,6 +292,20 @@ These are assumptions in this document. Each needs confirming before the rebuild
 | Boot | The startup profile connected when the emulator booted. |
 
 Not checked yet: UC-07 timeout.
+
+### Second pass on the current build (2026-10-24, emulator, release build, two processes)
+
+| Area | Result |
+|---|---|
+| Startup | The startup profile connected when the emulator cold-booted. The startup profile picker marks the chosen one and locks a profile without a saved password. Stay connected while the screen is off switches on and off. |
+| Backup | Back up without a passphrase asks for one first. The phone page and the download work, a wrong code gets 403, and the file holds only its encryption header (no names, servers or passwords readable). Sent back through Restore: a wrong passphrase is refused, the right one adds both profiles. Remove takes the passphrase away. |
+| OpenVPN | Connection timeout 30 s, then back to 60 s; "Applies the next time you connect" while connected. |
+| DNS | A custom DNS server that is not an IP address is refused ("nas.local is not an IP address"). |
+| Automation | `.Disconnect` drops the tunnel, `.Connect --es profile hatlevika` connects (any case), an unknown name says "Tunnel has no profile called Nope". |
+| About | Version, What Tunnel stores, the licenses, and Reset asks first with focus on Keep. |
+| Connection test | Connected: all four checks pass through the tunnel. Not connected: "Not connected", and the other checks say they need the tunnel. |
+| Link import | http:// is refused, an https:// 404 says "Nothing was found at that link", and a file that is not a profile says it has no remote line. |
+| Certificates | A .p12 from the phone: a wrong password is refused, the right one offers the profiles and the keystore, and Cancel changes nothing. Android's chooser with no certificate installed explains how to add one (its wording was wrong and is fixed). |
 
 ## Speed test (2026-10-24)
 
@@ -372,6 +386,15 @@ Release build on the emulator, connected:
 | After Android lets the screens go (`am kill`) | none | 15.1 MB | 15.1 MB |
 
 Before, it was one 41 MB process that could not be let go while the tunnel ran. Checked with the split: connect, Details counters, the log, Clear log, Pause and Resume, a pause that ends with the screens' process gone (the service reconnected by itself), a simulated drop with the kill switch, Allow internet, and the speed test through the tunnel. A screens' process started later shows the running tunnel ("Connected for 00:01:27") from the link.
+
+Leak rounds on this build, connected, on the emulator (`cycle3.sh`: Details, the quick menu's speed test opened and closed, a profile, Import from your phone with its server on and off, every Settings category):
+
+| | Screens' process | VPN process |
+|---|---|---|
+| Release build, 30 rounds | 48 MB at the start, 51 to 62 MB during, 51 MB 30 s after; threads 24, up to 31 while speed tests run, then 27 | 14.3 MB to 13.9 MB; threads 17, then 16 |
+| Debug build, 20 rounds | open files 118, 121, 121, then 119 at rest; sockets 11 throughout | open files 77 throughout; threads 18 to 19 |
+
+Nothing grows from round to round. The tunnel stayed up for every measurement. Release builds hide a process's open files from adb, so those were counted on a debug build of the same code.
 
 On the Shield (3 GB, about 800 MB free while a streaming app played), Android may keep a cached screens' process for a long time before it needs the room. So the screens close themselves ten minutes after you leave them (`MainActivity`, `CLOSE_AFTER_MS`): the activity finishes and its process ends, and the next launch starts fresh at Connect with the tunnel's state from the link. They stay while something waits on them: the VPN consent, a file picker or the certificate chooser, a file to review, or a backup or certificate to unlock. Coming back within the ten minutes cancels it. Debug builds take `--ei closeafterseconds N` to test it sooner.
 

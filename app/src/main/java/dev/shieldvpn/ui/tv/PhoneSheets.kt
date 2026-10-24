@@ -56,7 +56,7 @@ sealed interface PhoneKind {
 }
 
 /** Android's chooser returns no certificate when none are installed, or when it is closed. */
-const val NO_CERT_PICKED = "No certificate picked. To add one, send its .p12 file and choose Install it in the TV’s keystore"
+const val NO_CERT_PICKED = "No certificate picked. To add one, send its .p12 file and choose Keep the key in this TV’s keystore"
 
 /** A field the text sheet edits. */
 enum class TextKind(val title: String, val sub: String, val label: String) {
