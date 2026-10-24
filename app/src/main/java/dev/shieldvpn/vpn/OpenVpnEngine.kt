@@ -13,7 +13,7 @@ object OpenVpnEngine {
 
     @JvmStatic external fun create(callbacks: NativeCallbacks): Long
 
-    /** [options] holds "key=value" lines: proto, timeout, tlsMin, legacy, compress. */
+    /** [options] holds "key=value" lines: proto, timeout, tlsMin, legacy, compress, epki, nocert. */
     @JvmStatic external fun evaluate(handle: Long, config: String, options: String): String
 
     @JvmStatic external fun needsCredentials(handle: Long): Boolean

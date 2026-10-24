@@ -291,7 +291,7 @@ These are assumptions in this document. Each needs confirming before the rebuild
 | Mouse | Clicking tabs and rows works; the first remote press after a click lands on the screen’s main item. |
 | Boot | The startup profile connected when the emulator booted. |
 
-Not checked yet: UC-07 timeout.
+UC-07, a server that never answers: checked in the second pass below.
 
 ### Second pass on the current build (2026-10-24, emulator, release build, two processes)
 
@@ -306,6 +306,9 @@ Not checked yet: UC-07 timeout.
 | Connection test | Connected: all four checks pass through the tunnel. Not connected: "Not connected", and the other checks say they need the tunnel. |
 | Link import | http:// is refused, an https:// 404 says "Nothing was found at that link", and a file that is not a profile says it has no remote line. |
 | Certificates | A .p12 from the phone: a wrong password is refused, the right one offers the profiles and the keystore, and Cancel changes nothing. Android's chooser with no certificate installed explains how to add one (its wording was wrong and is fixed). |
+| Timeout (UC-07) | A profile for 192.0.2.1, an address nothing answers on: dialled at 13:44:21, gave up at 13:45:21 (the 60 s timeout) with "Couldn't connect · Server did not respond." Traffic went out normally meanwhile, since the kill switch only holds traffic after a tunnel has been up. |
+| Profiles without a client certificate | Fixed. With certificate support built into the core, a profile without a client certificate was taken to have its key in the keystore and failed at once with "Missing External PKI alias", before dialling. Most providers' files sign in with a username and password only. Such profiles now tell the core to send no certificate (`disableClientCert`), as OpenVPN Connect does. |
+| A tunnel started elsewhere | Fixed. Connecting by automation (or at boot) showed the profile last picked on screen as connected. Connect now follows the profile the tunnel is on. |
 
 ## Speed test (2026-10-24)
 

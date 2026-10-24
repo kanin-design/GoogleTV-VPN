@@ -117,7 +117,13 @@ object Tunnels {
             allowLan = settings.allowLan,
             blockIpv6 = settings.blockIpv6,
             dnsServerOnly = connection.dnsMode == "Server only",
-            coreOptions = coreOptions(settings) + (connection.keyAlias?.let { "epki=$it\n" } ?: ""),
+            coreOptions = coreOptions(settings) + when {
+                connection.keyAlias != null -> "epki=${connection.keyAlias}\n"
+                // Without one the core expects a key in the keystore, and fails before it dials.
+                // Most providers' files sign in with a username and password only.
+                !ServerStore.hasClientCertificate(config) -> "nocert=1\n"
+                else -> ""
+            },
             mtu = settings.mtu.toIntOrNull(),
             pushedDns = connection.dnsMode == "Server only" || (settings.pushedDns && !useCustom),
             customDns = if (useCustom) settings.customDns else emptyList(),

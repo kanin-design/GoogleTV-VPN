@@ -302,6 +302,8 @@ Java_dev_shieldvpn_vpn_OpenVpnEngine_evaluate(JNIEnv *env, jclass /*cls*/, jlong
     cfg.enableLegacyAlgorithms = option(o, "legacy") == "1";
     // A certificate installed on the TV: the core asks the app for it and for each signature.
     cfg.externalPkiAlias = option(o, "epki");
+    // A profile without a client certificate, which signs in with a password alone.
+    cfg.disableClientCert = option(o, "nocert") == "1";
     env->ReleaseStringUTFChars(options, opts);
     env->ReleaseStringUTFChars(config, text);
 

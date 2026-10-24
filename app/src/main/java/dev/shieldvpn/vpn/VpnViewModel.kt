@@ -90,6 +90,10 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun onStatus(status: VpnStatus) {
         _state.update { it.copy(status = status) }
+        // A tunnel started without these screens, at boot or by another app, is the one Connect shows.
+        status.connectionId
+            ?.takeIf { status.isActive && it != _state.value.activeId && _state.value.connection(it) != null }
+            ?.let(::setActive)
         // Each profile remembers why it last failed, until it connects again.
         when (status) {
             is VpnStatus.Failed -> status.connectionId?.let { id ->

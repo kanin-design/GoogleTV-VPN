@@ -112,6 +112,11 @@ object ServerStore {
     fun hasCertificate(config: String): Boolean =
         "<ca>" in config || "<pkcs12>" in config || config.lineSequence().any { it.trim().startsWith("ca ") }
 
+    /** The file carries its own client certificate, inline or as a cert or pkcs12 line. */
+    fun hasClientCertificate(config: String): Boolean =
+        "<cert>" in config || "<pkcs12>" in config ||
+            config.lineSequence().map { it.trim().split(WHITESPACE).first() }.any { it == "cert" || it == "pkcs12" }
+
     fun needsLogin(config: String): Boolean =
         config.lineSequence().any { it.trim().startsWith("auth-user-pass") }
 
@@ -187,7 +192,7 @@ object ServerStore {
             cipher = cipher,
             tls = tls,
             needsLogin = needsLogin(raw),
-            clientCert = "<cert>" in raw || "<pkcs12>" in raw || words("cert") != null || words("pkcs12") != null,
+            clientCert = hasClientCertificate(raw),
             cert = certOf(raw),
             fileHost = remote?.first,
             filePort = remote?.second,
