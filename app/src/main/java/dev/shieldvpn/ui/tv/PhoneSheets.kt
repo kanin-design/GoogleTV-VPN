@@ -56,7 +56,7 @@ sealed interface PhoneKind {
 }
 
 /** Android's chooser returns no certificate when none are installed, or when it is closed. */
-const val NO_CERT_PICKED = "No certificate picked. To add one, send its .p12 file and choose Keep the key in this TV’s keystore"
+const val NO_CERT_PICKED = "No certificate picked. To add one, send its .p12 file and choose Keep the key in this device’s keystore"
 
 /** A field the text sheet edits. */
 enum class TextKind(val title: String, val sub: String, val label: String) {
@@ -108,7 +108,7 @@ fun rememberPhoneBridge(key: Any?, page: PhoneBridge.Page?, onReceive: (PhoneBri
 @Composable
 fun PhoneCode(bridge: PhoneBridge?, qrSize: Float, steps: List<String> = emptyList()) {
     if (bridge == null) {
-        Notice(Ic.Bang, "This TV is not on a home network, so a phone can’t reach it.", amber = true)
+        Notice(Ic.Bang, "This device is not on a home network, so a phone can’t reach it.", amber = true)
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -229,8 +229,8 @@ fun PassphraseSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Re
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(if (o.restore) "Restore a backup" else "Backup passphrase", style = TvType.display(34f))
             Text(
-                if (o.restore) "Type the passphrase this backup was made with. Its profiles are added to this TV."
-                else "Backups are encrypted with it. You need it to restore on another TV, so keep it somewhere safe.",
+                if (o.restore) "Type the passphrase this backup was made with. Its profiles are added to this device."
+                else "Backups are encrypted with it. You need it to restore on another device, so keep it somewhere safe.",
                 style = TvType.ui(17f, color = Tv.soft(0.7f)),
             )
             InputBox("Passphrase", value, editing = true, onClick = {}, secret = true, showSecret = show)
@@ -307,7 +307,7 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(title, style = TvType.display(30f))
             Text(
-                if (o.setting) "4 to 8 digits. Anyone without it can still connect from Connect." else "Profiles and settings are locked on this TV.",
+                if (o.setting) "4 to 8 digits. Anyone without it can still connect from Connect." else "Profiles and settings are locked on this device.",
                 style = TvType.ui(15f, color = Tv.soft(0.7f)),
                 modifier = Modifier.padding(top = 6.dp),
             )
@@ -390,7 +390,7 @@ fun TextSheet(nav: Nav, req: Requesters, o: Overlay.Text, close: () -> Unit) {
                     QrCode(bridge.url, 180f)
                     Text("Or open http://${bridge.address} and enter ${bridge.code.chunked(3).joinToString("\u00A0")}.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
                 } else {
-                    Text("Connect the TV to your home network to type on a phone.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
+                    Text("Connect this device to your home network to type on a phone.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
                 }
             }
         }
@@ -466,13 +466,13 @@ fun P12Sheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requester
                     }
                     item {
                     ListRow(
-                        "Keep the key in this TV’s keystore instead", {
+                        "Keep the key in this device’s keystore instead", {
                             val alias = actions.keepP12(password)
                             if (alias == null) {
                                 nav.toast("Android could not keep this key")
                             } else {
                                 nav.overlay = Overlay.PickProfile(
-                                    "Use it for which profile?", "The key stays in the TV’s keystore and can’t be copied off it.",
+                                    "Use it for which profile?", "The key stays in the device’s keystore and can’t be copied off it.",
                                     cancelled = { Certificates.forget(alias) },
                                 ) { id ->
                                     actions.setKeyAlias(id, alias)
@@ -480,7 +480,7 @@ fun P12Sheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requester
                                 }
                             }
                         },
-                        subtitle = "The key can sign in but can’t be copied off the TV. Pick the profile next",
+                        subtitle = "The key can sign in but can’t be copied off the device. Pick the profile next",
                         focusRequester = if (state.connections.isEmpty()) req["p12-first"] else null,
                         leading = { IconSquare(Ic.Cert, it) },
                     )

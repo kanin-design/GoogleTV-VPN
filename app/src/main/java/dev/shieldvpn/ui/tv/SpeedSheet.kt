@@ -136,7 +136,7 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = if (direct) "No answer from the speed test. Is the TV online?" else "No answer through the tunnel. ${e.message.orEmpty()}".trim()
+            error = if (direct) "No answer from the speed test. Is this device online?" else "No answer through the tunnel. ${e.message.orEmpty()}".trim()
             phase = null
             stage = Stage.Failed
         }

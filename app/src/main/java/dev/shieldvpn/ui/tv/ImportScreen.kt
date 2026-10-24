@@ -57,10 +57,10 @@ import dev.shieldvpn.vpn.VpnUiState
 
 enum class ImportMethod(val icon: Ic, val title: String, val sub: String, val more: Boolean = false) {
     Phone(Ic.Phone, "From your phone", "Scan a code, pick the file there"),
-    Files(Ic.Usb, "USB drive or Downloads", "Files on this TV"),
+    Files(Ic.Usb, "USB drive or Downloads", "Files on this device"),
     Link(Ic.Link, "From a link", "An HTTPS address"),
-    Restore(Ic.Archive, "Restore a backup", "Everything from another TV"),
-    Certs(Ic.Cert, "Certificates", ".p12 file or the TV keystore", more = true),
+    Restore(Ic.Archive, "Restore a backup", "Everything from another device"),
+    Certs(Ic.Cert, "Certificates", ".p12 file or the device keystore", more = true),
     Paste(Ic.Paste, "Paste config text", "Type or paste it on your phone", more = true),
 }
 
@@ -174,13 +174,13 @@ private fun MethodRow(m: ImportMethod, state: VpnUiState, nav: Nav, actions: Tun
 private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters) {
     when (m) {
         ImportMethod.Files -> {
-            PanelHeading("On this TV", "Pick a file", "Android’s file picker opens. Choose the .ovpn or .conf file from Downloads or a USB drive.")
+            PanelHeading("On this device", "Pick a file", "Android’s file picker opens. Choose the .ovpn or .conf file from Downloads or a USB drive.")
             Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 TvButton("Choose a file", actions::pickFile, icon = Ic.File, focusRequester = req["im-entry"])
             }
             Steps(
                 listOf(
-                    "Save the .ovpn file in Downloads, or on a USB drive in the TV",
+                    "Save the .ovpn file in Downloads, or on a USB drive in this device",
                     "Pick it in the file picker",
                     "Check it here before it is saved",
                 ),
@@ -190,7 +190,7 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
         ImportMethod.Phone -> PhonePanel(actions, req)
         ImportMethod.Link -> LinkPanel(nav, actions, req)
         ImportMethod.Restore -> {
-            PanelHeading("Moving to a new TV", "Restore a backup", "A backup holds every profile, saved password and setting, encrypted with the passphrase you chose when you made it.")
+            PanelHeading("Moving to a new device", "Restore a backup", "A backup holds every profile, saved password and setting, encrypted with the passphrase you chose when you made it.")
             Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ListRow(
                     "Send the backup from your phone", { nav.overlay = Overlay.Phone(PhoneKind.Restore) },
@@ -224,7 +224,7 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
                     trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
                 )
                 ListRow(
-                    "Use a certificate installed on this TV", {
+                    "Use a certificate installed on this device", {
                         actions.chooseKeyAlias { alias ->
                             if (alias != null) {
                                 nav.overlay = Overlay.PickProfile("Use it for which profile?", "The profile signs in with $alias. Its own certificate is kept, unused.") { id ->
@@ -379,8 +379,8 @@ private fun ProblemPanel(review: ImportReview, nav: Nav, actions: TunnelActions,
     // No file was opened at all: this TV has no file picker, or the file could not be read.
     val noFile = review.fileName.isEmpty()
     PanelHeading(
-        if (noFile) "On this TV" else "Can’t import ${review.fileName}",
-        if (noFile) "No file picker on this TV" else "This isn’t an OpenVPN profile",
+        if (noFile) "On this device" else "Can’t import ${review.fileName}",
+        if (noFile) "No file picker on this device" else "This isn’t an OpenVPN profile",
         review.problem,
     )
     Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {

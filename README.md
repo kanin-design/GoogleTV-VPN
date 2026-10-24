@@ -8,17 +8,17 @@ An OpenVPN client for Android TV and Google TV, made for the remote. ("Tunnel" i
 
 ## What it does
 
-- **Connects with one press.** Connect shows the current profile, large, with the button you most likely want already focused. Quick connect cards below switch profiles. The tunnel in the background is green while connected, amber while connecting and dim red when off.
+- **Connects with one press.** Connect shows the current profile, large, with the button you most likely want already focused. Quick connect cards below switch profiles. The background shows where your traffic goes: green from this device through your VPN to the internet while connected, yellow while it connects, and red straight to the internet when off.
 - **Imports profiles without typing.** Scan a QR code with your phone and pick or paste the `.ovpn` file there, or use a USB drive, Downloads or an HTTPS link. Every file is checked before it is saved, and a login inside the file is moved out of it and encrypted.
-- **Client certificates.** A `.p12` or `.pfx` file goes into the profile, or into Android's keystore, where the key can sign in but can't be copied off the TV. A certificate already installed on the TV works too.
+- **Client certificates.** A `.p12` or `.pfx` file goes into the profile, or into Android's keystore, where the key can sign in but can't be copied off the device. A certificate already installed on the device works too.
 - **Protection.** A kill switch, IPv6 and DNS leak blocking, and the choice to keep casting and devices at home reachable.
 - **Per-app routing.** Let streaming services that block VPNs skip it, or send only the apps you choose through it.
 - **Speed test.** Ping, download and upload through the VPN, on a speedometer, with whether it is fast enough for 4K or HD and how much of your plain connection the VPN keeps.
-- **Everyday controls.** Pause for 15 minutes, connect when the TV starts, and reconnect by itself after Wi-Fi changes. There are a connection test, a connection log and connection details.
-- **Backups.** One encrypted file (PBKDF2 and AES-GCM) moves every profile, saved password and setting to a new TV through your phone.
+- **Everyday controls.** Pause for 15 minutes, connect when the device starts, and reconnect by itself after Wi-Fi changes. There are a connection test, a connection log and connection details.
+- **Backups.** One encrypted file (PBKDF2 and AES-GCM) moves every profile, saved password and setting to a new device through your phone.
 - **PIN lock** for settings or the whole app, and **automation intents** for home automation apps and ADB.
 - **Remote, keyboard or mouse.** Everything works with the remote; a keyboard types into fields, and a mouse can click anything.
-- **Light on the TV.** The VPN runs in its own small process (about 15 MB, measured on the Android TV emulator). The screens close themselves ten minutes after you leave them, so the TV gets that memory back while you watch.
+- **Light on the device.** The VPN runs in its own small process (about 15 MB, measured on the Android TV emulator). The screens close themselves ten minutes after you leave them, so the device gets that memory back while you watch.
 
 ## Screenshots
 
@@ -35,7 +35,7 @@ The screenshots use demo profiles on the Android TV emulator. The speed test is 
 
 ## Install
 
-Download the APK from [Releases](https://github.com/kanin-design/GoogleTV-VPN/releases) and sideload it: with `adb install`, or with a downloader app on the TV.
+Download the APK from [Releases](https://github.com/kanin-design/GoogleTV-VPN/releases) and sideload it: with `adb install`, or with a downloader app on the device.
 
 ```
 adb install tunnel-0.1.0-beta-arm64.apk
@@ -78,9 +78,9 @@ python3 tools/banner.py Roboto-Regular.ttf
 
 ## Privacy
 
-What stays on the TV: your profiles and settings, in the app's private storage. Saved passwords and the backup passphrase are encrypted with a key in the TV's keystore, and the PIN is kept as a salted hash.
+What stays on the device: your profiles and settings, in the app's private storage. Saved passwords and the backup passphrase are encrypted with a key in the device's keystore, and the PIN is kept as a salted hash.
 
-What leaves the TV:
+What leaves the device:
 - the VPN traffic itself, to the servers named in your profiles;
 - while connected, one request through the tunnel to api.ipify.org (or icanhazip.com), to show the address sites see;
 - files you send to or from your phone, which stay on your home network;

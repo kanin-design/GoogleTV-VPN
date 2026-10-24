@@ -43,7 +43,7 @@ import dev.shieldvpn.vpn.VpnStatus
 import dev.shieldvpn.vpn.VpnUiState
 
 /**
- * Connect: the current profile, huge, over the tunnel, with the one button most visits need
+ * Connect: the current profile, huge, over the background, with the one button most visits need
  * already focused. Quick connect cards below preview a profile as focus moves over them.
  */
 @Composable
@@ -96,7 +96,7 @@ private fun Hero(
     Column(horizontalAlignment = Alignment.Start) {
         if (c == null) {
             Title("Add a profile")
-            Lede(null, "Import an .ovpn file saved on this TV.")
+            Lede(null, "Import an .ovpn file saved on this device.")
             Actions {
                 TvButton("Import a profile", { nav.go(Screen.Import) }, icon = Ic.Plus, focusRequester = primaryFocus)
             }
@@ -124,15 +124,23 @@ private fun Hero(
                 // The address sites see once it is looked up; until then the tunnel's own.
                 val ip = state.tunnel?.publicIp?.let { "VPN IP $it" } ?: state.tunnel?.address?.substringBefore('/')?.let { "Tunnel IP $it" }
                 Lede("Connected", " for ${fmtDuration((now - since).coerceAtLeast(0) / 1000)}" + (ip?.let { " · $it" } ?: ""))
+                Traffic("Traffic from your device goes through your VPN")
             }
-            mode == Mode.Busy -> Lede("Connecting…", "")
+            mode == Mode.Busy -> {
+                Lede("Connecting…", "")
+                // An empty line, so the name stays put from not connected to connecting to connected.
+                Traffic("")
+            }
             mode == Mode.Paused -> Lede("Paused", " · back on in ${fmtMinutes(((state.pausedUntil ?: now) - now).coerceAtLeast(0) / 1000)}")
             mode == Mode.Error && blocked -> Lede("Connection dropped", " · The kill switch is blocking traffic.")
             mode == Mode.Error -> {
                 val why = (state.status as? VpnStatus.Failed)?.message ?: "Could not connect"
                 Lede("Couldn’t connect", " · " + why + if (why.endsWith(".")) "" else ".")
             }
-            else -> Lede("Not connected", " · traffic leaves this TV unencrypted")
+            else -> {
+                Lede("Not connected", "")
+                Traffic("Traffic from your device goes directly to the internet")
+            }
         }
         Meta(listOfNotNull(server?.host, server?.let { "${it.protocol.label} ${it.port}" }, info?.cipher))
         Actions {
@@ -204,6 +212,12 @@ private fun Lede(bold: String?, rest: String) {
     )
 }
 
+/** Where the device's traffic goes, on its own line under the lede, as the background shows it. */
+@Composable
+private fun Traffic(text: String) {
+    Text(text, style = TvType.ui(19f, color = Tv.soft(0.62f)), maxLines = 1, modifier = Modifier.padding(top = 6.dp))
+}
+
 /** .meta: host, protocol and port, cipher, with dots between. */
 @Composable
 private fun Meta(parts: List<String>) {
@@ -272,7 +286,7 @@ private fun QuickRow(state: VpnUiState, nav: Nav, connect: (String) -> Unit, pri
                 iconPath = AppsPath,
                 iconSize = 28f,
                 title = "All profiles",
-                subtitle = "${state.connections.size} on this TV",
+                subtitle = "${state.connections.size} on this device",
                 onClick = { nav.go(Screen.Profiles) },
                 modifier = Modifier.weight(1f),
             )

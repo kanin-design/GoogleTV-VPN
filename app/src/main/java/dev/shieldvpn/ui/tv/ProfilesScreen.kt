@@ -278,7 +278,7 @@ private fun ColumnHead(eyebrow: String, title: String, sub: String?, mini: Boole
 @Composable
 private fun ListColumn(state: VpnUiState, nav: Nav, req: Requesters, mini: Boolean) {
     Column(Modifier.fillMaxSize()) {
-        ColumnHead("On this TV", "Profiles", null, mini, count = state.connections.size)
+        ColumnHead("On this device", "Profiles", null, mini, count = state.connections.size)
         val list = rememberLazyListState()
         LazyColumn(
             state = list,
@@ -340,7 +340,7 @@ private fun ProfileHero(state: VpnUiState, c: Connection) {
     val server = state.serverOf(c)
     val facts = listOfNotNull(
         authText(state, c),
-        "starts with the TV".takeIf { state.settings.boot && state.settings.startupId == c.id },
+        "starts with the device".takeIf { state.settings.boot && state.settings.startupId == c.id },
         "in Quick connect".takeIf { c.pinned },
     )
     Column(horizontalAlignment = Alignment.Start) {
@@ -478,18 +478,18 @@ private fun ProfileColumn(
             }
             item {
                 ListRow(
-                    "Connect when the TV starts",
+                    "Connect when the device starts",
                     {
                         if (stepBackTo(nav, index, "pe-startup")) return@ListRow
                         when {
                             needsLogin && !saved -> nav.toast("Save the password first, so it can connect by itself")
                             startup -> {
                                 actions.setStartup(null)
-                                nav.toast("Nothing connects when the TV starts")
+                                nav.toast("Nothing connects when the device starts")
                             }
                             else -> {
                                 actions.setStartup(c.id)
-                                nav.toast("${c.name} connects when the TV starts")
+                                nav.toast("${c.name} connects when the device starts")
                             }
                         }
                     },
@@ -583,7 +583,7 @@ private fun ProfileColumn(
                             if (stepBackTo(nav, index, "pe-del")) return@ListRow
                             confirm = true
                         },
-                        subtitle = "Removes it from this TV", danger = true, mini = mini,
+                        subtitle = "Removes it from this device", danger = true, mini = mini,
                         focusRequester = req["pe-del"],
                         leading = { IconSquare(Ic.Trash, it) },
                         trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
@@ -652,7 +652,7 @@ private fun AdvancedColumn(state: VpnUiState, nav: Nav, req: Requesters, c: Conn
             item { adv(LeafKind.Kill, "Kill switch", "For this profile only", c.killMode) }
             item { adv(LeafKind.Dns, "DNS", "For this profile only", c.dnsMode) }
             item { adv(LeafKind.File, "The .ovpn file", listOfNotNull(info?.tls, info?.cipher).joinToString(" · ").ifEmpty { "Read-only" }, "View") }
-            item { adv(LeafKind.Cert, "Client certificate", c.keyAlias?.let { "In the TV’s keystore · ${Certificates.label(it)}" } ?: info?.cert?.validUntil ?: "Not in the file", "Details") }
+            item { adv(LeafKind.Cert, "Client certificate", c.keyAlias?.let { "In the device’s keystore · ${Certificates.label(it)}" } ?: info?.cert?.validUntil ?: "Not in the file", "Details") }
         }
     }
 }
@@ -683,7 +683,7 @@ private val Labels = mapOf("name" to "Name", "host" to "Server", "port" to "Port
 private val LeafText = mapOf(
     LeafKind.Name to ("Name" to "Shown on cards and on the Connect screen."),
     LeafKind.Look to ("Icon" to "Shown on its card on Connect and in your profile list."),
-    LeafKind.Password to ("Saved password" to "Kept in the TV’s keystore, never in the .ovpn file."),
+    LeafKind.Password to ("Saved password" to "Kept in the device’s keystore, never in the .ovpn file."),
     LeafKind.Cert to ("Client certificate" to "The certificate inside the .ovpn file that signs you in."),
     LeafKind.Server to ("Server and port" to "Use another address than the one in the file."),
     LeafKind.Protocol to ("Protocol" to "Override the protocol in the file."),
@@ -948,7 +948,7 @@ private fun CertBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: R
             DetailGrid(
                 listOf(
                     "Certificate" to Certificates.label(c.keyAlias),
-                    "Stored" to "In this TV’s keystore. The key can’t be copied off it",
+                    "Stored" to "In this device’s keystore. The key can’t be copied off it",
                 ),
                 columns = 1,
             )
@@ -971,7 +971,7 @@ private fun CertBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: R
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TvButton("Back", { nav.pop() }, icon = Ic.Back, glass = true, focusRequester = req["ed-done"])
-            TvButton(if (c.keyAlias == null) "Use one installed on this TV" else "Choose another", {
+            TvButton(if (c.keyAlias == null) "Use one installed on this device" else "Choose another", {
                 actions.chooseKeyAlias { alias ->
                     if (alias != null) {
                         actions.setKeyAlias(c.id, alias)

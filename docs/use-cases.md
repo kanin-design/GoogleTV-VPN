@@ -284,7 +284,7 @@ These are assumptions in this document. Each needs confirming before the rebuild
 | Details | VPN IP (what sites see), tunnel IP, DNS, routes, data transferred. |
 | Profiles | Rename with Backspace, saved password page, Duplicate, Delete (confirm in the column and in the quick menu), Back returns to the row it came from. |
 | Advanced | Server and port, Use the file’s server, protocol, kill switch. A profile that shares its server file with a copy gets its own copy on its first change. |
-| Certificates | A .p12 from the phone: wrong password refused, certificate put into a profile’s file (same as the original), or its key kept in the TV’s keystore; a profile signing with the kept key connects. |
+| Certificates | A .p12 from the phone: wrong password refused, certificate put into a profile’s file (same as the original), or its key kept in the device’s keystore; a profile signing with the kept key connects. |
 | Import | From your phone (QR decodes, wrong code refused), paste, link (https only; a web page is refused), restore a backup (wrong passphrase refused), no file picker explained. |
 | Settings | Apps that skip the VPN (Android routes all apps but the chosen one through the tunnel), custom DNS (the tunnel used 9.9.9.9), connection test (four checks pass), log, PIN lock, licenses. |
 | Automation | `am start -n dev.shieldvpn/.Connect --es profile NAME` and `.Disconnect`. |
@@ -334,7 +334,7 @@ Measured on the emulator (1920x1080), release build, connected:
 | classes.dex | 2.0 MB | 2.0 MB (Material 3 is no longer a dependency) |
 
 How:
-- The background is one procedural tunnel at 30 frames a second, with no pictures in memory. Its gradients and strokes are made once per colour, not every frame. Behind Import, Settings and any sheet it holds still and draws nothing until the state changes; there every tunnel frame also redrew the panels on top.
+- The background is one procedural network at 30 frames a second, with no pictures in memory: lines, circles and points, and no filled shapes that change, which the GPU would have to cut into triangles again every frame. Its gradients are made once per colour, not every frame. Behind Import, Settings and any sheet it holds still and draws nothing until the state changes; there every frame of it also redrew the panels on top.
 - The native library exports only its JNI functions (`exports.map`), is linked with `--gc-sections` and `--icf=all`, and links a slim OpenSSL built with per-function sections (`third_party/OPENSSL-BUILD.md`).
 - Web requests (the VPN IP lookup, the connection test, download from a link) close their connection when done (`vpn/Http.kt`). Before, each left a socket open.
 

@@ -167,7 +167,7 @@ private fun SignInSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 if (o.forStartup) {
                     actions.setStartup(c.id)
                     nav.pick = null
-                    nav.toast("Password saved. ${c.name} connects when the TV starts")
+                    nav.toast("Password saved. ${c.name} connects when the device starts")
                 } else {
                     nav.toast("Password saved")
                 }
@@ -198,7 +198,7 @@ private fun SignInSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req
             Column {
                 Text("Sign in to ${c.name}", style = TvType.display(34f))
                 Text(
-                    "This profile asks for a username and password. The password stays in the TV’s keystore.",
+                    "This profile asks for a username and password. The password stays in the device’s keystore.",
                     style = TvType.ui(17f, color = Tv.soft(0.7f)),
                     modifier = Modifier.padding(top = 6.dp),
                 )
@@ -228,7 +228,7 @@ private fun SignInSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 if (!o.save) {
                     Spacer(Modifier.weight(1f))
                     ListRow(
-                        "Remember on this TV", { remember = !remember },
+                        "Remember on this device", { remember = !remember },
                         modifier = Modifier.width(300.dp),
                         trailing = { TvSwitch(remember, it) },
                     )
@@ -241,7 +241,7 @@ private fun SignInSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 QrCode(bridge.url, 180f)
                 Text("Or open http://${bridge.address} and enter ${bridge.code.chunked(3).joinToString("\u00A0")}.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
             } else {
-                Text("Connect the TV to your home network to type on a phone.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
+                Text("Connect this device to your home network to type on a phone.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
             }
         }
         }
@@ -384,7 +384,7 @@ private fun MenuSheet(
                         }
                     }
                 },
-                subtitle = if (confirm) "Its saved password goes too" else "Removes it from this TV",
+                subtitle = if (confirm) "Its saved password goes too" else "Removes it from this device",
                 danger = true,
                 leading = { IconSquare(Ic.Trash, it) },
             )

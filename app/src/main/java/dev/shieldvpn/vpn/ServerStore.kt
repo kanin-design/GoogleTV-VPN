@@ -185,7 +185,7 @@ object ServerStore {
         }
         val remote = remoteOf(raw)
         val warnings = buildList {
-            if (words("up") != null || words("down") != null) add("The up and down scripts in the file cannot run on a TV.")
+            if (words("up") != null || words("down") != null) add("The up and down scripts in the file cannot run on this device.")
             if (words("comp-lzo") != null || words("compress") != null) add("The file asks for compression. ${APP_NAME} only accepts it from the server.")
         }
         return ConfigInfo(

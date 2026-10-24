@@ -420,6 +420,7 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
                 mode,
                 Modifier.fillMaxSize(),
                 covered = nav.overlay != null || nav.screen == Screen.Import || nav.screen == Screen.Settings,
+                blocked = state.status is VpnStatus.Blocked,
             )
             Scrims(nav)
             when (nav.screen) {
@@ -749,7 +750,7 @@ private fun TabItem(label: String, selected: Boolean, focusRequester: FocusReque
     }
 }
 
-/** The shading that keeps text readable over the tunnel, by screen. */
+/** The shading that keeps text readable over the background, by screen. */
 @Composable
 private fun Scrims(nav: Nav) {
     val hero by animateFloatAsState(if (nav.screen == Screen.Connect || nav.screen == Screen.Profiles) 1f else 0f, tween(450), label = "hero")

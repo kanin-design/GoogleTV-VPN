@@ -114,8 +114,19 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
      * Debug builds, for screenshots: the active profile looks connected, with addresses from the
      * ranges kept for documentation. Nothing connects, and the next real change replaces it.
      */
-    fun showDemo() {
+    fun showDemo(state: String? = null) {
         val id = _state.value.activeId ?: return
+        when (state) {
+            "Busy" -> return VpnController.update(VpnStatus.Connecting(id))
+            "Blocked" -> {
+                VpnController.setTunnel(null)
+                return VpnController.update(VpnStatus.Blocked(id))
+            }
+            "Off" -> {
+                VpnController.setTunnel(null)
+                return VpnController.update(VpnStatus.Disconnected)
+            }
+        }
         VpnController.setTunnel(
             TunnelInfo(
                 address = "10.8.0.6/30", dns = listOf("10.8.0.1"), routes = listOf("All traffic"), mtu = 1500,
@@ -260,7 +271,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     fun noFilePicker() {
         _state.update {
-            it.copy(review = ImportReview("", "", "", "", 0, Protocol.UDP, false, "", "", emptyList(), "This TV has no file picker, so ${APP_NAME} can’t open files from Downloads or USB. Send the file from your phone instead."))
+            it.copy(review = ImportReview("", "", "", "", 0, Protocol.UDP, false, "", "", emptyList(), "This device has no file picker, so ${APP_NAME} can’t open files from Downloads or USB. Send the file from your phone instead."))
         }
     }
 

@@ -335,12 +335,12 @@ Home automation apps send the same intents:
   component dev.shieldvpn/.Connect or dev.shieldvpn/.Disconnect,
   with an optional string extra "profile"."""
 
-private const val PRIVACY = """What ${APP_NAME} keeps on this TV
+private const val PRIVACY = """What ${APP_NAME} keeps on this device
   Your profiles (the .ovpn files) and settings, in the app's private storage.
-  Saved passwords and the backup passphrase, encrypted with a key in the TV's keystore.
+  Saved passwords and the backup passphrase, encrypted with a key in the device's keystore.
   The PIN, as a salted hash.
 
-What leaves the TV
+What leaves the device
   The VPN traffic itself, to the servers named in your profiles.
   While connected, one request through the tunnel to api.ipify.org
   (or icanhazip.com) to show the address sites see.
@@ -355,11 +355,11 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
     val cat = nav.settingsCat
     val context = LocalContext.current
     val (title, sub) = when (cat) {
-        Category.Protection -> "Protection" to "What happens when the tunnel drops, and what may leave the TV outside it."
-        Category.Startup -> "Startup" to "What ${APP_NAME} does when the TV turns on or the network changes."
+        Category.Protection -> "Protection" to "What happens when the tunnel drops, and what may leave the device outside it."
+        Category.Startup -> "Startup" to "What ${APP_NAME} does when the device turns on or the network changes."
         Category.Apps -> "Apps" to "Some TV services block VPNs. Let those apps skip it, or send only the apps you choose through the VPN."
         Category.Diagnostics -> "Diagnostics" to "For when something does not connect."
-        Category.Backup -> "Backup" to "Move everything to a new TV, or keep a copy on your phone."
+        Category.Backup -> "Backup" to "Move everything to a new device, or keep a copy on your phone."
         Category.OpenVpn -> "OpenVPN" to "Applied on top of every profile. A setting inside the .ovpn file wins unless noted."
         Category.Dns -> "DNS" to "Where name lookups go while the tunnel is up."
         Category.Automation -> "Automation" to "For home automation apps and ADB. Off until you turn it on."
@@ -403,12 +403,12 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                     }
                 }
                 value(scope, "s-always", "Always-on VPN", "Set in Android TV system settings", "Open") {
-                    if (!actions.openVpnSettings()) nav.toast("This TV has no VPN settings screen")
+                    if (!actions.openVpnSettings()) nav.toast("This device has no VPN settings screen")
                 }
             }
             Category.Startup -> {
                 val startup = state.connection(s.startupId)
-                toggle(scope, "s-boot", "Connect when the TV starts", "Uses the startup profile below", s.boot && startup != null) {
+                toggle(scope, "s-boot", "Connect when the device starts", "Uses the startup profile below", s.boot && startup != null) {
                     if (s.boot && startup != null) actions.changeSettings { it.copy(boot = false) }
                     else if (startup != null) actions.changeSettings { it.copy(boot = true) }
                     else openPick(Pick.Startup)
@@ -422,7 +422,7 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                 }
                 if (s.advanced) {
                     item { SectionLabel("Advanced") }
-                    toggle(scope, "s-sleep", "Stay connected while the screen is off", "Keeps the TV awake while the tunnel is up", s.stayAwake) {
+                    toggle(scope, "s-sleep", "Stay connected while the screen is off", "Keeps the device awake while the tunnel is up", s.stayAwake) {
                         actions.changeSettings { it.copy(stayAwake = !it.stayAwake) }
                         scope.appliesNext()
                     }
@@ -447,7 +447,7 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                     }
                 }
                 if (found == null) {
-                    item { Text("Finding the apps on this TV…", style = TvType.ui(16f, color = Tv.soft(0.6f)), modifier = Modifier.padding(10.dp)) }
+                    item { Text("Finding the apps on this device…", style = TvType.ui(16f, color = Tv.soft(0.6f)), modifier = Modifier.padding(10.dp)) }
                 } else {
                     found.chunked(2).forEachIndexed { r, line ->
                         item("apps-$r") {
@@ -513,7 +513,7 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                     nav.importMethod = ImportMethod.Restore
                     nav.go(Screen.Import)
                 }
-                value(scope, "s-bkpass", "Backup passphrase", "Needed to restore on another TV", if (state.hasBackupPassphrase) "Change" else "Set") {
+                value(scope, "s-bkpass", "Backup passphrase", "Needed to restore on another device", if (state.hasBackupPassphrase) "Change" else "Set") {
                     nav.overlay = Overlay.Passphrase(restore = false)
                 }
             }
@@ -526,7 +526,7 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                     actions.changeSettings { it.copy(legacyCiphers = !it.legacyCiphers) }
                     scope.appliesNext()
                 }
-                toggle(scope, "s-compress", "Compress what the TV sends", "Can leak data (VORACLE). Compression the server sends is always accepted", s.compress) {
+                toggle(scope, "s-compress", "Compress what this device sends", "Can leak data (VORACLE). Compression the server sends is always accepted", s.compress) {
                     actions.changeSettings { it.copy(compress = !it.compress) }
                     scope.appliesNext()
                 }
@@ -565,7 +565,7 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
             }
             Category.About -> {
                 value(scope, "s-ver", "Version", "${APP_NAME} and its OpenVPN core", "${actions.versionName} · OpenVPN 3") {}
-                value(scope, "s-priv", "What ${APP_NAME} stores", "Profiles and passwords, encrypted on this TV. No accounts, no analytics", "Details") {
+                value(scope, "s-priv", "What ${APP_NAME} stores", "Profiles and passwords, encrypted on this device. No accounts, no analytics", "Details") {
                     nav.overlay = Overlay.File("About", "What ${APP_NAME} stores", PRIVACY, plain = true)
                 }
                 value(scope, "s-lic", "Open-source licenses", "OpenVPN 3 core (MPL 2.0), OpenSSL, asio, fmt, lz4, xxHash, ZXing", "View") {
@@ -660,7 +660,7 @@ private fun LazyListScope.action(scope: PanelScope, key: String, icon: Ic, title
 @Composable
 private fun LockedPanel(nav: Nav, req: Requesters) {
     req.alias("panel-first", "s-unlock")
-    PanelHeading(null, "Settings are locked", "Enter the PIN to change settings on this TV.")
+    PanelHeading(null, "Settings are locked", "Enter the PIN to change settings on this device.")
     Row(Modifier.padding(top = 22.dp)) {
         TvButton("Enter PIN", { nav.overlay = Overlay.Pin() }, icon = Ic.Lock, focusRequester = req["s-unlock"])
     }
@@ -856,7 +856,7 @@ private fun ValuePick(state: VpnUiState, nav: Nav, actions: TunnelActions, req: 
 
 @Composable
 private fun StartupPick(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, done: () -> Unit) {
-    PickHeading("Startup", "Startup profile", "${APP_NAME} connects to this profile when the TV turns on, before you open the app.")
+    PickHeading("Startup", "Startup profile", "${APP_NAME} connects to this profile when the device turns on, before you open the app.")
     val current = if (state.settings.boot) state.settings.startupId else null
     val list = rememberLazyListState()
     LazyColumn(state = list, modifier = Modifier.bleed(12.dp).scrollFade(list), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
