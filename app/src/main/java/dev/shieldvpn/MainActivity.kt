@@ -9,8 +9,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.os.SystemClock
 import android.provider.Settings
 import android.security.KeyChain
+import android.view.InputDevice
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -121,7 +124,9 @@ class MainActivity : ComponentActivity(), TunnelActions {
      * `--ei closeafterseconds N` closes the screens N seconds after they leave instead of 10 minutes,
      * `--ez demo true` shows a made-up connected tunnel for screenshots; nothing connects
      * (`--es demostate Busy`, `Off` or `Blocked` shows connecting, not connected or the kill
-     * switch blocking traffic instead).
+     * switch blocking traffic instead),
+     * `--es hover "X,Y X,Y"` glides a mouse pointer through those points in screen pixels, resting
+     * 1.5 s at each, and `--es hover off` takes it away.
      */
     private fun debugExtras(intent: Intent) {
         if (isDebuggable()) {
@@ -145,6 +150,11 @@ class MainActivity : ComponentActivity(), TunnelActions {
                 Tunnels.pause(this, System.currentTimeMillis() + seconds * 1000L)
                 intent.removeExtra("pauseseconds")
             }
+            // The emulator has no mouse (its clicks arrive as touches), so hover is tested with this.
+            intent.getStringExtra("hover")?.let { at ->
+                window.decorView.post { fakeHover(at) }
+                intent.removeExtra("hover")
+            }
             // `--ez dumpthreads true` logs every thread's stack, to find leaks.
             if (intent.getBooleanExtra("dumpthreads", false)) {
                 Thread.getAllStackTraces().forEach { (t, stack) ->
@@ -160,6 +170,46 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     private fun isDebuggable(): Boolean =
         applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+
+    /** Where the fake mouse pointer rests, or null while there is none. */
+    private var hoverAt: Pair<Float, Float>? = null
+
+    /** Debug builds: sends the hover events of a mouse gliding through [at] ("X,Y X,Y", or "off"). */
+    private fun fakeHover(at: String) {
+        fun send(action: Int, x: Float, y: Float) {
+            val now = SystemClock.uptimeMillis()
+            val pointer = MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_MOUSE }
+            val coords = MotionEvent.PointerCoords().apply { this.x = x; this.y = y }
+            val event = MotionEvent.obtain(now, now, action, 1, arrayOf(pointer), arrayOf(coords), 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_MOUSE, 0)
+            window.decorView.dispatchGenericMotionEvent(event)
+            event.recycle()
+        }
+        val last = hoverAt
+        if (at == "off") {
+            last?.let { (x, y) -> send(MotionEvent.ACTION_HOVER_EXIT, x, y) }
+            hoverAt = null
+            return
+        }
+        val view = window.decorView
+        var from = last
+        var start = 0L
+        for (point in at.trim().split(Regex("\\s+"))) {
+            val (x, y) = point.split(',').map { it.trim().toFloat() }
+            val a = from
+            if (a == null) {
+                view.postDelayed({ send(MotionEvent.ACTION_HOVER_ENTER, x, y); send(MotionEvent.ACTION_HOVER_MOVE, x, y) }, start)
+            } else {
+                // Twelve steps, as a real mouse reports its way across the screen.
+                for (i in 1..12) {
+                    val f = i / 12f
+                    view.postDelayed({ send(MotionEvent.ACTION_HOVER_MOVE, a.first + (x - a.first) * f, a.second + (y - a.second) * f) }, start + i * 20L)
+                }
+            }
+            from = x to y
+            start += 1500L
+        }
+        hoverAt = from
+    }
 
     private fun start(id: String, login: CredentialStore.Credentials?, remember: Boolean) {
         if (!viewModel.connect(id, login, remember)) {

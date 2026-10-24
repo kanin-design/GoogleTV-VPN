@@ -40,7 +40,6 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlin.math.abs
 import kotlin.math.cos
@@ -57,9 +56,11 @@ import kotlin.math.sqrt
  * - Connected (green): your traffic goes from the device up through the network to the VPN, and
  *   on from there, by its own way, to the internet.
  * - Connecting (yellow): the link to the VPN lights up hop by hop, the VPN answers, over again.
- * - Off (red): the VPN goes dark, your traffic runs straight from the device to the internet, and
- *   the network's links shorten, flicker and break. While the kill switch blocks traffic after a
- *   drop, that straight way stays dark and nothing moves on it.
+ * - Off (red): the VPN goes dark, your traffic hops through the network straight to the internet,
+ *   around the VPN, and the network's links shorten, flicker and break. While the kill switch blocks
+ *   traffic after a drop, that way stays dark and nothing moves on it.
+ *
+ * The three stops stay still; the rest of the network wanders slowly around them.
  *
  * It keeps no pictures and no offscreen buffers: lines, circles and points, drawn on the 1280 × 720
  * design canvas at the screen's own resolution. It draws 30 times a second while it is on screen,
@@ -83,8 +84,9 @@ fun TunnelBackdrop(mode: Mode, modifier: Modifier = Modifier, covered: Boolean =
         val moving = ValueAnimator.areAnimatorsEnabled()
         var last = withFrameNanos { it }
         while (true) {
-            // 30 frames a second is plenty for a slow drift, and halves the drawing.
-            delay(20)
+            // Every other frame: 30 a second at 60 Hz, plenty for a slow drift and half the
+            // drawing. Counting frames, not milliseconds, spaces them evenly, so motion stays smooth.
+            withFrameNanos { }
             val now = withFrameNanos { it }
             // Behind panels and sheets, where little of it shows, it holds still. Every frame here
             // also redraws the panels on top, so this is most of the app's work there.
@@ -173,11 +175,12 @@ private class StatusLight {
 private class NetworkScene(private val measurer: TextMeasurer) {
     private val light = StatusLight()
 
-    // Each node rests at (bx, by) and drifts around it on its own slow loop.
+    // Each node rests at (bx, by). All but the three stops drift around it on a slow loop of their own.
     // Node 0 is this device, node 1 the VPN server and node 2 the internet.
     private val bx = FloatArray(NODES)
     private val by = FloatArray(NODES)
     private val phase = FloatArray(NODES)
+    private val pace = FloatArray(NODES)
     private val x = FloatArray(NODES)
     private val y = FloatArray(NODES)
     private val count: Int
@@ -188,6 +191,9 @@ private class NetworkScene(private val measurer: TextMeasurer) {
     private val maxHops: Int
     private val toVpn: IntArray
     private val toNet: IntArray
+
+    /** Off: the way from the device to the internet through the network, around the VPN. */
+    private val direct: IntArray
 
     private val dots = FloatArray(NODES * 2)
     private val paint = Paint().apply {
@@ -221,13 +227,19 @@ private class NetworkScene(private val measurer: TextMeasurer) {
             placed++
         }
         count = placed
+        for (i in 0 until ENDS) {
+            x[i] = bx[i]
+            y[i] = by[i]
+        }
         for (i in 0 until count) phase[i] = r() * 6.28f
+        for (i in 0 until count) pace[i] = 0.16f + r() * 0.14f
         neighbours = Array(count) { a -> (0 until count).filter { b -> b != a && dist(bx[a], by[a], bx[b], by[b]) <= LINK }.toIntArray() }
         hops = hopsFrom(0)
         maxHops = hops.maxOrNull()?.coerceAtLeast(1) ?: 1
         toVpn = shortest(0, 1)
         // The way on shares nothing with the way in but the VPN, so it never looks like a shortcut past it.
         toNet = shortest(1, 2, avoid = toVpn.toSet() - 1)
+        direct = shortest(0, 2, avoid = setOf(1))
     }
 
     /** Hops from [start] to every node. */
@@ -332,11 +344,14 @@ private class NetworkScene(private val measurer: TextMeasurer) {
         val searching = smoothstep(0.5f, 1f, e)
         val on = alive * (1 - searching)
         val drift = 0.4f + 0.6f * alive + 0.8f * searching
-        for (i in 0 until count) {
+        // The three stops stay put. Every other node wanders on its own slow, uneven loop (two
+        // waves of different speeds), so the web keeps reshaping around them.
+        for (i in ENDS until count) {
             val sag = (1 - alive) * 26f * (0.4f + 0.6f * ((by[i] - 70f) / 560f))
-            val wobble = if (i < ENDS) 0.25f else 1f
-            x[i] = bx[i] + wobble * 9f * drift * sin(t * 0.37f + phase[i])
-            y[i] = by[i] + wobble * 7f * drift * cos(t * 0.31f + phase[i] * 1.3f) + sag * if (i < ENDS) 0.3f else 1f
+            val p = pace[i]
+            val a = 16f * drift
+            x[i] = bx[i] + a * (0.72f * sin(t * p + phase[i]) + 0.28f * sin(t * p * 2.3f + phase[i] * 1.7f))
+            y[i] = by[i] + a * 0.8f * (0.72f * cos(t * p * 0.87f + phase[i] * 1.3f) + 0.28f * cos(t * p * 1.9f + phase[i] * 0.6f)) + sag
         }
         drawRect(Color(0xFF030508))
         drawCircle(field, radius = 600f, center = Offset(900f, 360f))
@@ -370,8 +385,6 @@ private class NetworkScene(private val measurer: TextMeasurer) {
     }
 
     private fun DrawScope.drawTraffic(l: Float, t: Float, alive: Float, searching: Float, on: Float) {
-        val device = Offset(x[0], y[0])
-        val net = Offset(x[2], y[2])
         val h1 = toVpn.size - 1
         val h2 = toNet.size - 1
         if (on > 0.02f) {
@@ -401,17 +414,22 @@ private class NetworkScene(private val measurer: TextMeasurer) {
             // Not on to the internet yet.
             pathLine(toNet, light.tone(0.05f * l * searching), 1.4f)
         }
-        // Off: no VPN. Your traffic goes straight from the device to the internet. While the kill
-        // switch blocks it, the way stays dark and nothing moves on it.
+        // Off: no VPN. Your traffic hops through the network straight to the internet, around
+        // the VPN. While the kill switch blocks it, the way stays dark and nothing moves on it.
         val exposed = 1 - alive
         if (exposed > 0.02f) {
             val open = exposed * flow
-            drawLine(light.tone(0.14f * l * open), device, net, strokeWidth = 10f, blendMode = BlendMode.Plus)
-            drawLine(light.core((0.12f + 0.48f * flow) * l * exposed, 0.4f), device, net, strokeWidth = 2f, blendMode = BlendMode.Plus)
+            val steps = (direct.size - 1).toFloat()
+            pathLine(direct, light.tone(0.14f * l * open), 10f)
+            pathLine(direct, light.core((0.12f + 0.48f * flow) * l * exposed, 0.4f), 2f)
             if (open > 0.02f) {
                 for (p in 0 until 3) {
-                    val f = (travel * 1.4f + p / 3f) % 1f
-                    packet(lerp(device, net, f), l * open)
+                    val u = ((travel * 1.4f + p / 3f) % 1f) * steps
+                    for (s in 4 downTo 1) {
+                        val back = u - s * 0.07f
+                        if (back > 0f) drawCircle(light.core(0.45f * l * open / (s + 1), 0.5f), radius = 2.6f, center = along(direct, back), blendMode = BlendMode.Plus)
+                    }
+                    packet(along(direct, u), l * open)
                 }
             }
         }
@@ -504,8 +522,6 @@ private class NetworkScene(private val measurer: TextMeasurer) {
             canvas.nativeCanvas.drawPoints(dots, 0, (count - ENDS) * 2, paint)
         }
     }
-
-    private fun lerp(a: Offset, b: Offset, f: Float) = Offset(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
 
     private fun dist(ax: Float, ay: Float, bx: Float, by: Float): Float {
         val dx = ax - bx
