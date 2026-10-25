@@ -447,6 +447,8 @@ Tested on the emulator against a local copy of a release (debug builds take `--e
 
 Again on 2026-10-26, connected, with the reconnect: build 12 found build 13, downloaded and checked it, and Android asked "Do you want to update this app?". After Update, the tunnel went down 4 seconds in and was connected again at 7 seconds, with nobody opening the app.
 
+An app on a USB drive that the TV uses as its own storage (adopted storage) is updated where it is. Before build 13 the install session left its location unset, and Android's default, internal storage only, refused it: "Cannot automatically move dev.shieldvpn from … to internal storage" (reported from a Google TV). Reproduced on the emulator with an adopted virtual disk; with the location set to where the app is now, build 22 on the drive updated itself to 23 and stayed on the drive. A build from before the fix cannot update itself there, so it needs the new APK installed by hand once.
+
 ## Beta build
 
 ```

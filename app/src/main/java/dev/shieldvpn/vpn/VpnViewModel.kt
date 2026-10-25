@@ -93,7 +93,14 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
                 SettingsStore.setReconnectAfterUpdate(app, up)
                 runCatching { Updates.install(app, file) }.exceptionOrNull()?.also { SettingsStore.setReconnectAfterUpdate(app, null) }
             }
-            if (failed != null) _state.update { it.copy(update = UpdateState.Failed("Android could not start the install: ${failed.message}")) }
+            if (failed != null) {
+                val why = if (failed.message.orEmpty().contains("space", ignoreCase = true)) {
+                    "There isn't room for the update where ${APP_NAME} is installed. Free some space and try again."
+                } else {
+                    "Android could not start the install: ${failed.message}"
+                }
+                _state.update { it.copy(update = UpdateState.Failed(why)) }
+            }
         }
     }
 
