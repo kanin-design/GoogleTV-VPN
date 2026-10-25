@@ -164,12 +164,12 @@ fun PhoneSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Request
             }
             PhoneKind.Backup -> actions.backupFile()?.let { PhoneBridge.Page.Download(title, lede, "$APP_FILE_NAME.${Backup.EXTENSION}", "application/octet-stream", it) }
             PhoneKind.Restore -> PhoneBridge.Page.Upload(title, lede, ".${Backup.EXTENSION},application/octet-stream,application/json", paste = false)
-            PhoneKind.Paste -> PhoneBridge.Page.Upload(title, lede, ".ovpn,.conf,text/plain", paste = true)
+            PhoneKind.Paste -> PhoneBridge.Page.Upload(title, lede, ".ovpn,.conf,text/plain", paste = true, login = true)
             PhoneKind.P12 -> PhoneBridge.Page.Upload(title, lede, ".p12,.pfx,application/x-pkcs12", paste = false)
         }
     }
     val bridge = rememberPhoneBridge(o, page) { got ->
-        val problem = actions.receive(got.name, got.bytes)
+        val problem = actions.receive(got.name, got.bytes, got.username, got.password)
         if (problem == null) close()
         problem
     }

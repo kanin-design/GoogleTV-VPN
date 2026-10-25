@@ -128,6 +128,8 @@ data class ImportReview(
     val warnings: List<String>,
     /** Why the file cannot be imported, if it cannot. */
     val problem: String? = null,
+    /** The login was typed on the phone that sent the file, not found in it. */
+    val loginFromPhone: Boolean = false,
 )
 
 data class AppSettings(

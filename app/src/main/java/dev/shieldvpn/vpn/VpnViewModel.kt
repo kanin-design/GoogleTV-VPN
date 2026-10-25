@@ -359,7 +359,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
      * A file or text from a phone or a link. A backup waits for its passphrase; anything else
      * opens the review. Returns what is wrong, for the phone to show, or null when it arrived.
      */
-    fun receive(name: String, bytes: ByteArray): String? {
+    fun receive(name: String, bytes: ByteArray, username: String = "", password: String = ""): String? {
         if (Backup.isBackup(bytes)) {
             _state.update { it.copy(pendingRestore = bytes) }
             return null
@@ -368,8 +368,12 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(pendingP12 = bytes) }
             return null
         }
-        val review = ServerStore.review(name.ifBlank { "pasted.ovpn" }, bytes)
+        var review = ServerStore.review(name.ifBlank { "pasted.ovpn" }, bytes)
         if (review.problem != null) return review.problem
+        // A login typed on the phone goes with a profile that asks for one and does not hold it.
+        if (review.needsLogin && review.username.isEmpty() && username.isNotBlank()) {
+            review = review.copy(username = username.trim(), password = password, loginFromPhone = true)
+        }
         _state.update { it.copy(review = review) }
         return null
     }

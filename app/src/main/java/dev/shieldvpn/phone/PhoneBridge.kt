@@ -38,8 +38,11 @@ class PhoneBridge private constructor(
         val title: String
         val lede: String
 
-        /** Pick a file or paste its text, and send it to the TV. */
-        data class Upload(override val title: String, override val lede: String, val accept: String, val paste: Boolean) : Page
+        /**
+         * Pick a file or paste its text, and send it to the TV. With [login], a profile that asks
+         * for a username and password gets a next step for them, and they go with the file.
+         */
+        data class Upload(override val title: String, override val lede: String, val accept: String, val paste: Boolean, val login: Boolean = false) : Page
 
         /** Type into a field on the TV. */
         data class Type(override val title: String, override val lede: String, val label: String, val secret: Boolean) : Page
@@ -48,8 +51,8 @@ class PhoneBridge private constructor(
         data class Download(override val title: String, override val lede: String, val fileName: String, val mime: String, val body: ByteArray) : Page
     }
 
-    /** What the phone sent: a file's name and bytes, or the text typed or pasted. */
-    data class Received(val name: String, val bytes: ByteArray)
+    /** What the phone sent: a file's name and bytes, or the text typed or pasted, and a login typed with a profile. */
+    data class Received(val name: String, val bytes: ByteArray, val username: String = "", val password: String = "")
 
     /** The address to open on the phone, with the code in it. */
     val url: String get() = "http://$address/?c=$code"
@@ -111,7 +114,9 @@ class PhoneBridge private constructor(
                 if (length > MAX_BODY) return send(out, 413, "text/plain", "That file is too large for a profile.".toByteArray())
                 val body = readExactly(input, length) ?: return
                 val name = URLDecoder.decode(headers["x-name"].orEmpty(), "UTF-8").take(120)
-                val problem = onReceive(Received(name, body))
+                val username = URLDecoder.decode(headers["x-user"].orEmpty(), "UTF-8").take(256)
+                val password = URLDecoder.decode(headers["x-pass"].orEmpty(), "UTF-8").take(256)
+                val problem = onReceive(Received(name, body, username, password))
                 if (problem == null) send(out, 200, "text/plain", "Sent. Look at the TV.".toByteArray())
                 else send(out, 422, "text/plain", problem.toByteArray())
             }

@@ -9,7 +9,7 @@ An OpenVPN client for Android TV and Google TV, made for the remote. ("OpenVPN c
 ## What it does
 
 - **Connects with one press.** Connect shows the current profile, large, with the button you most likely want already focused. Quick connect cards below switch profiles. The background shows where your traffic goes: green from this device through your VPN to the internet while connected, yellow while it connects, and red straight to the internet when off.
-- **Imports profiles without typing.** Scan a QR code with your phone and pick or paste the `.ovpn` file there, or use a USB drive, Downloads or an HTTPS link. Every file is checked before it is saved, and a login inside the file is moved out of it and encrypted.
+- **Imports profiles without typing.** Scan a QR code with your phone and pick or paste the `.ovpn` file there (a profile that asks for a username and password asks for them on the phone too, and they arrive with it), or use a USB drive, Downloads or an HTTPS link. Every file is checked before it is saved, and a login inside the file is moved out of it and encrypted.
 - **Client certificates.** A `.p12` or `.pfx` file goes into the profile, or into Android's keystore, where the key can sign in but can't be copied off the device. A certificate already installed on the device works too.
 - **Protection.** A kill switch, IPv6 and DNS leak blocking, and the choice to keep casting and devices at home reachable.
 - **Per-app routing.** Let streaming services that block VPNs skip it, or send only the apps you choose through it.

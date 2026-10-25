@@ -102,8 +102,8 @@ interface TunnelActions {
     fun clearLog()
     fun resetAll()
 
-    /** A file or text from a phone. Returns what is wrong with it, or null when it arrived. */
-    fun receive(name: String, bytes: ByteArray): String?
+    /** A file or text from a phone, and a login typed with it. Returns what is wrong with it, or null when it arrived. */
+    fun receive(name: String, bytes: ByteArray, username: String = "", password: String = ""): String?
     suspend fun download(url: String, username: String?, password: String?): String?
     fun cancelRestore()
     suspend fun restore(passphrase: String): Backup.Restored

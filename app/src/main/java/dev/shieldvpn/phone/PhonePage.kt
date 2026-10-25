@@ -12,7 +12,7 @@ object PhonePage {
     fun html(page: PhoneBridge.Page, code: String): String {
         val given = code.filter { it.isDigit() }.take(6)
         val body = when (page) {
-            is PhoneBridge.Page.Upload -> upload(page.accept, page.paste)
+            is PhoneBridge.Page.Upload -> upload(page.accept, page.paste, page.login)
             is PhoneBridge.Page.Type -> typed(page.label, page.secret)
             is PhoneBridge.Page.Download -> download(page.fileName, page.body.size)
         }
@@ -52,7 +52,11 @@ $SCRIPT
     <input id="code" class="codein" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000"></section>"""
     }
 
-    private fun upload(accept: String, paste: Boolean): String {
+    /**
+     * Pick a file or paste it. With [login], a profile that asks for a username and password
+     * (checked here, as the TV checks it) gets a second step for them before it is sent.
+     */
+    private fun upload(accept: String, paste: Boolean, login: Boolean): String {
         val what = "The ${kinds(accept)}"
         val modes = if (paste) {
             """<div class="seg" role="group"><button id="modeFile" type="button" aria-pressed="true">File</button><button id="modePaste" type="button" aria-pressed="false">Paste text</button></div>"""
@@ -64,11 +68,24 @@ $SCRIPT
         } else {
             ""
         }
-        return """$modes
+        val signIn = if (login) {
+            """
+    <div id="step2" hidden>
+      <div class="file chosen"><span class="icon">${doc("#4BE3A1")}</span><span class="txt"><b id="step2Name"></b><small id="step2Sub"></small></span><button id="back" class="link" type="button">Change</button></div>
+      <label class="lbl" for="user">Username</label>
+      <div class="fieldrow"><input id="user" class="field" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="username"></div>
+      <label class="lbl" for="pass">Password</label>
+      <div class="fieldrow"><input id="pass" class="field" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="current-password"><button id="eye2" class="eye" type="button" aria-label="Show">$EYE</button></div>
+      <p class="hint">Saved with the profile on the TV, encrypted. Leave them empty to type them on the TV when you connect.</p>
+    </div>"""
+        } else {
+            ""
+        }
+        return """<div id="step1">$modes
     <label class="pick" id="pick"><input id="file" type="file" accept="${esc(accept)}"><span class="icon">${doc("rgba(235,242,248,.8)")}</span>
       <span class="txt"><b id="pickName">Choose a file</b><small id="pickSub" data-sub="${esc(what)}">${esc(what)}</small></span><span class="change" id="pickChange" hidden>Change</span></label>
-    $area
-    <button id="go" class="btn" type="button" disabled>Send to the TV$ARROW</button>"""
+    $area</div>$signIn
+    <button id="go" class="btn" type="button" disabled><span id="goLabel">Send to the TV</span>$ARROW</button>"""
     }
 
     private fun typed(label: String, secret: Boolean): String {
@@ -166,6 +183,11 @@ textarea::placeholder,.field::placeholder{color:rgba(235,242,248,.28)}
 .file{display:flex;align-items:center;gap:14px}
 .file b{display:block;font-size:16px;font-weight:650;word-break:break-all}
 .file small{color:var(--faint);font-size:13.5px}
+.file .txt{min-width:0;flex:1}
+.chosen{margin-bottom:20px}
+.link{padding:8px 4px;border:0;background:none;color:var(--mint);font-family:inherit;font-size:14.5px;font-weight:650;cursor:pointer}
+.fieldrow+.lbl{margin-top:16px}
+.hint{margin:12px 2px 0;color:var(--faint);font-size:13.5px}
 .btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;margin-top:16px;padding:17px;border:0;border-radius:999px;background:#F4F7FA;color:#071018;font-family:inherit;font-size:17px;font-weight:700;line-height:1;text-decoration:none;cursor:pointer;transition:transform .12s,opacity .2s}
 .btn:active{transform:scale(.98)}
 .btn:disabled{opacity:.35}
@@ -194,10 +216,22 @@ const status = (kind, text) => {
   s.lastChild.textContent = text;
 };
 const size = (n) => n < 1024 ? n + ' bytes' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
-const file = ${'$'}('file'), text = ${'$'}('text'), go = ${'$'}('go');
+const file = ${'$'}('file'), text = ${'$'}('text'), go = ${'$'}('go'), step2 = ${'$'}('step2');
 let mode = file ? 'file' : 'text';
-const ready = () => code().length === 6 && (mode === 'file' ? !!(file.files && file.files[0]) : !!(text && text.value.trim()));
+// A profile asks for a login when it has an auth-user-pass line and no login inside it, as the TV reads it.
+let needsLogin = false;
+const asksLogin = (t) => !/<auth-user-pass>[\s\S]*?<\/auth-user-pass>/.test(t) && /^[ \t]*auth-user-pass\b/m.test(t);
+const onStep2 = () => !!step2 && !step2.hidden;
+const label = () => { if (${'$'}('goLabel')) ${'$'}('goLabel').textContent = needsLogin && !onStep2() ? 'Next' : 'Send to the TV'; };
+const ready = () => code().length === 6 && (onStep2() || (mode === 'file' ? !!(file.files && file.files[0]) : !!(text && text.value.trim())));
 const update = () => { if (go) go.disabled = !ready(); };
+const check = async () => {
+  if (!step2) return;
+  const f = mode === 'file' && file.files && file.files[0];
+  const t = mode === 'file' ? (f && f.size < 524288 ? await f.text() : '') : text.value;
+  needsLogin = asksLogin(t);
+  label();
+};
 const codeIn = ${'$'}('code');
 if (codeIn) codeIn.oninput = () => {
   const d = codeIn.value.replace(/\D/g, '').slice(0, 6);
@@ -210,7 +244,7 @@ const showFile = (name, bytes) => {
   ${'$'}('pickSub').textContent = name ? size(bytes) : ${'$'}('pickSub').dataset.sub;
   ${'$'}('pickChange').hidden = !name;
 };
-if (file) file.onchange = () => { const f = file.files[0]; showFile(f && f.name, f && f.size); update(); };
+if (file) file.onchange = () => { const f = file.files[0]; showFile(f && f.name, f && f.size); update(); check(); };
 const setMode = (m) => {
   mode = m;
   ${'$'}('modeFile').setAttribute('aria-pressed', m === 'file');
@@ -218,17 +252,45 @@ const setMode = (m) => {
   ${'$'}('pick').hidden = m !== 'file';
   text.hidden = m !== 'text';
   update();
+  check();
 };
 if (${'$'}('modeFile')) { ${'$'}('modeFile').onclick = () => setMode('file'); ${'$'}('modePaste').onclick = () => { setMode('text'); text.focus(); }; }
-if (text) { text.oninput = update; text.onkeydown = (e) => { if (e.key === 'Enter' && text.tagName === 'INPUT' && go && !go.disabled) go.click(); }; }
+if (text) { text.oninput = () => { update(); check(); }; text.onkeydown = (e) => { if (e.key === 'Enter' && text.tagName === 'INPUT' && go && !go.disabled) go.click(); }; }
 if (${'$'}('eye')) ${'$'}('eye').onclick = () => { text.type = text.type === 'password' ? 'text' : 'password'; text.focus(); };
+const lede = document.querySelector('.lede'), ledeText = lede.textContent;
+const showStep = (two) => {
+  ${'$'}('step1').hidden = two;
+  step2.hidden = !two;
+  lede.textContent = two ? 'It asks for a username and password. Type them here, and they go to the TV with it.' : ledeText;
+  if (two) {
+    const f = mode === 'file' && file.files[0];
+    ${'$'}('step2Name').textContent = f ? f.name : 'Pasted profile';
+    ${'$'}('step2Sub').textContent = size(f ? f.size : new Blob([text.value]).size);
+    ${'$'}('user').focus();
+  }
+  ${'$'}('status').className = 'status';
+  label();
+  update();
+};
+if (step2) {
+  ${'$'}('back').onclick = () => showStep(false);
+  ${'$'}('eye2').onclick = () => { const p = ${'$'}('pass'); p.type = p.type === 'password' ? 'text' : 'password'; p.focus(); };
+  ${'$'}('pass').onkeydown = (e) => { if (e.key === 'Enter' && !go.disabled) go.click(); };
+}
 if (go) go.onclick = async () => {
+  if (needsLogin && step2 && !onStep2()) return showStep(true);
   const f = mode === 'file' && file.files[0];
+  const headers = { 'X-Code': code(), 'X-Name': encodeURIComponent(f ? f.name : 'pasted.ovpn') };
+  if (onStep2() && ${'$'}('user').value.trim()) {
+    headers['X-User'] = encodeURIComponent(${'$'}('user').value.trim());
+    headers['X-Pass'] = encodeURIComponent(${'$'}('pass').value);
+  }
   go.disabled = true;
   status('busy', 'Sending…');
   try {
-    const r = await fetch('/send', { method: 'POST', headers: { 'X-Code': code(), 'X-Name': encodeURIComponent(f ? f.name : 'pasted.ovpn') }, body: f || text.value });
+    const r = await fetch('/send', { method: 'POST', headers, body: f || text.value });
     status(r.ok ? 'ok' : 'bad', await r.text());
+    if (r.ok && step2) ${'$'}('pass').value = '';
   } catch (e) {
     status('bad', 'The TV did not answer. Is its screen still open?');
   }

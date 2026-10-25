@@ -92,6 +92,8 @@ Opens when a row is selected, and animates in over the list.
 4. A server and a connection are created. The name comes from the file name, so `client.ovpn` becomes "Client".
 5. If the file holds a username and password, they are filled in. If not, they are left empty, and Connect asks for them (UC-04).
 
+From a phone, the page checks the file the same way when it is picked or pasted. If it asks for a username and password and holds none, the button says Next, and a second step on the phone asks for them; Send to the TV sends them with the file. The review says "Certificate + password · name, from your phone", and Save keeps the login with the profile, so Connect needs nothing more. Left empty, they are asked for when connecting, as before. Tested 2026-10-26 in a phone-sized browser against the emulator: a profile with `auth-user-pass` got Next, one without it or with the login inside sent at once, pasted text the same, and the saved profile connected without asking.
+
 **Failures:** not an OpenVPN file, over 256 KB, or no `remote` line. Show the message on Connections and save nothing (UC-21).
 
 ### UC-03: Add a server and connection manually

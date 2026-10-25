@@ -307,7 +307,8 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override fun resetAll() = viewModel.resetAll()
 
-    override fun receive(name: String, bytes: ByteArray): String? = viewModel.receive(name, bytes)
+    override fun receive(name: String, bytes: ByteArray, username: String, password: String): String? =
+        viewModel.receive(name, bytes, username, password)
 
     override suspend fun download(url: String, username: String?, password: String?): String? = viewModel.download(url, username, password)
 

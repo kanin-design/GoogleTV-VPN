@@ -263,10 +263,10 @@ private fun ColumnScope.PhonePanel(actions: TunnelActions, req: Requesters) {
     val page = remember {
         dev.shieldvpn.phone.PhoneBridge.Page.Upload(
             "Send a profile to the TV", "Pick the .ovpn file, or paste its text. The TV shows it to you before it is saved.",
-            ".ovpn,.conf,.${dev.shieldvpn.vpn.Backup.EXTENSION},text/plain,application/octet-stream", paste = true,
+            ".ovpn,.conf,.${dev.shieldvpn.vpn.Backup.EXTENSION},text/plain,application/octet-stream", paste = true, login = true,
         )
     }
-    val bridge = rememberPhoneBridge(ImportMethod.Phone, page) { got -> actions.receive(got.name, got.bytes) }
+    val bridge = rememberPhoneBridge(ImportMethod.Phone, page) { got -> actions.receive(got.name, got.bytes, got.username, got.password) }
     PanelHeading("From your phone", "Send it from your phone")
     Box(Modifier.padding(top = 22.dp)) {
         PhoneCode(
@@ -419,6 +419,8 @@ private fun ColumnScope.ReviewPanel(
             listOf(
                 "Server" to "${review.host} · ${review.protocol.label} ${review.port}",
                 "Sign-in" to when {
+                    review.loginFromPhone && hasClientCert -> "Certificate + password · ${review.username}, from your phone"
+                    review.loginFromPhone -> "Username + password · ${review.username}, from your phone"
                     review.needsLogin && hasClientCert -> "Certificate + password"
                     review.needsLogin -> "Username + password"
                     hasClientCert -> "Certificate"
@@ -433,6 +435,7 @@ private fun ColumnScope.ReviewPanel(
     } else {
         val note = when {
             review.needsLogin && review.username.isEmpty() -> " Asks for a username and password when you connect."
+            review.loginFromPhone -> " The login from your phone is saved with it, encrypted."
             review.needsLogin -> " The login in the file is saved, encrypted, and taken out of the file."
             else -> ""
         }
