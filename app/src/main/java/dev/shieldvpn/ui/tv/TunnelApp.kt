@@ -224,6 +224,9 @@ class Nav {
     var contentFocus by mutableStateOf<Screen?>(null)
     var tabFocus by mutableStateOf(false)
 
+    /** The remote's focus is on the tabs, so Back from the Connect tab leaves the app. */
+    var onTabs by mutableStateOf(false)
+
     var toast by mutableStateOf<String?>(null)
     var toastCount by mutableIntStateOf(0)
 
@@ -533,7 +536,9 @@ private fun back(nav: Nav, state: VpnUiState, actions: TunnelActions): Boolean {
             return true
         }
     }
-    if (!nav.tabFocus) {
+    // Up to the tabs first. With nothing focused (a mouse click puts Android in touch mode, which
+    // refuses focus) there is nothing to step up from, so Back goes on.
+    if (!nav.onTabs && anyItemFocused()) {
         nav.tabFocus = true
         return true
     }
@@ -688,6 +693,7 @@ private fun TopBar(nav: Nav) {
             Row(
                 // Up from a screen lands on that screen's tab, not on whichever tab is nearest.
                 modifier = Modifier
+                    .onFocusChanged { nav.onTabs = it.hasFocus }
                     .focusProperties { enter = { tabs[nav.screen.name] } }
                     .focusGroup()
                     .padding(6.dp),
@@ -732,8 +738,9 @@ private fun TabItem(label: String, selected: Boolean, focusRequester: FocusReque
                 },
             )
             .onKeyEvent { e ->
-                // Down from a tab goes into the screen, wherever its content starts.
-                if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionDown) {
+                // Down from a tab goes into the screen, wherever its content starts; so does Up,
+                // as nothing is above the tabs.
+                if (e.type == KeyEventType.KeyDown && (e.key == Key.DirectionDown || e.key == Key.DirectionUp)) {
                     onEnter()
                     true
                 } else {
