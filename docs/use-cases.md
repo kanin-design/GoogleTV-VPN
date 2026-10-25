@@ -409,7 +409,7 @@ Keep it this way: no cached full-screen bitmaps, no per-item thumbnails, small a
 
 ## The app's name
 
-"Tunnel" is a working name. It lives in one place, `appName` in `gradle.properties`. The build makes it the home-screen label (`app_name`) and `BuildConfig.APP_NAME`, which code reads as `APP_NAME` (`AppName.kt`): every sentence that names the app, the notification, the VPN session Android shows, the phone page, and exported files (`APP_FILE_NAME`: `tunnel-log.txt`, `tunnel.tunnelbackup`). The TV banner and the launcher icon don't carry the name: until the app has a real logo they are a placeholder, "VPN" on a teal gradient, drawn by:
+"OpenVPN client" is a working name (it was "Tunnel"). It lives in one place, `appName` in `gradle.properties`. The build makes it the home-screen label (`app_name`) and `BuildConfig.APP_NAME`, which code reads as `APP_NAME` (`AppName.kt`): every sentence that names the app, the notification, the VPN session Android shows, the phone page, and exported files (`APP_FILE_NAME`: `openvpnclient-log.txt`, `openvpnclient.openvpnclientbackup`; a `.tunnelbackup` from before still restores, as a backup is known by what is inside). The TV banner and the launcher icon don't carry the name: until the app has a real logo they are a placeholder, "VPN" on a teal gradient, drawn by:
 
 ```
 python3 tools/banner.py Archivo-ExpandedBlack.ttf

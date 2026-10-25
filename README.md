@@ -1,8 +1,8 @@
-# Tunnel
+# OpenVPN client
 
-An OpenVPN client for Android TV and Google TV, made for the remote. ("Tunnel" is a working name.)
+An OpenVPN client for Android TV and Google TV, made for the remote. ("OpenVPN client" is a working name; it was "Tunnel".)
 
-![Tunnel on the TV's home screen](app/src/main/res/drawable-xxxhdpi/banner.png)
+![The app on the TV's home screen](app/src/main/res/drawable-xxxhdpi/banner.png)
 
 ![Connected, with Quick connect below](docs/screenshots/connect.png)
 
@@ -39,12 +39,12 @@ The screenshots use demo profiles on the Android TV emulator. The speed test is 
 Download the APK from [Releases](https://github.com/kanin-design/GoogleTV-VPN/releases) and sideload it: with `adb install`, or with a downloader app on the device.
 
 ```
-adb install tunnel-0.1.0-beta-arm64.apk
+adb install openvpnclient-0.1.0-beta-arm64.apk
 ```
 
 It needs Android TV or Google TV on Android 9 or newer, on ARM. There is one APK for each kind of chip: `arm64` for 64-bit Android, such as the NVIDIA Shield, and `armv7` for 32-bit Android, which some Google TV devices run, the Chromecast with Google TV among them. If you are not sure, `adb shell getprop ro.product.cpu.abi` says which: `arm64-v8a` or `armeabi-v7a`.
 
-Later builds install from the app, in Settings › About › Updates. The first time, Android asks you to allow Tunnel to install apps.
+Later builds install from the app, in Settings › About › Updates. The first time, Android asks you to allow the app to install apps.
 
 This is a beta, signed with a development key. A later build signed with a release key will need the beta uninstalled first. Back up your profiles before that (Settings › Backup).
 
@@ -85,7 +85,7 @@ python3 tools/banner.py Archivo-ExpandedBlack.ttf
 
 - The [OpenVPN 3](https://github.com/OpenVPN/openvpn3) core in C++ with OpenSSL 3.5, through JNI (`app/src/main/cpp`).
 - Jetpack Compose on Compose's foundation only, without the Material library.
-- Drawn at the screen's full resolution, never upscaled. Android TV gives every app a 1920 × 1080 window, even on a 4K TV, and the TV scales that to 4K, as it does the home screen and every other app. Tunnel fills that window pixel for pixel, and a 4K window if a TV offers one. Its layout is measured in design units, 1280 × 720 of them to the screen, but units aren't pixels: 1.5 pixels a unit at 1080p, 3 at 4K.
+- Drawn at the screen's full resolution, never upscaled. Android TV gives every app a 1920 × 1080 window, even on a 4K TV, and the TV scales that to 4K, as it does the home screen and every other app. The app fills that window pixel for pixel, and a 4K window if a TV offers one. Its layout is measured in design units, 1280 × 720 of them to the screen, but units aren't pixels: 1.5 pixels a unit at 1080p, 3 at 4K.
 - The VPN service runs in its own process (`:vpn`) and tells the screens about the tunnel over a Binder (`vpn/VpnLink.kt`).
 - [docs/use-cases.md](docs/use-cases.md) has the behaviour, test notes and measurements of memory and CPU.
 
