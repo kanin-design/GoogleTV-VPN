@@ -71,6 +71,25 @@ object SettingsStore {
             .apply()
     }
 
+    /**
+     * The profile whose tunnel an update from Settings › About ends, to connect again once the new
+     * build is in. Written at once (commit), because the installer ends this process right after.
+     */
+    @android.annotation.SuppressLint("ApplySharedPref")
+    fun setReconnectAfterUpdate(context: Context, id: String?) {
+        val edit = prefs(context).edit()
+        if (id == null) edit.remove("reconnectAfterUpdate") else edit.putString("reconnectAfterUpdate", "$id ${System.currentTimeMillis()}")
+        edit.commit()
+    }
+
+    /** Takes that profile, if the update was in the last ten minutes. */
+    fun takeReconnectAfterUpdate(context: Context): String? {
+        val saved = prefs(context).getString("reconnectAfterUpdate", null) ?: return null
+        setReconnectAfterUpdate(context, null)
+        val at = saved.substringAfterLast(' ').toLongOrNull() ?: return null
+        return saved.substringBeforeLast(' ').takeIf { System.currentTimeMillis() - at < 10 * 60 * 1000L }
+    }
+
     /** The profile Connect shows. */
     fun activeConnection(context: Context): String? = prefs(context).getString("activeConnection", null)
 

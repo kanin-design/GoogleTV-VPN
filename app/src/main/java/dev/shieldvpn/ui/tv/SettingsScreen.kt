@@ -901,6 +901,7 @@ private fun StartupPick(state: VpnUiState, nav: Nav, actions: TunnelActions, req
         items(state.connections.size) { i ->
             val c = state.connections[i]
             val needs = state.infoOf(c)?.needsLogin != false
+            val cert = c.keyAlias != null || state.infoOf(c)?.clientCert == true
             val ok = !state.asksForLogin(c)
             ListRow(
                 c.name,
@@ -915,7 +916,8 @@ private fun StartupPick(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 subtitle = when {
                     !ok -> "Save its password first"
                     needs -> "Password saved · connects by itself"
-                    else -> "Certificate · connects by itself"
+                    cert -> "Certificate · connects by itself"
+                    else -> "No certificate or password in its file"
                 },
                 kind = RowKind.Pick,
                 selected = c.id == current,

@@ -54,11 +54,13 @@
         </activity>
 
         <!-- Settings › Automation: other apps start .Connect (with an optional "profile" name) or .Disconnect. -->
+        <!-- A task of its own, so a command never brings the app's screens over what is playing. -->
         <activity
             android:name=".AutomationActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:noHistory="true"
+            android:taskAffinity=""
             android:theme="@android:style/Theme.NoDisplay" />
         <activity-alias
             android:name=".Connect"
@@ -82,6 +84,15 @@
         <receiver
             android:name=".vpn.UpdateReceiver"
             android:exported="false" />
+
+        <!-- After an update from the app, connects again the tunnel that installing it ended (vpn/Updates.kt). -->
+        <receiver
+            android:name=".vpn.UpdatedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- A foreground service while it owns a tunnel, so it can connect with the screen
              asleep or another app open, and stays alive through a pause. It runs in its own

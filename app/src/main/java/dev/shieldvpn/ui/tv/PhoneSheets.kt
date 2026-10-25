@@ -199,7 +199,7 @@ fun PassphraseSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Re
     var show by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    TypeInto(nav, { value = value.dropLast(1) }) { ch -> value = (value + ch).take(64) }
+    TypeInto(nav, { value = value.dropLast(1) }, onEnter = { req["ov-go"].takeFocus() }) { ch -> value = (value + ch).take(64) }
     val go: () -> Unit = {
         when {
             busy -> Unit
@@ -302,7 +302,7 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
             }
         }
     }
-    TypeInto(nav, { digits = digits.dropLast(1) }) { ch -> if (ch.isDigit() && digits.length < 8) digits += ch }
+    TypeInto(nav, { digits = digits.dropLast(1) }, onEnter = { submit(); true }) { ch -> if (ch.isDigit() && digits.length < 8) digits += ch }
     Sheet(460f) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(title, style = TvType.display(30f))
@@ -353,7 +353,7 @@ fun TextSheet(nav: Nav, req: Requesters, o: Overlay.Text, close: () -> Unit) {
     var value by remember { mutableStateOf(o.initial) }
     var shift by remember { mutableStateOf(false) }
     val secret = o.kind == TextKind.LinkPass
-    TypeInto(nav, { value = value.dropLast(1) }) { ch -> value = (value + ch).take(400) }
+    TypeInto(nav, { value = value.dropLast(1) }, onEnter = { req["ov-go"].takeFocus() }) { ch -> value = (value + ch).take(400) }
     val page = remember(o.kind) { PhoneBridge.Page.Type(o.kind.title, "Type it here, then press Send. It appears on the TV.", o.kind.label, secret) }
     val bridge = rememberPhoneBridge(o, page) { got ->
         value = String(got.bytes).trim().take(400)
@@ -408,7 +408,7 @@ fun P12Sheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requester
         actions.cancelP12()
         close()
     }
-    if (!opened) TypeInto(nav, { password = password.dropLast(1) }) { ch -> password = (password + ch).take(64) }
+    if (!opened) TypeInto(nav, { password = password.dropLast(1) }, onEnter = { req["ov-go"].takeFocus() }) { ch -> password = (password + ch).take(64) }
     Sheet(820f) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(if (opened) "Add the certificate to a profile" else "Certificate password", style = TvType.display(34f))

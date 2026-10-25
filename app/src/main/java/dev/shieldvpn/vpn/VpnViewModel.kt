@@ -82,9 +82,18 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             _state.update { it.copy(update = UpdateState.Installing(build)) }
-            withContext(Dispatchers.IO) { runCatching { Updates.install(app, file) } }.onFailure { e ->
-                _state.update { it.copy(update = UpdateState.Failed("Android could not start the install: ${e.message}")) }
+            // Installing ends the tunnel along with this process; the new build connects it again.
+            val up = when (val s = _state.value.status) {
+                is VpnStatus.Connected -> s.connectionId
+                is VpnStatus.Connecting -> s.connectionId
+                is VpnStatus.Blocked -> s.connectionId
+                else -> null
             }
+            val failed = withContext(Dispatchers.IO) {
+                SettingsStore.setReconnectAfterUpdate(app, up)
+                runCatching { Updates.install(app, file) }.exceptionOrNull()?.also { SettingsStore.setReconnectAfterUpdate(app, null) }
+            }
+            if (failed != null) _state.update { it.copy(update = UpdateState.Failed("Android could not start the install: ${failed.message}")) }
         }
     }
 

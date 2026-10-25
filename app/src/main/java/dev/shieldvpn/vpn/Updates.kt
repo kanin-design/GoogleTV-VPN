@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.net.VpnService
 import android.os.Build
 import androidx.core.content.IntentCompat
 import dev.shieldvpn.APP_NAME
@@ -147,17 +148,34 @@ object Updates {
 /** How an update's install went. Android may want the user to confirm it first. */
 class UpdateReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+        when (val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 val confirm = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java) ?: return
                 context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
             // Android replaces the app and ends its processes; nothing more to do here.
             PackageInstaller.STATUS_SUCCESS -> Unit
-            PackageInstaller.STATUS_FAILURE_ABORTED -> Updates.installFailure.value = "The update was cancelled."
-            PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
-                Updates.installFailure.value = "This build can't replace the installed one: it was signed with another key."
-            else -> Updates.installFailure.value = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Android could not install the update."
+            else -> {
+                // The old build stays, so its tunnel never ended: nothing to connect again.
+                SettingsStore.setReconnectAfterUpdate(context, null)
+                Updates.installFailure.value = when (status) {
+                    PackageInstaller.STATUS_FAILURE_ABORTED -> "The update was cancelled."
+                    PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
+                        "This build can't replace the installed one: it was signed with another key."
+                    else -> intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Android could not install the update."
+                }
+            }
         }
+    }
+}
+
+/** The new build is in: connects again the tunnel that installing it ended, as the boot receiver does. */
+class UpdatedReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        val id = SettingsStore.takeReconnectAfterUpdate(context) ?: return
+        if (VpnService.prepare(context) != null) return
+        val plan = Tunnels.plan(context, id) as? Tunnels.Plan.Ready ?: return
+        Tunnels.start(context, plan)
     }
 }

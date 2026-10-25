@@ -733,18 +733,26 @@ fun BoxScope.TvToast(message: String?) {
 
 /**
  * Lets a real keyboard (or adb) type into a text field while it is on screen: Backspace deletes,
- * characters are added. It works wherever focus is, because the app root hands keys to it.
+ * characters are added, and Enter does what the on-screen Done does ([onEnter], true when it
+ * did something). It works wherever focus is, because the app root hands keys to it.
  */
 @Composable
-fun TypeInto(nav: Nav, onDelete: () -> Unit, onChar: (Char) -> Unit) {
+fun TypeInto(nav: Nav, onDelete: () -> Unit, onEnter: () -> Boolean = { false }, onChar: (Char) -> Unit) {
     val delete by rememberUpdatedState(onDelete)
+    val enter by rememberUpdatedState(onEnter)
     val char by rememberUpdatedState(onChar)
     DisposableEffect(nav) {
+        var entered = false
         val handler: (KeyEvent) -> Boolean = { e ->
             when {
                 e.key == Key.Backspace -> {
                     if (e.type == KeyEventType.KeyDown) delete()
                     true
+                }
+                // A remote's OK can be Enter too, and presses the focused key; a keyboard's Enter is Done.
+                (e.key == Key.Enter || e.key == Key.NumPadEnter) && e.fromKeyboard -> {
+                    if (e.type == KeyEventType.KeyDown) entered = enter()
+                    entered
                 }
                 e.type == KeyEventType.KeyDown && e.utf16CodePoint >= 32 -> {
                     char(e.utf16CodePoint.toChar())
@@ -757,6 +765,13 @@ fun TypeInto(nav: Nav, onDelete: () -> Unit, onChar: (Char) -> Unit) {
         onDispose { nav.typists.remove(handler) }
     }
 }
+
+/** The key came from a keyboard with letters, not from a remote. */
+private val KeyEvent.fromKeyboard: Boolean
+    get() = nativeKeyEvent.device?.keyboardType == android.view.InputDevice.KEYBOARD_TYPE_ALPHABETIC
+
+/** Moves focus to this requester's item unless it has it already. True when focus moved. */
+fun FocusRequester.takeFocus(): Boolean = !hasFocusNow && tryFocus()
 
 /**
  * Focus coming into this column from beside it lands on [target], its selected row, instead of

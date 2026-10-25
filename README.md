@@ -16,9 +16,9 @@ An OpenVPN client for Android TV and Google TV, made for the remote. ("OpenVPN c
 - **Speed test.** Ping, download and upload through the VPN, on a speedometer, with whether it is fast enough for 4K or HD and how much of your plain connection the VPN keeps.
 - **Everyday controls.** Pause for 15 minutes, connect when the device starts, and reconnect by itself after Wi-Fi changes. There are a connection test, a connection log and connection details.
 - **Backups.** One encrypted file (PBKDF2 and AES-GCM) moves every profile, saved password and setting to a new device through your phone.
-- **Updates.** Each time it opens, it looks on GitHub for a newer build, by build number, so a build republished under the same version counts too. Settings › About downloads the APK for the device, checks its SHA-256 and installs it; Android asks you to confirm.
+- **Updates.** Each time it opens, it looks on GitHub for a newer build, by build number, so a build republished under the same version counts too. Settings › About downloads the APK for the device, checks its SHA-256 and installs it; Android asks you to confirm. If the VPN was on, it connects again once the new build is in.
 - **PIN lock** for settings or the whole app, and **automation intents** for home automation apps and ADB.
-- **Remote, keyboard or mouse.** Everything works with the remote; a keyboard types into fields, and a mouse can click anything.
+- **Remote, keyboard or mouse.** Everything works with the remote; a keyboard types into fields (Enter moves on, as Done does), and a mouse can click anything.
 - **Light on the device.** The VPN runs in its own small process (about 15 MB, measured on the Android TV emulator). The screens close themselves ten minutes after you leave them, so the device gets that memory back while you watch.
 
 ## Screenshots

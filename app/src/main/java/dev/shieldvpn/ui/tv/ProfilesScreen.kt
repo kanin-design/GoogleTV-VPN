@@ -812,7 +812,7 @@ private fun EditorBody(
             }
         }
     }
-    TypeInto(nav, { editor.type(TvKey.Del) }) { ch -> editor.values[editor.field] = (editor.values[editor.field].orEmpty() + ch).take(64) }
+    TypeInto(nav, { editor.type(TvKey.Del) }, onEnter = { req["ed-save"].takeFocus() }) { ch -> editor.values[editor.field] = (editor.values[editor.field].orEmpty() + ch).take(64) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             editor.keys.forEach { key ->

@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import dev.shieldvpn.vpn.VpnController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -192,7 +193,7 @@ private fun SignInSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req
         null
     }
     Sheet(1100f) {
-        TypeInto(nav, { edit { it.dropLast(1) } }) { ch -> edit { (it + ch).take(64) } }
+        TypeInto(nav, { edit { it.dropLast(1) } }, onEnter = { req["ov-go"].takeFocus() }) { ch -> edit { (it + ch).take(64) } }
         Row(horizontalArrangement = Arrangement.spacedBy(34.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column {
@@ -263,6 +264,8 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
             // A call into the VPN's process, so not on the main thread.
             bytes = withContext(Dispatchers.IO) { VpnController.stats?.invoke() }
             delay(2000)
+            // Not while the app is hidden: the frame clock stops with it.
+            withFrameNanos { }
         }
     }
     Box(Modifier.padding(top = 124.dp, end = 64.dp, bottom = 36.dp).width(540.dp)) {

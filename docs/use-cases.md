@@ -154,7 +154,7 @@ Opens when a row is selected, and animates in over the list.
 ### UC-10: Duplicate a connection
 
 1. Open the panel and press **Duplicate**.
-2. A copy appears, named "Name (copy)", with the same server and login. Its panel opens with focus on Name.
+2. A copy appears in the list, named "Name (copy)", with the same server and login. Focus stays on Duplicate, and a toast says where the copy is.
 3. The user changes only what differs.
 
 ### UC-11: Rename a connection
@@ -310,6 +310,26 @@ UC-07, a server that never answers: checked in the second pass below.
 | Profiles without a client certificate | Fixed. With certificate support built into the core, a profile without a client certificate was taken to have its key in the keystore and failed at once with "Missing External PKI alias", before dialling. Most providers' files sign in with a username and password only. Such profiles now tell the core to send no certificate (`disableClientCert`), as OpenVPN Connect does. |
 | A tunnel started elsewhere | Fixed. Connecting by automation (or at boot) showed the profile last picked on screen as connected. Connect now follows the profile the tunnel is on. |
 
+### Third pass (2026-10-26, emulator, release build 11, then the fixes below)
+
+| Area | Result |
+|---|---|
+| Connect | Connect in about a second, Details (server, protocol, VPN IP, tunnel IP, DNS, routes, cipher), Pause 15 min, 15 more minutes (29:29), Resume now, the speed test (55 Mbps down, 0.8 up, "Fast enough for 4K"), Disconnect. |
+| Back and Up | Back steps up to the tabs, then to Connect, then leaves the app; with nothing focused it leaves at once. Up on a tab goes into its screen. After a mouse click (a tap here) the first press lands on the main button. |
+| Profiles | Quick menu, Duplicate, rename with the on-screen Backspace, from the phone's Type page and from a keyboard, Advanced › Protocol on a copy (the original keeps UDP), the icon picked from a new name, delete in two presses, a profile without a password asks for one with a QR code to type it on the phone. |
+| Import | From the phone (the QR link shows the code to check, a typed-in page asks for it, a wrong code gets 403), pasted text, a profile without a client certificate explained, links (http refused, a 404, a web page with no remote line), no file picker explained, restore a backup (a wrong passphrase refused). |
+| Certificates | A .p12 from the phone: a wrong password refused, the right one lists the profiles, each marked when its certificate will be replaced. |
+| Settings | PIN for settings (asked after reopening, a wrong PIN refused, then off again), Always-on VPN on a device without that screen explained, the startup picker, apps that skip the VPN, the connection test (not connected and connected), the log and the log on the phone (no keys, user name or password in it), the backup (only an encrypted body), the OpenVPN timeout, a DNS server that is not an IP refused, About (Check, the stores page, licenses, Reset asks with focus on Keep). |
+| Automation | `.Disconnect`, `.Connect --es profile HATLEVIKA` (any case), an unknown name. |
+| Boot | The startup profile was connected 3 seconds after the emulator finished booting. |
+| Memory | No leak: after a forced GC one activity was left through 20 rounds of open and close, with threads at 26 to 27. |
+| Hidden or closed | Fixed. The clock and the Details counters kept waking the app behind Home; now they wait for the screen. Behind Home it uses about one CPU tick (10 ms) in 15 s, with Details open none, and closed none. |
+| Automation in the background | Fixed. With the screens left open behind Home, a command brought them over what was playing; it now runs in a task of its own and leaves the front alone. |
+| Keyboard Enter | Fixed. Enter on a keyboard pressed the focused key of the on-screen keyboard (a password got an extra letter); it now does what Done does: to the main button, and Enter again presses it. A remote's OK is unchanged. |
+| Sign-in labels | Fixed. A profile with neither a certificate nor a password was labelled "Certificate"; it now says so. |
+| After an update | Fixed. An update from the app ended the tunnel and nothing connected it again; see Updates. |
+| Noted, not changed | Restoring a backup on the device it came from adds every profile again under the same names. A DNS server that is refused closes its sheet, so it is typed again. One OK on a profile in the .p12 list replaces its certificate (the row says it will). |
+
 ## Speed test (2026-10-24)
 
 Connect › Speed test, Profiles › a profile › Speed test, the quick menu, and Settings › Diagnostics › Speed test. It measures against speed.cloudflare.com: ping is the median of five TCP handshakes, download is four streams for 8 seconds without the first 1.5, and upload is four kept-alive TLS connections for 8 seconds, counting a request only when the server has answered it. (Counting written bytes measured the TV's send buffer, a megabyte or more: a burst, then nothing.) A profile that is not connected is connected first; with nothing connected, "Test without the VPN" gives a figure to compare with. The last result of each profile is kept (`shieldvpn_speed` preferences) and shown under its Speed test row.
@@ -421,9 +441,11 @@ Two internal identifiers keep the old word on purpose, because existing data dep
 
 ## Updates
 
-Builds are numbered by the commits on their branch (`git rev-list --count HEAD`), and the number is the APKs' `versionCode`, so a build republished under the same version (as the beta is) is still newer. Each GitHub release carries `update.json` beside its APKs, written by `tools/release.sh`: the version, build number, commit, and each APK's name, size and SHA-256 by ABI. The app (`vpn/Updates.kt`) reads the newest release that has one, picks the APK for the device's ABI, and offers it when its build is higher than its own: Settings › About › Updates, and by itself each time the app opens (it can be turned off), which then says so once in a toast. Installing downloads the APK, checks its size and SHA-256, and hands it to Android's package installer. Android asks to confirm, and the first time asks to allow the app to install apps. It only accepts an APK signed with the same key as the installed app.
+Builds are numbered by the commits on their branch (`git rev-list --count HEAD`), and the number is the APKs' `versionCode`, so a build republished under the same version (as the beta is) is still newer. Each GitHub release carries `update.json` beside its APKs, written by `tools/release.sh`: the version, build number, commit, and each APK's name, size and SHA-256 by ABI. The app (`vpn/Updates.kt`) reads the newest release that has one, picks the APK for the device's ABI, and offers it when its build is higher than its own: Settings › About › Updates, and by itself each time the app opens (it can be turned off), which then says so once in a toast. Installing downloads the APK, checks its size and SHA-256, and hands it to Android's package installer. Android asks to confirm, and the first time asks to allow the app to install apps. It only accepts an APK signed with the same key as the installed app. Installing ends the tunnel along with the app, so when the VPN was on, the app notes its profile first and the new build connects it again (`UpdatedReceiver`, on `MY_PACKAGE_REPLACED`); a failed or cancelled install clears the note.
 
-Tested on the emulator against a local copy of a release (debug builds take `--es updatesource URL`, and may use plain HTTP to the emulator's host): build 6 found build 7 (by itself and with Check), downloaded it and checked its SHA-256. Android's installer first asked to allow Tunnel to install apps; once that was on, it installed build 7 over build 6, kept the profiles and settings, and the VPN came back by itself.
+Tested on the emulator against a local copy of a release (debug builds take `--es updatesource URL`, and may use plain HTTP to the emulator's host): build 6 found build 7 (by itself and with Check), downloaded it and checked its SHA-256. Android's installer first asked to allow Tunnel to install apps; once that was on, it installed build 7 over build 6, kept the profiles and settings. (The VPN did not come back by itself then; nothing connected it again after an update.)
+
+Again on 2026-10-26, connected, with the reconnect: build 12 found build 13, downloaded and checked it, and Android asked "Do you want to update this app?". After Update, the tunnel went down 4 seconds in and was connected again at 7 seconds, with nobody opening the app.
 
 ## Beta build
 

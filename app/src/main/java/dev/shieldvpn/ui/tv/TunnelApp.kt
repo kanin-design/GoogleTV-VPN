@@ -580,7 +580,11 @@ fun authText(state: VpnUiState, c: Connection): String {
     val info = state.infoOf(c)
     val login = state.logins[c.id]
     return when {
-        info != null && !info.needsLogin -> "Certificate in the file"
+        info != null && !info.needsLogin -> when {
+            c.keyAlias != null -> "Key in the device’s keystore"
+            info.clientCert -> "Certificate in the file"
+            else -> "No certificate or password in the file"
+        }
         login != null && login.hasPassword && login.username.isNotEmpty() -> "Password saved · ${login.username}"
         else -> "Asks for a password"
     }
@@ -614,12 +618,14 @@ fun fmtBytes(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-/** The current time, ticking once a second. */
+/** The current time, ticking once a second while the screens are in front. */
 @Composable
 fun rememberNow(): Long {
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
             delay(1000)
+            // The frame clock stops while the app is hidden, so the ticking stops with it.
+            withFrameNanos { }
             value = System.currentTimeMillis()
         }
     }
