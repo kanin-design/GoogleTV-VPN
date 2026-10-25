@@ -37,34 +37,33 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             Updates.installFailure.collect { why -> if (why != null) _state.update { it.copy(update = UpdateState.Failed(why)) } }
         }
-        // An update that was installed leaves its APK behind; then, once a day, look for the next.
+        // An update that was installed leaves its APK behind; then, each time the app opens, look for the next.
         File(app.cacheDir, UPDATE_APK).delete()
-        if (_state.value.settings.autoUpdate && System.currentTimeMillis() - SettingsStore.updateCheckedAt(app) > DAY_MS) {
+        if (_state.value.settings.autoUpdate) {
             viewModelScope.launch {
                 delay(5_000)
-                checkUpdate(daily = true)
+                checkUpdate(atStart = true)
             }
         }
     }
 
     // ---- Updates ------------------------------------------------------------
 
-    /** Looks on GitHub for a newer build. The [daily] check says nothing unless it finds one. */
-    fun checkUpdate(daily: Boolean = false) {
+    /** Looks on GitHub for a newer build. The check when the app opens ([atStart]) says nothing unless it finds one. */
+    fun checkUpdate(atStart: Boolean = false) {
         when (_state.value.update) {
             UpdateState.Checking, is UpdateState.Downloading, is UpdateState.Installing -> return
             else -> Unit
         }
-        if (!daily) _state.update { it.copy(update = UpdateState.Checking) }
+        if (!atStart) _state.update { it.copy(update = UpdateState.Checking) }
         viewModelScope.launch {
             val found = withContext(Dispatchers.IO) { runCatching { Updates.newest() } }
-            if (found.isSuccess) SettingsStore.setUpdateCheckedAt(app, System.currentTimeMillis())
             val next = found.fold(
-                onSuccess = { b -> if (b != null && b.number > BuildConfig.VERSION_CODE) UpdateState.Available(b, found = daily) else UpdateState.UpToDate },
+                onSuccess = { b -> if (b != null && b.number > BuildConfig.VERSION_CODE) UpdateState.Available(b, found = atStart) else UpdateState.UpToDate },
                 onFailure = { UpdateState.Failed("GitHub didn't answer. Try again later.") },
             )
-            // The daily check only reports what it found; a failure or no news waits for the next day.
-            if (!daily || next is UpdateState.Available) _state.update { it.copy(update = next) }
+            // The check at startup only reports what it found; a failure or no news waits for the next start.
+            if (!atStart || next is UpdateState.Available) _state.update { it.copy(update = next) }
         }
     }
 
@@ -546,7 +545,6 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val PAUSE_MILLIS = 15 * 60 * 1000L
-        private const val DAY_MS = 24 * 60 * 60 * 1000L
         private const val UPDATE_APK = "update.apk"
         private const val BACKUP_SECRET = "backup"
     }

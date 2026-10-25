@@ -172,7 +172,7 @@ data class AppSettings(
     val searchDomains: List<String> = emptyList(),
     /** Let other apps connect and disconnect Tunnel with intents. */
     val automation: Boolean = false,
-    /** Look for a newer build on GitHub once a day. */
+    /** Look for a newer build on GitHub each time the app opens. */
     val autoUpdate: Boolean = true,
 ) {
     companion object {
@@ -187,7 +187,7 @@ sealed interface UpdateState {
     data object Checking : UpdateState
     data object UpToDate : UpdateState
 
-    /** [found]: the daily check found it, so the screens mention it once. */
+    /** [found]: the check when the app opened found it, so the screens mention it once. */
     data class Available(val build: Updates.Published, val found: Boolean = false) : UpdateState
     data class Downloading(val build: Updates.Published, val percent: Int) : UpdateState
     data class Installing(val build: Updates.Published) : UpdateState

@@ -16,7 +16,7 @@ An OpenVPN client for Android TV and Google TV, made for the remote. ("Tunnel" i
 - **Speed test.** Ping, download and upload through the VPN, on a speedometer, with whether it is fast enough for 4K or HD and how much of your plain connection the VPN keeps.
 - **Everyday controls.** Pause for 15 minutes, connect when the device starts, and reconnect by itself after Wi-Fi changes. There are a connection test, a connection log and connection details.
 - **Backups.** One encrypted file (PBKDF2 and AES-GCM) moves every profile, saved password and setting to a new device through your phone.
-- **Updates.** Once a day it looks on GitHub for a newer build, by build number, so a build republished under the same version counts too. Settings › About downloads the APK for the device, checks its SHA-256 and installs it; Android asks you to confirm.
+- **Updates.** Each time it opens, it looks on GitHub for a newer build, by build number, so a build republished under the same version counts too. Settings › About downloads the APK for the device, checks its SHA-256 and installs it; Android asks you to confirm.
 - **PIN lock** for settings or the whole app, and **automation intents** for home automation apps and ADB.
 - **Remote, keyboard or mouse.** Everything works with the remote; a keyboard types into fields, and a mouse can click anything.
 - **Light on the device.** The VPN runs in its own small process (about 15 MB, measured on the Android TV emulator). The screens close themselves ten minutes after you leave them, so the device gets that memory back while you watch.
@@ -98,7 +98,7 @@ What leaves the device:
 - while connected, one request through the tunnel to api.ipify.org (or icanhazip.com), to show the address sites see;
 - files you send to or from your phone, which stay on your home network;
 - a speed test, only when you start one: data to and from speed.cloudflare.com;
-- once a day, unless you turn it off in Settings › About: a look at this app's releases on GitHub (api.github.com) for a newer build, and the build itself when you choose to install it.
+- each time the app opens, unless you turn it off in Settings › About: a look at this app's releases on GitHub (api.github.com) for a newer build, and the build itself when you choose to install it.
 
 No accounts, no analytics, no ads.
 

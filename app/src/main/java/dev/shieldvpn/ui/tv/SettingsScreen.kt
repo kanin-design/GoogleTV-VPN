@@ -348,7 +348,7 @@ What leaves the device
   (or icanhazip.com) to show the address sites see.
   Files you send to or from your phone, which stay on your home network.
   A speed test, only when you start one: data to and from speed.cloudflare.com.
-  Once a day, unless you turn it off in About, a look at this app's releases on GitHub
+  Each time the app opens, unless you turn it off in About, a look at this app's releases on GitHub
   (api.github.com) for a newer build, and the build itself when you choose to install it.
 
 No accounts, no analytics, no ads."""
@@ -586,7 +586,7 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                         else -> actions.checkUpdate()
                     }
                 }
-                toggle(scope, "s-autoupd", "Check for updates by itself", "Once a day, when ${APP_NAME} opens", s.autoUpdate) {
+                toggle(scope, "s-autoupd", "Check for updates by itself", "Each time ${APP_NAME} opens", s.autoUpdate) {
                     actions.changeSettings { it.copy(autoUpdate = !it.autoUpdate) }
                 }
                 value(scope, "s-priv", "What ${APP_NAME} stores", "Profiles and passwords, encrypted on this device. No accounts, no analytics", "Details") {

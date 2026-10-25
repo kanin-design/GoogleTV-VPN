@@ -358,7 +358,7 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
     LaunchedEffect(state.pendingP12) {
         if (state.pendingP12 != null) nav.overlay = Overlay.P12
     }
-    // The daily check found a newer build: say so once; Settings › About installs it.
+    // The check when the app opened found a newer build: say so once; Settings › About installs it.
     LaunchedEffect(state.update) {
         val u = state.update
         if (u is UpdateState.Available && u.found) nav.toast("Build ${u.build.number} is ready: Settings › About")

@@ -71,13 +71,6 @@ object SettingsStore {
             .apply()
     }
 
-    /** When GitHub was last asked for a newer build, in milliseconds. */
-    fun updateCheckedAt(context: Context): Long = prefs(context).getLong("updateCheckedAt", 0L)
-
-    fun setUpdateCheckedAt(context: Context, at: Long) {
-        prefs(context).edit().putLong("updateCheckedAt", at).apply()
-    }
-
     /** The profile Connect shows. */
     fun activeConnection(context: Context): String? = prefs(context).getString("activeConnection", null)
 
