@@ -39,7 +39,7 @@ The screenshots use demo profiles on the Android TV emulator. The speed test is 
 Download the APK from [Releases](https://github.com/kanin-design/GoogleTV-VPN/releases) and sideload it: with `adb install`, or with a downloader app on the device.
 
 ```
-adb install openvpnclient-0.1.0-beta-arm64.apk
+adb install openvpnclient-0.1.1-beta-arm64.apk
 ```
 
 It needs Android TV or Google TV on Android 9 or newer, on ARM. There is one APK for each kind of chip: `arm64` for 64-bit Android, such as the NVIDIA Shield, and `armv7` for 32-bit Android, which some Google TV devices run, the Chromecast with Google TV among them. If you are not sure, `adb shell getprop ro.product.cpu.abi` says which: `arm64-v8a` or `armeabi-v7a`.
@@ -68,7 +68,7 @@ The APKs are `app-arm64-v8a-release.apk` and `app-armeabi-v7a-release.apk` in `a
 Each build is numbered by the commits on its branch (`git rev-list --count HEAD`). The number is the APKs' `versionCode`, Settings › About shows it, and the update check compares it. To publish a release, from a clean checkout:
 
 ```
-tools/release.sh v0.1.0-beta
+tools/release.sh v0.1.1-beta
 ```
 
 It builds both APKs, writes `update.json` (the version, build number, commit, and each APK's name, size and SHA-256) and uploads all three to that GitHub release with `gh`. `--dry-run` builds without uploading. The app finds updates through `update.json`, so every release needs it.

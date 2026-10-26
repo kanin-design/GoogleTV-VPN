@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Builds both APKs from a clean checkout and publishes them, with update.json, to a GitHub release.
 #
-# usage: tools/release.sh TAG [--dry-run]     e.g. tools/release.sh v0.1.0-beta
+# usage: tools/release.sh TAG [--dry-run]     e.g. tools/release.sh v0.1.1-beta
 #
 # update.json is what the app's update check reads (app/src/main/java/dev/shieldvpn/vpn/Updates.kt):
 # the build number (commits on the branch, also the APKs' versionCode), the commit, and each APK's
