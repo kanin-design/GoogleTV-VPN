@@ -1,359 +1,123 @@
 package dev.shieldvpn.ui.tv
 
-import android.os.Handler
-import android.os.Looper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
-import dev.shieldvpn.APP_FILE_NAME
 import dev.shieldvpn.APP_NAME
-import dev.shieldvpn.phone.PhoneBridge
+import dev.shieldvpn.phone.PhoneField
+import dev.shieldvpn.phone.PhoneOption
 import dev.shieldvpn.vpn.Backup
 import dev.shieldvpn.vpn.Certificates
+import dev.shieldvpn.vpn.Connection
 import dev.shieldvpn.vpn.VpnUiState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** What a phone sheet is for. */
-sealed interface PhoneKind {
-    data object Log : PhoneKind
-    data class Profile(val id: String) : PhoneKind
-    data object Backup : PhoneKind
-    data object Restore : PhoneKind
-    data object Paste : PhoneKind
-    data object P12 : PhoneKind
-}
-
 /** Android's chooser returns no certificate when none are installed, or when it is closed. */
-const val NO_CERT_PICKED = "No certificate picked. To add one, send its .p12 file and choose Keep the key in this device’s keystore"
+const val NO_CERT_PICKED = "No certificate picked. To add one, send its .p12 file and keep its key on this device"
 
-/** A field the text sheet edits. */
-enum class TextKind(val title: String, val sub: String, val label: String) {
-    CustomDns("Custom DNS servers", "Used instead of the servers your VPN pushes. Separate them with spaces.", "DNS servers"),
-    SearchDomains("Search domains", "Short names like nas then find nas.home.lan. Separate them with spaces.", "Domains"),
-    LinkUrl("Profile link", "The address of the .ovpn file. ${APP_NAME} downloads it and shows it to you before saving.", "Link"),
-    LinkUser("Username for the link", "The username the link asks for.", "Username"),
-    LinkPass("Password for the link", "Used once for the download. It is not saved.", "Password"),
-    ReviewName("Name", "Shown on cards and on the Connect screen.", "Name"),
+/** A screen's phone code, big, for a task done on the phone: back up, edit a profile, send a file. */
+@Composable
+fun PhoneSheet(req: Requesters, o: Overlay.Phone, close: () -> Unit) {
+    val session = phoneSession(o.key)
+    DisposableEffect(session, o.section) {
+        session?.point(o.section)
+        onDispose { if (session?.focus == o.section) session?.point(null) }
+    }
+    // As wide as the code and its steps, so no half of the sheet stays empty.
+    Sheet(740f) {
+        PanelHeading(o.eyebrow, o.title, o.lede, titleSize = 32f)
+        Box(Modifier.padding(top = 22.dp)) { PhoneBlock(session, PhoneBlockSize.Panel, steps = o.steps) }
+        Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TvButton("Done", close, icon = Ic.Check, focusRequester = req["ov-first"])
+            o.extra?.let { (label, run) -> TvButton(label, run, glass = true) }
+        }
+    }
 }
 
 /**
- * Runs a phone session for as long as the caller is on screen. [onReceive] and [onDownloaded]
- * run on the main thread. Returns null while starting, or when the TV is not on a home network.
+ * Wrong PINs in a row, for this run of the app. After five, each try waits: 30 seconds, then
+ * twice as long each time, so a 4-digit PIN can't be tried through from the remote.
  */
-@Composable
-fun rememberPhoneBridge(
-    key: Any?,
-    page: PhoneBridge.Page?,
-    onDownloaded: () -> Unit = {},
-    onReceive: (PhoneBridge.Received) -> String? = { null },
-): PhoneBridge? {
-    var bridge by remember { mutableStateOf<PhoneBridge?>(null) }
-    val receive by rememberUpdatedState(onReceive)
-    val downloaded by rememberUpdatedState(onDownloaded)
-    val current by rememberUpdatedState(page)
-    // The session starts once there is a page, and keeps its address and code when the page changes.
-    LaunchedEffect(page) { if (page != null) bridge?.page = page }
-    DisposableEffect(key, page == null) {
-        val page = current
-        val main = Handler(Looper.getMainLooper())
-        val b = page?.let { p ->
-            PhoneBridge.start(p, onDownloaded = { main.post { downloaded() } }) { got ->
-                // Answer the phone with what the app says, worked out on the main thread.
-                var answer: String? = null
-                val done = java.util.concurrent.CountDownLatch(1)
-                main.post {
-                    answer = receive(got)
-                    done.countDown()
-                }
-                done.await(5, java.util.concurrent.TimeUnit.SECONDS)
-                answer
-            }
-        }
-        bridge = b
-        onDispose {
-            b?.stop()
-            bridge = null
-        }
+private object PinTries {
+    var misses = 0
+    var waitUntil = 0L
+
+    fun missed() {
+        misses++
+        if (misses >= 5) waitUntil = System.currentTimeMillis() + 30_000L * (1L shl (misses - 5).coerceAtMost(6))
     }
-    return bridge
+
+    fun secondsLeft(): Long = ((waitUntil - System.currentTimeMillis() + 999) / 1000).coerceAtLeast(0)
 }
 
-/** The QR code and, beside it, the address and code for a phone without a camera. */
-@Composable
-fun PhoneCode(bridge: PhoneBridge?, qrSize: Float, steps: List<String> = emptyList()) {
-    if (bridge == null) {
-        Notice(Ic.Bang, "This device isn’t on a home network, so your phone can’t reach it.", amber = true)
-        return
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(30.dp), verticalAlignment = Alignment.CenterVertically) {
-            QrCode(bridge.url, qrSize, Modifier.shadow(10.dp, RoundedCornerShape(14.dp), ambientColor = Color.Black, spotColor = Color.Black))
-            if (steps.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    steps.forEachIndexed { i, step ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.white(0.12f)), contentAlignment = Alignment.Center) {
-                                Text("${i + 1}", style = TvType.ui(14f, FontWeight.ExtraBold))
-                            }
-                            Text(step, style = TvType.ui(17f, color = Tv.soft(0.86f)), modifier = Modifier.widthIn(max = 360.dp))
-                        }
-                    }
-                }
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(40.dp)) {
-            KeyValue("No camera? Open on any device", "http://${bridge.address}")
-            KeyValue("Code", bridge.code.chunked(3).joinToString("\u00A0"), big = true)
-        }
-    }
-}
-
-@Composable
-private fun KeyValue(label: String, value: String, big: Boolean = false) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = TvType.ui(14f, FontWeight.SemiBold, Tv.soft(0.55f)))
-        Text(value, style = TvType.mono(if (big) 24f else 20f).copy(letterSpacing = if (big) 0.08.em else 0.em))
-    }
-}
-
-@Composable
-fun PhoneSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Phone, close: () -> Unit) {
-    val (title, lede) = when (val k = o.kind) {
-        PhoneKind.Log -> "Send the log to your phone" to "Scan the code to download this session’s connection log."
-        is PhoneKind.Profile -> "Send ${state.connection(k.id)?.name ?: "the profile"} to your phone" to "Scan the code to download the .ovpn file. It holds the profile’s keys, so keep it safe. The saved password is not in it."
-        PhoneKind.Backup -> "Back up to your phone" to "Scan the code. Your phone downloads one encrypted file with every profile and setting. Restoring it needs the backup passphrase."
-        PhoneKind.Restore -> "Send the backup from your phone" to "Scan the code, then pick the .${Backup.EXTENSION} file on your phone."
-        PhoneKind.Paste -> "Paste config text" to "Scan the code, paste the config on your phone and press Send."
-        PhoneKind.P12 -> "Send a certificate from your phone" to "Scan the code and pick the .p12 or .pfx file. ${APP_NAME} asks for its password next."
-    }
-    // Files to download are made once, when the sheet opens; the backup takes a moment to encrypt.
-    // Lint misreads produceState with a key: the value is set on every run.
-    @Suppress("ProduceStateDoesNotAssignValue")
-    val page by produceState<PhoneBridge.Page?>(null, o) {
-        value = when (val k = o.kind) {
-            PhoneKind.Log -> PhoneBridge.Page.Download(title, lede, "$APP_FILE_NAME-log.txt", "text/plain; charset=utf-8", actions.logText().toByteArray())
-            is PhoneKind.Profile -> {
-                val c = state.connection(k.id)
-                // Keep the name's letters (æøå too); drop only what file names can't hold.
-                val name = (c?.name ?: "").replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "").trim().ifEmpty { "profile" }
-                actions.profileFile(k.id)?.let { PhoneBridge.Page.Download(title, lede, "$name.ovpn", "application/x-openvpn-profile", it) }
-            }
-            PhoneKind.Backup -> actions.backupFile()?.let {
-                PhoneBridge.Page.Download(title, lede, "$APP_FILE_NAME-backup-${java.time.LocalDate.now()}.${Backup.EXTENSION}", "application/octet-stream", it)
-            }
-            PhoneKind.Restore -> PhoneBridge.Page.Upload(title, lede, ".${Backup.EXTENSION},application/octet-stream,application/json", paste = false)
-            PhoneKind.Paste -> PhoneBridge.Page.Upload(title, lede, ".ovpn,.conf,text/plain", paste = true, login = true)
-            PhoneKind.P12 -> PhoneBridge.Page.Upload(title, lede, ".p12,.pfx,application/x-pkcs12", paste = false)
-        }
-    }
-    var downloads by remember { mutableIntStateOf(0) }
-    val bridge = rememberPhoneBridge(o, page, onDownloaded = { downloads++ }) { got ->
-        val problem = actions.receive(got.name, got.bytes, got.username, got.password)
-        if (problem == null) close()
-        problem
-    }
-    Sheet(800f) {
-        Row(horizontalArrangement = Arrangement.spacedBy(30.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text(title, style = TvType.display(34f))
-                Text(lede, style = TvType.ui(17f, color = Tv.soft(0.7f)), modifier = Modifier.padding(top = 6.dp, bottom = 22.dp))
-                val p = page
-                if (p == null) {
-                    Text("Getting it ready…", style = TvType.ui(17f, color = Tv.soft(0.7f)))
-                } else {
-                    PhoneCode(bridge, 220f)
-                    // What the phone gets, and whether it has it yet.
-                    if (p is PhoneBridge.Page.Download && bridge != null) {
-                        val size = if (p.body.size < 1024) "${p.body.size} bytes" else "%.1f KB".format(p.body.size / 1024f)
-                        if (downloads > 0) {
-                            Notice(Ic.Check, "Downloaded to your phone: ${p.fileName}", modifier = Modifier.padding(top = 20.dp))
-                        } else {
-                            Text("${p.fileName} · $size", style = TvType.ui(15f, color = Tv.soft(0.6f)), modifier = Modifier.padding(top = 18.dp))
-                        }
-                    }
-                }
-                Row(Modifier.padding(top = 26.dp)) {
-                    TvButton("Done", close, icon = Ic.Check, focusRequester = req["ov-first"])
-                }
-            }
-        }
-    }
-}
-
-/** Sets the backup passphrase, or unlocks a backup that arrived. */
-@Composable
-fun PassphraseSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Passphrase, close: () -> Unit) {
-    var value by remember { mutableStateOf("") }
-    // A new passphrase is typed twice, like the PIN: it can't be shown again later.
-    var first by remember { mutableStateOf<String?>(null) }
-    var shift by remember { mutableStateOf(false) }
-    var show by remember { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    TypeInto(nav, { value = value.dropLast(1) }, onEnter = { req["ov-go"].takeFocus() }) { ch -> value = (value + ch).take(256) }
-    val go: () -> Unit = {
-        when {
-            busy -> Unit
-            !o.restore && value.length < 6 -> nav.toast("Use at least 6 characters")
-            !o.restore && first == null -> {
-                first = value
-                value = ""
-                req["ov-first"].tryFocus()
-            }
-            !o.restore && value != first -> {
-                first = null
-                value = ""
-                nav.toast("The two passphrases were different. Try again")
-                req["ov-first"].tryFocus()
-            }
-            !o.restore -> {
-                actions.setBackupPassphrase(value)
-                nav.toast("Backup passphrase saved")
-                if (o.thenBackup) nav.overlay = Overlay.Phone(PhoneKind.Backup) else close()
-            }
-            else -> {
-                busy = true
-                scope.launch {
-                    when (val r = actions.restore(value)) {
-                        is Backup.Restored.Done -> {
-                            val added = "Restored ${r.profiles} profile${if (r.profiles == 1) "" else "s"}"
-                            nav.toast(
-                                when {
-                                    r.profiles == 0 && r.already > 0 -> "All ${r.already} profiles were here already. The settings are restored"
-                                    r.already > 0 -> "$added. ${r.already} ${if (r.already == 1) "was" else "were"} here already"
-                                    else -> added
-                                },
-                            )
-                            close()
-                            nav.go(Screen.Profiles)
-                        }
-                        is Backup.Restored.Problem -> nav.toast(r.message)
-                    }
-                    busy = false
-                }
-            }
-        }
-    }
-    Sheet(820f) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(
-                when {
-                    o.restore -> "Restore a backup"
-                    first != null -> "Type it again"
-                    state.hasBackupPassphrase -> "Change the backup passphrase"
-                    else -> "Choose a backup passphrase"
-                },
-                style = TvType.display(34f),
-            )
-            Text(
-                when {
-                    o.restore -> "Type the passphrase this backup was made with. Its profiles are added to this device; ones already here are left alone."
-                    first != null -> "The same passphrase once more, to be sure it is right."
-                    else -> "At least 6 characters. Backups are encrypted with it, and you need it to restore on another device, so keep it somewhere safe."
-                },
-                style = TvType.ui(17f, color = Tv.soft(0.7f)),
-            )
-            InputBox(if (first != null) "Passphrase again" else "Passphrase", value, editing = true, onClick = {}, secret = true, showSecret = show)
-            Keyboard(shift, { k ->
-                when (k) {
-                    TvKey.Shift -> shift = !shift
-                    TvKey.Done -> req["ov-go"].tryFocus()
-                    else -> {
-                        value = typeKey(value, k, shift) ?: value
-                        if (k is TvKey.Ch && shift) shift = false
-                    }
-                }
-            }, entry = req["ov-first"])
-            var confirmRemove by remember { mutableStateOf(false) }
-            if (confirmRemove) {
-                ConfirmBar(
-                    "Remove the backup passphrase? Backups made with it still need it.", "Remove", req["ov-remove-no"],
-                    onConfirm = {
-                        actions.setBackupPassphrase(null)
-                        nav.toast("Backup passphrase removed")
-                        close()
-                    },
-                    onKeep = {
-                        confirmRemove = false
-                        nav.refocus(req["ov-go"])
-                    },
-                )
-            } else Row(Modifier.enterAt { req["ov-go"] }, horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TvButton(
-                    when {
-                        o.restore -> if (busy) "Restoring…" else "Restore"
-                        first == null -> "Next"
-                        o.thenBackup -> "Save and back up"
-                        else -> "Save"
-                    },
-                    go, icon = Ic.Check, focusRequester = req["ov-go"],
-                )
-                TvButton("Cancel", {
-                    if (o.restore) actions.cancelRestore()
-                    close()
-                }, glass = true)
-                TvButton(if (show) "Hide" else "Show", { show = !show }, icon = Ic.Eye, small = true, glass = true)
-                if (!o.restore && state.hasBackupPassphrase && first == null) {
-                    TvButton("Remove", { confirmRemove = true }, small = true, glass = true, danger = true)
-                }
-            }
-        }
-    }
-}
-
-/** Asks for the PIN, or sets a new one with a second entry to confirm. */
+/** Asks for the PIN, or sets a new one with a second entry to confirm. What is wrong shows under the dots. */
 @Composable
 fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, close: () -> Unit) {
     var digits by remember { mutableStateOf("") }
     var first by remember { mutableStateOf<String?>(null) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    var wait by remember { mutableLongStateOf(PinTries.secondsLeft()) }
+    // Counts down while a wait is on, and then lets the next try through.
+    LaunchedEffect(wait > 0) {
+        while (wait > 0) {
+            problem = "Too many wrong PINs. Try again in $wait s"
+            delay(1000)
+            wait = PinTries.secondsLeft()
+        }
+        if (problem?.startsWith("Too many") == true) problem = null
+    }
     val title = when {
         !o.setting -> "Type your PIN"
-        first == null -> "Choose a PIN"
-        else -> "Type it again"
+        first != null -> "Type it again"
+        o.mode == null -> "Choose a new PIN"
+        else -> "Choose a PIN"
     }
     val submit: () -> Unit = {
+        problem = null
         when {
-            digits.length < 4 -> nav.toast("The PIN has 4 to 8 digits")
+            !o.setting && PinTries.secondsLeft() > 0 -> {
+                digits = ""
+                wait = PinTries.secondsLeft()
+            }
+            digits.length < 4 -> problem = "The PIN has 4 to 8 digits"
             !o.setting -> if (actions.checkPin(digits)) {
+                PinTries.misses = 0
                 nav.unlocked = true
                 close()
                 o.then?.invoke()
             } else {
                 digits = ""
-                nav.toast("Wrong PIN")
+                PinTries.missed()
+                wait = PinTries.secondsLeft()
+                if (wait == 0L) problem = "That isn’t the PIN. Try again"
             }
             first == null -> {
                 first = digits
@@ -363,30 +127,41 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
                 actions.setPin(digits)
                 o.mode?.let { m -> actions.changeSettings { it.copy(pinMode = m) } }
                 nav.unlocked = true
-                nav.toast("PIN saved")
+                nav.flash("s-pin")
                 close()
+                // The value column that opened this is gone: back to the row, not the category.
+                if (nav.screen == Screen.Settings) {
+                    nav.settingsReturn = "s-pin"
+                    nav.contentFocus = Screen.Settings
+                }
             }
             else -> {
                 first = null
                 digits = ""
-                nav.toast("The two PINs were different. Try again")
+                problem = "The two were different. Choose it again"
             }
         }
     }
-    TypeInto(nav, { digits = digits.dropLast(1) }, onEnter = { submit(); true }) { ch -> if (ch.isDigit() && digits.length < 8) digits += ch }
+    TypeInto(nav, { digits = digits.dropLast(1) }, onEnter = { submit(); true }) { ch ->
+        if (ch.isDigit() && digits.length < 8) {
+            digits += ch
+            problem = null
+        }
+    }
     Sheet(460f) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(title, style = TvType.display(30f))
             Text(
-                if (o.setting) "4 to 8 digits. Anyone without it can still connect from Connect." else "Profiles and settings are locked on this device.",
-                style = TvType.ui(15f, color = Tv.soft(0.7f)),
+                if (o.setting) "4 to 8 digits. Without it, Connect still works." else "Profiles and settings are locked on this device.",
+                style = TvType.ui(15f, color = Tv.soft(0.7f)).copy(textAlign = TextAlign.Center),
                 modifier = Modifier.padding(top = 6.dp),
             )
-            Row(Modifier.padding(vertical = 22.dp).height(18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.padding(top = 22.dp, bottom = if (problem != null) 8.dp else 22.dp).height(18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 repeat(maxOf(4, digits.length)) { i ->
-                    Box(Modifier.size(16.dp).clip(CircleShape).background(if (i < digits.length) Tv.Ink else Tv.white(0.18f)))
+                    Box(Modifier.size(16.dp).clip(CircleShape).background(if (i < digits.length) Tv.Ink else if (problem != null) Tv.Red.copy(alpha = 0.5f) else Tv.white(0.18f)))
                 }
             }
+            problem?.let { Text(it, style = TvType.ui(15f, FontWeight.SemiBold, Tv.Red), modifier = Modifier.padding(bottom = 14.dp)) }
             val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "OK")
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 keys.chunked(3).forEach { line ->
@@ -398,7 +173,10 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
                                     when (k) {
                                         "⌫" -> digits = digits.dropLast(1)
                                         "OK" -> submit()
-                                        else -> if (digits.length < 8) digits += k
+                                        else -> if (digits.length < 8) {
+                                            digits += k
+                                            problem = null
+                                        }
                                     }
                                 },
                                 modifier = Modifier.width(110.dp),
@@ -418,117 +196,27 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
     }
 }
 
-/** One text field with the on-screen keyboard, and a phone to type on instead. */
+/** A .p12 that opened: the profile it goes into, or the device's keystore. */
 @Composable
-fun TextSheet(nav: Nav, req: Requesters, o: Overlay.Text, close: () -> Unit) {
-    var value by remember { mutableStateOf(o.initial) }
-    var shift by remember { mutableStateOf(false) }
-    val secret = o.kind == TextKind.LinkPass
-    TypeInto(nav, { value = value.dropLast(1) }, onEnter = { req["ov-go"].takeFocus() }) { ch -> value = (value + ch).take(400) }
-    val page = remember(o.kind) { PhoneBridge.Page.Type(o.kind.title, "Type it here, then press Send. It appears on the TV.", o.kind.label, secret) }
-    val bridge = rememberPhoneBridge(o, page) { got ->
-        value = String(got.bytes).trim().take(400)
-        null
-    }
-    Sheet(1100f) {
-        Row(horizontalArrangement = Arrangement.spacedBy(34.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(o.kind.title, style = TvType.display(34f))
-                Text(o.kind.sub, style = TvType.ui(17f, color = Tv.soft(0.7f)))
-                InputBox(o.kind.label, value, editing = true, onClick = {}, secret = secret, mono = o.kind != TextKind.ReviewName)
-                Keyboard(shift, { k ->
-                    when (k) {
-                        TvKey.Shift -> shift = !shift
-                        TvKey.Done -> req["ov-go"].tryFocus()
-                        else -> {
-                            value = typeKey(value, k, shift, max = 400) ?: value
-                            if (k is TvKey.Ch && shift) shift = false
-                        }
-                    }
-                }, entry = req["ov-first"])
-                Row(Modifier.enterAt { req["ov-go"] }, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TvButton("Save", {
-                        // A value that can't be used keeps the sheet open, with the text, to correct it.
-                        val problem = o.check(value.trim())
-                        if (problem != null) {
-                            nav.toast(problem)
-                        } else {
-                            o.save(value.trim())
-                            close()
-                        }
-                    }, icon = Ic.Check, focusRequester = req["ov-go"])
-                    TvButton("Cancel", close, glass = true)
-                }
-            }
-            Column(Modifier.width(300.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Spacer(Modifier.height(4.dp))
-                Text("Type it on your phone", style = TvType.ui(18f, FontWeight.Bold))
-                if (bridge != null) {
-                    QrCode(bridge.url, 180f)
-                    Text("Or open http://${bridge.address} and enter ${bridge.code.chunked(3).joinToString("\u00A0")}.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
-                } else {
-                    Text("This device isn’t on a home network, so your phone can’t reach it.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
-                }
-            }
-        }
-    }
-}
-
-/** A .p12 certificate that arrived: its password first, then the profile it goes into. */
-@Composable
-fun P12Sheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, close: () -> Unit) {
-    var password by remember { mutableStateOf("") }
-    var shift by remember { mutableStateOf(false) }
-    var show by remember { mutableStateOf(false) }
-    var opened by remember { mutableStateOf(false) }
+fun P12TargetSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.P12Target, close: () -> Unit) {
     var replacing by remember { mutableStateOf<String?>(null) }
-    val cancel = {
-        actions.cancelP12()
-        close()
-    }
-    if (!opened) TypeInto(nav, { password = password.dropLast(1) }, onEnter = { req["ov-go"].takeFocus() }) { ch -> password = (password + ch).take(256) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { req["p12-first"].focusWhenReady() }
     Sheet(820f) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(if (opened) "Add the certificate to a profile" else "Certificate password", style = TvType.display(34f))
-            Text(
-                if (opened) "Its certificate and key go into the profile’s file, in place of any it had."
-                else "The password the .p12 file was exported with. It is used once and not kept.",
-                style = TvType.ui(17f, color = Tv.soft(0.7f)),
-            )
-            if (!opened) {
-                InputBox("Password", password, editing = true, onClick = {}, secret = true, showSecret = show)
-                Keyboard(shift, { k ->
-                    when (k) {
-                        TvKey.Shift -> shift = !shift
-                        TvKey.Done -> req["ov-go"].tryFocus()
-                        else -> {
-                            password = typeKey(password, k, shift) ?: password
-                            if (k is TvKey.Ch && shift) shift = false
-                        }
-                    }
-                }, entry = req["ov-first"])
-                Row(Modifier.enterAt { req["ov-go"] }, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TvButton("Open", {
-                        val problem = actions.checkP12(password)
-                        if (problem != null) nav.toast(problem) else opened = true
-                    }, icon = Ic.Lock, focusRequester = req["ov-go"])
-                    TvButton("Cancel", cancel, glass = true)
-                    TvButton(if (show) "Hide" else "Show", { show = !show }, icon = Ic.Eye, small = true, glass = true)
-                }
-            } else {
-                LaunchedEffect(Unit) { req["p12-first"].focusWhenReady() }
-                val list = rememberLazyListState()
-                LazyColumn(
-                    state = list,
-                    modifier = Modifier.heightIn(max = 470.dp).bleed(12.dp).scrollFade(list),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    items(state.connections.size) { i ->
-                        val c = state.connections[i]
-                        val hasCert = state.infoOf(c)?.cert != null
-                        val attach = {
-                            val problem = actions.attachP12(password, c.id)
+            PanelHeading("Import › Certificates", "Add the certificate to a profile", "Its certificate and key go into the profile’s file, in place of any it had.", titleSize = 32f)
+            val list = rememberLazyListState()
+            LazyColumn(
+                state = list,
+                modifier = Modifier.heightIn(max = 470.dp).bleed(12.dp).scrollFade(list),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                itemsIndexed(state.connections, key = { _, c -> c.id }) { i, c ->
+                    val hasCert = state.infoOf(c)?.cert != null
+                    val attach: () -> Unit = {
+                        scope.launch {
+                            val problem = actions.attachP12(o.password, c.id)
                             if (problem != null) {
                                 nav.toast(problem)
                             } else {
@@ -536,40 +224,43 @@ fun P12Sheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requester
                                 close()
                             }
                         }
-                        // A profile's own certificate is only replaced after it says so, and Keep is focused.
-                        if (replacing == c.id) {
-                            ConfirmBar(
-                                "Replace the certificate and key in ${c.name}?", "Replace", req["p12-keep"],
-                                onConfirm = attach,
-                                onKeep = {
-                                    replacing = null
-                                    nav.refocus(req[if (i == 0) "p12-first" else "p12-$i"])
-                                },
-                                icon = Ic.Swap,
-                            )
-                        } else {
-                            ListRow(
-                                c.name,
-                                { if (hasCert) replacing = c.id else attach() },
-                                subtitle = if (hasCert) "Has its own certificate, which this one would replace" else state.serverOf(c)?.host,
-                                focusRequester = if (i == 0) req["p12-first"] else req["p12-$i"],
-                                leading = { Avatar(lookOf(c), 40f) },
-                            )
-                        }
                     }
-                    item {
+                    // A profile's own certificate is only replaced after it says so, and Keep is focused.
+                    if (replacing == c.id) {
+                        ConfirmBar(
+                            "Replace the certificate and key in ${c.name}?", "Replace", req["p12-keep"],
+                            onConfirm = attach,
+                            onKeep = {
+                                replacing = null
+                                nav.refocus(req[if (i == 0) "p12-first" else "p12-${c.id}"])
+                            },
+                            icon = Ic.Swap,
+                        )
+                    } else {
+                        ListRow(
+                            c.name,
+                            { if (hasCert) replacing = c.id else attach() },
+                            subtitle = if (hasCert) "Has its own certificate, which this one would replace" else state.serverOf(c)?.host,
+                            focusRequester = if (i == 0) req["p12-first"] else req["p12-${c.id}"],
+                            leading = { Avatar(lookOf(c), 40f) },
+                        )
+                    }
+                }
+                item {
                     ListRow(
                         "Keep the key in this device’s keystore instead", {
-                            val alias = actions.keepP12(password)
-                            if (alias == null) {
-                                nav.toast("Android could not keep this key")
-                            } else {
-                                nav.overlay = Overlay.PickProfile(
-                                    "Use it for which profile?", "The key stays in the device’s keystore and can’t be copied off it.",
-                                    cancelled = { Certificates.forget(alias) },
-                                ) { id ->
-                                    actions.setKeyAlias(id, alias)
-                                    nav.toast("${state.connection(id)?.name} now uses ${Certificates.label(alias)}")
+                            scope.launch {
+                                val alias = actions.keepP12(o.password)
+                                if (alias == null) {
+                                    nav.toast("Android could not keep this key")
+                                } else {
+                                    nav.overlay = Overlay.PickProfile(
+                                        "Use it for which profile?", "The key stays in the device’s keystore and can’t be copied off it.",
+                                        cancelled = { Certificates.forget(alias) },
+                                    ) { id ->
+                                        actions.setKeyAlias(id, alias)
+                                        nav.toast("${state.connection(id)?.name} now uses ${Certificates.label(alias)}")
+                                    }
                                 }
                             }
                         },
@@ -577,9 +268,13 @@ fun P12Sheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requester
                         focusRequester = if (state.connections.isEmpty()) req["p12-first"] else null,
                         leading = { IconSquare(Ic.Cert, it) },
                     )
-                    }
                 }
-                Row { TvButton("Cancel", cancel, glass = true) }
+            }
+            Row {
+                TvButton("Cancel", {
+                    actions.cancelP12()
+                    close()
+                }, glass = true)
             }
         }
     }
@@ -590,8 +285,7 @@ fun P12Sheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requester
 fun PickProfileSheet(state: VpnUiState, req: Requesters, o: Overlay.PickProfile, close: () -> Unit) {
     Sheet(640f) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(o.title, style = TvType.display(34f))
-            Text(o.sub, style = TvType.ui(17f, color = Tv.soft(0.7f)))
+            PanelHeading(o.eyebrow, o.title, o.sub, titleSize = 32f)
             val list = rememberLazyListState()
             LazyColumn(
                 state = list,
@@ -599,8 +293,7 @@ fun PickProfileSheet(state: VpnUiState, req: Requesters, o: Overlay.PickProfile,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(state.connections.size) { i ->
-                    val c = state.connections[i]
+                itemsIndexed(state.connections, key = { _, c -> c.id }) { i, c ->
                     ListRow(
                         c.name,
                         {
@@ -624,3 +317,103 @@ fun PickProfileSheet(state: VpnUiState, req: Requesters, o: Overlay.PickProfile,
     }
 }
 
+// ---- Shared forms -----------------------------------------------------------------
+
+/** Settings › Backup › Backup passphrase, typed twice; with [thenBackup], the backup follows straight on. */
+fun passphraseSpec(state: VpnUiState, nav: Nav, actions: TunnelActions, thenBackup: Boolean = false): FormSpec {
+    val change = state.hasBackupPassphrase
+    val next: (Outcome) -> FormResult = { o -> if (o is Outcome.Done && thenBackup) FormResult.Open(backupSheet()) else o.toForm() }
+    return FormSpec(
+        eyebrow = "Settings › Backup",
+        title = if (change) "Change the backup passphrase" else "Choose a backup passphrase",
+        sub = "At least 6 characters, typed twice. Backups are encrypted with it, and restoring one needs it, so keep it somewhere safe.",
+        fields = listOf(FormField("pass1", "Passphrase", secret = true), FormField("pass2", "Type it again", secret = true)),
+        primary = if (thenBackup) "Save and back up" else "Save",
+        phone = "backup",
+        phoneSection = if (change) "change" else "pass",
+        // Chosen on the phone, the backup goes straight on there too; the TV shows its code.
+        phoneSaved = { if (thenBackup) FormResult.Open(backupSheet()) else FormResult.Done },
+    ) { v, _ -> next(setPassphrase(state, actions, nav, v["pass1"].orEmpty(), v["pass2"].orEmpty())) }
+}
+
+/** The Backup screen's phone code, pointing at the download. */
+fun backupSheet(): Overlay.Phone = Overlay.Phone(
+    key = "backup",
+    eyebrow = "Settings › Backup",
+    title = "Back up to your phone",
+    lede = "Scan the code and press Download. Your phone gets one encrypted file with every profile and setting; restoring it needs the backup passphrase.",
+    section = "download",
+)
+
+/** The line after a restore. */
+fun restoredText(r: Backup.Restored.Done): String {
+    fun profiles(count: Int) = "$count profile${if (count == 1) "" else "s"}"
+    if (r.profiles == 0 && r.replaced == 0) {
+        return when (r.already) {
+            0 -> "The settings are restored"
+            1 -> "The profile was here already. The settings are restored"
+            else -> "All ${r.already} profiles were here already. The settings are restored"
+        }
+    }
+    val parts = mutableListOf<String>()
+    if (r.profiles > 0) parts += "Restored ${profiles(r.profiles)}"
+    if (r.replaced > 0) parts += (if (parts.isEmpty()) "Replaced " else "replaced ") + profiles(r.replaced)
+    if (r.already > 0) parts += if (r.already == 1) "1 was here already" else "${r.already} were here already"
+    return parts.joinToString(", ")
+}
+
+/** A backup picked on the TV: its passphrase. */
+fun restoreSpec(nav: Nav, actions: TunnelActions): FormSpec = FormSpec(
+    eyebrow = "Import › Restore",
+    title = "Restore a backup",
+    sub = "Type the passphrase it was made with. Its profiles are added to this device; ones already here, exactly the same, are left alone.",
+    fields = listOf(FormField("passphrase", "Passphrase", secret = true)),
+    primary = "Restore",
+    busyLabel = "Restoring…",
+    toggle = FormToggle("Replace", "Profiles with the same name", false),
+    cancelled = {
+        actions.cancelRestore()
+        nav.toast("The backup was not restored")
+    },
+) { v, replace -> restoreBackup(actions, nav, null, v["passphrase"].orEmpty(), replace, "passphrase").toForm() }
+
+/** A .p12 picked on the TV: its password first, then the profile it goes into. */
+fun p12PasswordSpec(nav: Nav, actions: TunnelActions): FormSpec = FormSpec(
+    eyebrow = "Import › Certificates",
+    title = "Certificate password",
+    sub = "The password the .p12 file was exported with. It is used once and not kept.",
+    fields = listOf(FormField("p12pass", "Password", secret = true)),
+    primary = "Open",
+    primaryIcon = Ic.Lock,
+    cancelled = {
+        actions.cancelP12()
+        nav.toast("The certificate was not added")
+    },
+) { v, _ ->
+    val password = v["p12pass"].orEmpty()
+    actions.checkP12(password)?.let { FormResult.Problems("p12pass", it) } ?: FormResult.Open(Overlay.P12Target(password))
+}
+
+/** The phone fields for a .p12: its password, the profile it is for (unless [only] is given), and where its key goes. */
+fun p12Fields(state: VpnUiState, only: Connection?): List<PhoneField> = listOfNotNull(
+    PhoneField.Text("p12pass", "Its password", secret = true, required = true, help = "The password it was exported with. It is used once and not kept."),
+    if (only == null) {
+        PhoneField.Select(
+            "target", "Use it for",
+            state.connections.map { c ->
+                val has = state.infoOf(c)?.cert != null
+                PhoneOption(
+                    c.id, c.name,
+                    sub = if (has) "Has its own certificate, which this one replaces" else state.serverOf(c)?.host,
+                    confirm = if (has) "${c.name} has its own certificate and key. Replace them?" else null,
+                )
+            },
+            null,
+        )
+    } else {
+        null
+    },
+    // Said from the phone's side, where "this device" would be the phone.
+    PhoneField.Choice("keep", "Keep the key", listOf("file" to "In the profile", "keystore" to "In the TV’s keystore"), "file"),
+    PhoneField.Info("keepnote", text = "In the TV’s keystore, the key signs in but can’t be copied off the TV, and ${APP_NAME}’s backups don’t hold it."),
+)

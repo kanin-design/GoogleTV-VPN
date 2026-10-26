@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import dev.shieldvpn.APP_NAME
+import dev.shieldvpn.Features
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
@@ -21,6 +22,9 @@ import java.util.UUID
 /**
  * Servers live in filesDir/servers: one .ovpn file each, kept as imported, and an
  * index with the address, port and protocol, which the user can change in Advanced.
+ * A WireGuard server is a .conf file without its keys, which [CredentialStore] keeps; the
+ * stores keep these whatever the build, and only WireGuard builds show them ([hidden]).
+ * Both are replaced whole on each change ([writeAtomically]).
  */
 object ServerStore {
 
@@ -32,10 +36,26 @@ object ServerStore {
     private val SECRET_BLOCK = Regex("<(key|tls-auth|tls-crypt|tls-crypt-v2|secret|pkcs12)>[\\s\\S]*?</\\1>")
     private val CERT_BLOCK = Regex("<cert>([\\s\\S]*?)</cert>")
 
+    // A valid key, all zeros, put in a stored WireGuard file only to read the rest of it.
+    private const val PLACEHOLDER_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+    // The last index read, for a file that later turns out damaged.
+    private var lastGood: List<Server>? = null
+
+    // What each file says, by server id, with the file's size and time to tell when it changed.
+    private val infos = HashMap<String, Pair<Long, ConfigInfo>>()
+
+    @Synchronized
     fun list(context: Context): List<Server> {
         val index = File(dir(context), INDEX)
         if (!index.exists()) return emptyList()
-        val array = JSONArray(index.readText())
+        return runCatching { parse(readAtomically(index).orEmpty()) }
+            .onSuccess { lastGood = it }
+            .getOrElse { setAside(index, it); lastGood ?: emptyList() }
+    }
+
+    private fun parse(text: String): List<Server> {
+        val array = JSONArray(text)
         return List(array.length()) { i ->
             val item = array.getJSONObject(i)
             Server(
@@ -43,20 +63,28 @@ object ServerStore {
                 host = item.getString("host"),
                 port = item.getInt("port"),
                 protocol = Protocol.valueOf(item.getString("protocol")),
+                kind = if (item.optString("kind") == "wireguard") VpnKind.WireGuard else VpnKind.OpenVpn,
             )
         }
     }
 
     /** Stores [config] as a server. [id] is passed only to keep an existing id. */
     fun add(context: Context, config: String, id: String = UUID.randomUUID().toString()): Server {
-        val (host, port, protocol) = remoteOf(config) ?: Triple("", 1194, Protocol.UDP)
-        val server = Server(id, host, port, protocol)
-        File(dir(context), "$id.ovpn").writeText(config)
+        val server = if (WireGuardFile.looksLike(config)) {
+            val (host, port) = WireGuardFile.endpoint(config) ?: ("" to 51820)
+            Server(id, host, port, Protocol.UDP, VpnKind.WireGuard)
+        } else {
+            val (host, port, protocol) = remoteOf(config) ?: Triple("", 1194, Protocol.UDP)
+            Server(id, host, port, protocol)
+        }
+        writeAtomically(fileFor(context, id, server.kind), config)
+        synchronized(this) { infos.remove(id) }
         update(context, server)
         return server
     }
 
     /** Saves a changed address, port or protocol, keeping the server's place in the list. */
+    @Synchronized
     fun update(context: Context, server: Server) {
         val servers = list(context)
         write(
@@ -68,23 +96,39 @@ object ServerStore {
     /** Goes back to the address, port and protocol written in the file. */
     fun resetToFile(context: Context, id: String) {
         val raw = rawText(context, id) ?: return
+        if (WireGuardFile.looksLike(raw)) {
+            val (host, port) = WireGuardFile.endpoint(raw) ?: return
+            return update(context, Server(id, host, port, Protocol.UDP, VpnKind.WireGuard))
+        }
         val (host, port, protocol) = remoteOf(raw) ?: return
         update(context, Server(id, host, port, protocol))
     }
 
+    /** A WireGuard profile in a build without WireGuard: kept, but not shown or connected. */
+    fun hidden(context: Context, serverId: String): Boolean =
+        !Features.WIREGUARD && list(context).firstOrNull { it.id == serverId }?.kind == VpnKind.WireGuard
+
+    @Synchronized
     fun delete(context: Context, id: String) {
-        File(dir(context), "$id.ovpn").delete()
+        VpnKind.entries.forEach { fileFor(context, id, it).delete() }
+        infos.remove(id)
         write(context, list(context).filterNot { it.id == id })
     }
 
+    @Synchronized
     fun clear(context: Context) {
         dir(context).deleteRecursively()
+        lastGood = null
+        infos.clear()
     }
 
     /** The config to connect with: the file as imported, with the address the user set in Advanced. */
     fun effectiveConfig(context: Context, id: String): String? {
         val raw = rawText(context, id) ?: return null
         val server = list(context).firstOrNull { it.id == id } ?: return raw
+        if (server.kind == VpnKind.WireGuard) {
+            return if (WireGuardFile.endpoint(raw) == server.host to server.port) raw else WireGuardFile.withEndpoint(raw, server.host, server.port)
+        }
         if (remoteOf(raw) == Triple(server.host, server.port, server.protocol)) return raw
         // A <connection> block carries its own remote lines, so such files are used as they are.
         if ("<connection>" in raw) return raw
@@ -92,21 +136,32 @@ object ServerStore {
         return "remote ${server.host} ${server.port} ${server.protocol.token}\n" + kept.joinToString("\n")
     }
 
-    /** The file as imported, with private keys hidden, for the read-only view. */
+    /** The file as it is used, with the server set in Advanced and private keys hidden, for the read-only view. */
     fun displayConfig(context: Context, id: String): String =
-        rawText(context, id)?.let(::hideSecrets) ?: "The server file is missing."
+        effectiveConfig(context, id)?.let(::hideSecrets) ?: "The server file is missing."
 
     fun hideSecrets(config: String): String =
-        config.replace(SECRET_BLOCK) { "<${it.groupValues[1]}>\n(hidden)\n</${it.groupValues[1]}>" }
+        if (WireGuardFile.looksLike(config)) WireGuardFile.hideSecrets(config)
+        else config.replace(SECRET_BLOCK) { "<${it.groupValues[1]}>\n(hidden)\n</${it.groupValues[1]}>" }
 
-    fun info(context: Context, id: String): ConfigInfo? = rawText(context, id)?.let(::infoOf)
+    /** What the file says. Read again only when the file changed, since this runs on each refresh. */
+    @Synchronized
+    fun info(context: Context, id: String): ConfigInfo? {
+        val file = fileOf(context, id)
+        if (!file.exists()) return null
+        val stamp = file.lastModified() * 31 + file.length()
+        infos[id]?.takeIf { it.first == stamp }?.let { return it.second }
+        return rawText(context, id)?.let(::infoOf)?.also { infos[id] = stamp to it }
+    }
 
     /** The file as stored, secrets included. */
     fun rawConfig(context: Context, id: String): String? = rawText(context, id)
 
     /** Replaces the stored file, for example with a client certificate added to it. */
+    @Synchronized
     fun replaceConfig(context: Context, id: String, config: String) {
-        File(dir(context), "$id.ovpn").writeText(config)
+        writeAtomically(fileOf(context, id), config)
+        infos.remove(id)
     }
 
     fun hasCertificate(config: String): Boolean =
@@ -128,18 +183,11 @@ object ServerStore {
 
     // ---- Importing --------------------------------------------------------------
 
-    /** Reads and checks a picked file without saving it. */
-    fun review(context: Context, source: Uri): ImportReview {
-        val fileName = fileNameOf(context, source)
-        val bytes = context.contentResolver.openInputStream(source)?.use { readLimited(it) }
-            ?: return problem(fileName, "${APP_NAME} could not open this file.")
-        return review(fileName, bytes)
-    }
-
     /** A file from a phone, a link or pasted text. */
     fun review(fileName: String, bytes: ByteArray): ImportReview {
         if (bytes.size > MAX_BYTES) return problem(fileName, "The file is too big to be an OpenVPN profile.")
         val text = String(bytes, Charsets.UTF_8)
+        if (Features.WIREGUARD && WireGuardFile.looksLike(text)) return wireGuardReview(fileName, text)
         val (host, port, protocol) = remoteOf(text)
             ?: return problem(fileName, "The file has no remote line, so ${APP_NAME} can't tell which server to connect to. Pick another file, or ask whoever sent it for a new copy.")
         val match = INLINE_LOGIN.find(text)
@@ -168,12 +216,33 @@ object ServerStore {
         )
     }
 
+    private fun wireGuardReview(fileName: String, text: String): ImportReview =
+        when (val r = WireGuardFile.review(text)) {
+            is WireGuardFile.Review.Problem -> problem(fileName, r.message)
+            is WireGuardFile.Review.Ok -> ImportReview(
+                fileName = fileName,
+                text = r.text,
+                name = nameFromFile(fileName),
+                host = r.facts.host,
+                port = r.facts.port,
+                protocol = Protocol.UDP,
+                needsLogin = false,
+                username = "",
+                password = "",
+                warnings = r.warnings,
+                kind = VpnKind.WireGuard,
+                wg = r.facts,
+                wgSecrets = r.secrets,
+            )
+        }
+
     private fun problem(fileName: String, why: String) =
         ImportReview(fileName, "", "", "", 0, Protocol.UDP, false, "", "", emptyList(), why)
 
     // ---- Reading a config -------------------------------------------------------
 
     private fun infoOf(raw: String): ConfigInfo {
+        if (WireGuardFile.looksLike(raw)) return wireGuardInfo(raw)
         val lines = raw.lineSequence().map { it.trim() }.toList()
         fun words(key: String) = lines.firstOrNull { it.split(WHITESPACE).first() == key }?.split(WHITESPACE)
         val cipher = words("data-ciphers")?.getOrNull(1)?.split(':')?.firstOrNull() ?: words("cipher")?.getOrNull(1)
@@ -200,6 +269,30 @@ object ServerStore {
             remotes = lines.count { it.split(WHITESPACE).first() == "remote" },
             warnings = warnings,
             hasCa = hasCertificate(raw),
+            connectionBlocks = "<connection>" in raw,
+        )
+    }
+
+    /** A WireGuard file in the terms the screens already use: no login, no certificate to check. */
+    private fun wireGuardInfo(raw: String): ConfigInfo {
+        // The stored file has no keys; a stand-in lets the review read the rest.
+        val review = WireGuardFile.review(WireGuardFile.withSecrets(raw, WireGuardFile.Secrets(PLACEHOLDER_KEY)))
+        val ok = review as? WireGuardFile.Review.Ok
+        val endpoint = WireGuardFile.endpoint(raw)
+        return ConfigInfo(
+            cipher = "ChaCha20-Poly1305",
+            tls = null,
+            needsLogin = false,
+            clientCert = false,
+            cert = null,
+            fileHost = endpoint?.first,
+            filePort = endpoint?.second,
+            fileProtocol = Protocol.UDP,
+            remotes = ok?.facts?.peers ?: 0,
+            warnings = ok?.warnings ?: listOf((review as WireGuardFile.Review.Problem).message),
+            hasCa = true,
+            kind = VpnKind.WireGuard,
+            wg = ok?.facts,
         )
     }
 
@@ -232,7 +325,14 @@ object ServerStore {
         File(context.filesDir, "servers").apply { mkdirs() }
 
     private fun rawText(context: Context, id: String): String? =
-        File(dir(context), "$id.ovpn").takeIf { it.exists() }?.readText()
+        fileOf(context, id).takeIf { it.exists() }?.let(::readAtomically)
+
+    private fun fileFor(context: Context, id: String, kind: VpnKind): File =
+        File(dir(context), if (kind == VpnKind.WireGuard) "$id.conf" else "$id.ovpn")
+
+    /** The server's file, whichever kind it is. */
+    private fun fileOf(context: Context, id: String): File =
+        fileFor(context, id, VpnKind.OpenVpn).takeIf { it.exists() } ?: fileFor(context, id, VpnKind.WireGuard)
 
     private fun write(context: Context, servers: List<Server>) {
         val array = JSONArray()
@@ -242,10 +342,13 @@ object ServerStore {
                     .put("id", s.id)
                     .put("host", s.host)
                     .put("port", s.port)
-                    .put("protocol", s.protocol.name),
+                    .put("protocol", s.protocol.name)
+                    // Only on WireGuard servers: older builds read the index without it.
+                    .apply { if (s.kind == VpnKind.WireGuard) put("kind", "wireguard") },
             )
         }
-        File(dir(context), INDEX).writeText(array.toString())
+        writeAtomically(File(dir(context), INDEX), array.toString())
+        lastGood = servers
     }
 
     /** Host, port and protocol from the first `remote` line, filling gaps from `port` and `proto`. */

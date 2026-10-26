@@ -1,79 +1,73 @@
 package dev.shieldvpn.ui.tv
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import dev.shieldvpn.APP_NAME
-import kotlinx.coroutines.launch
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.shieldvpn.APP_NAME
+import dev.shieldvpn.phone.PhoneAction
+import dev.shieldvpn.phone.PhoneField
+import dev.shieldvpn.phone.PhoneForm
+import dev.shieldvpn.phone.PhoneReply
+import dev.shieldvpn.phone.PhoneSection
+import dev.shieldvpn.phone.PhoneServer
+import dev.shieldvpn.phone.PhoneSession
+import dev.shieldvpn.phone.PhoneStatus
+import dev.shieldvpn.phone.Staged
+import dev.shieldvpn.vpn.Backup
 import dev.shieldvpn.vpn.ImportReview
+import dev.shieldvpn.vpn.Inspected
 import dev.shieldvpn.vpn.ServerStore
+import dev.shieldvpn.vpn.VpnKind
 import dev.shieldvpn.vpn.VpnUiState
 import dev.shieldvpn.vpn.isActive
 
-enum class ImportMethod(val icon: Ic, val title: String, val sub: String, val more: Boolean = false) {
-    Phone(Ic.Phone, "From your phone", "Scan a code, pick the file there"),
+enum class ImportMethod(val icon: Ic, val title: String, val sub: String) {
+    Phone(Ic.Phone, "From your phone", "A profile, backup or certificate"),
     Files(Ic.Usb, "USB drive or Downloads", "Files on this device"),
-    Link(Ic.Link, "From a link", "An HTTPS address"),
-    Restore(Ic.Archive, "Restore a backup", "Everything from another device"),
-    Certs(Ic.Cert, "Certificates", ".p12 file or the device keystore", more = true),
-    Paste(Ic.Paste, "Paste config text", "Type or paste it on your phone", more = true),
+    Link(Ic.Link, "From a link", "An HTTPS address, typed here"),
+    Restore(Ic.Archive, "Restore a backup", "From a USB drive, or your phone"),
+    Certs(Ic.Cert, "Certificates", "A .p12 file or the device keystore"),
 }
 
-/**
- * Where focus starts on the review: Back on a file that can't be used; Save while a tunnel is up,
- * so one OK doesn't switch away from it; otherwise Save and connect.
- */
-private fun reviewFocus(state: VpnUiState, review: ImportReview): String = when {
-    review.problem != null -> "rv-back"
-    state.status.isActive -> "rv-save"
-    else -> "rv-connect"
-}
+/** Where focus starts on the review: Back on a file that can't be used, otherwise Save. */
+private fun reviewFocus(review: ImportReview): String = if (review.problem != null) "rv-back" else "rv-save"
 
 /** Import: how the file gets here on the left, and what happens next on the right. Every file is reviewed first. */
 @Composable
@@ -81,69 +75,40 @@ fun ImportScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (
     val req = remember { Requesters() }
     SideEffect {
         val review = state.review
-        nav.entry = req[if (review == null) "m-${nav.importMethod.name}" else reviewFocus(state, review)]
+        nav.entry = req[if (review == null) "m-${nav.importMethod.name}" else reviewFocus(review)]
     }
     LaunchedEffect(nav.contentFocus) {
         if (nav.contentFocus == Screen.Import) {
             val review = state.review
-            val key = if (review == null) "m-${nav.importMethod.name}" else reviewFocus(state, review)
-            req[key].focusWhenReady()
+            req[if (review == null) "m-${nav.importMethod.name}" else reviewFocus(review)].focusWhenReady()
             nav.contentFocus = null
         }
     }
     LaunchedEffect(state.review) {
         val review = state.review ?: return@LaunchedEffect
-        req[reviewFocus(state, review)].focusWhenReady()
+        req[reviewFocus(review)].focusWhenReady()
     }
     // The phone session belongs to Import, not to its panel: it keeps its code while a file is
-    // reviewed, so the phone's page still works after Save or Cancel and can send another.
-    val phonePage = remember {
-        dev.shieldvpn.phone.PhoneBridge.Page.Upload(
-            "Send a profile to the TV", "Pick the .ovpn file, or paste its text. The TV shows it to you before it is saved.",
-            ".ovpn,.conf,.p12,.pfx,.${dev.shieldvpn.vpn.Backup.EXTENSION},text/plain,application/x-pkcs12,application/octet-stream", paste = true, login = true,
-        )
-    }
-    val phoneBridge = rememberPhoneBridge(ImportMethod.Phone, if (nav.importMethod == ImportMethod.Phone) phonePage else null) { got ->
-        actions.receive(got.name, got.bytes, got.username, got.password)
-    }
+    // reviewed, so the phone's page goes on working after Save or Cancel and can send another.
+    val session = rememberImportSession(state, nav, actions)
 
     Box(Modifier.fillMaxSize()) {
         Glass(Modifier.padding(start = 64.dp, top = 124.dp, bottom = 36.dp).width(400.dp)) {
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 22.dp)) {
-                Text("Add a profile", style = TvType.display(30f), modifier = Modifier.padding(horizontal = 8.dp))
-                Text("A profile, a backup or a certificate.", style = TvType.ui(15f, color = Tv.soft(0.65f)), modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 14.dp))
-                // A list, so the extra ways scroll into view when More ways opens them.
+                Box(Modifier.padding(horizontal = 8.dp)) { PanelHeading("Import", "Add a profile", "A profile, a backup or a certificate.", titleSize = 30f) }
                 val list = rememberLazyListState()
                 LazyColumn(
                     state = list,
                     modifier = Modifier
+                        .padding(top = 14.dp)
                         .weight(1f)
                         .bleed(12.dp)
                         .scrollFade(list)
-                        .enterAt {
-                            if (nav.importMethod.more && !nav.importMore) req["m-more"] else req["m-${nav.importMethod.name}"]
-                        },
+                        .enterAt { req["m-${nav.importMethod.name}"] },
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    ImportMethod.entries.filter { !it.more }.forEach { m -> item(m.name) { MethodRow(m, state, nav, actions, req) } }
-                    item("more") {
-                        ListRow(
-                            "More ways", { nav.importMore = !nav.importMore },
-                            subtitle = "Certificates, pasted text",
-                            focusRequester = req["m-more"],
-                            trailing = { focused ->
-                                val turn by animateFloatAsState(if (nav.importMore) 90f else 0f, tween(200), label = "chev")
-                                Box(Modifier.graphicsLayer { rotationZ = turn }) { TvIcon(Ic.Chev, 20f, if (focused) Tv.OnFocus else Tv.Ink, stroke = 2.4f) }
-                            },
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
-                    }
-                    if (nav.importMore) {
-                        ImportMethod.entries.filter { it.more }.forEach { m ->
-                            item(m.name) { Box(Modifier.animateItem()) { MethodRow(m, state, nav, actions, req) } }
-                        }
-                    }
+                    ImportMethod.entries.forEach { m -> item(m.name) { MethodRow(m, state, nav, actions, req, session) } }
                 }
                 Spacer(Modifier.height(10.dp))
                 Text("Every file is checked before it is saved.", style = TvType.ui(14f, color = Tv.soft(0.55f)), modifier = Modifier.padding(horizontal = 8.dp))
@@ -154,13 +119,13 @@ fun ImportScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (
             Modifier
                 .padding(start = 488.dp, end = 64.dp, top = 124.dp, bottom = 36.dp)
                 .fillMaxSize()
-                .enterAt { req[if (review == null) "im-entry" else reviewFocus(state, review)] },
+                .enterAt { req[if (review == null) "im-entry" else reviewFocus(review)] },
         ) {
             Column(Modifier.fillMaxSize().padding(horizontal = 34.dp, vertical = 30.dp)) {
                 when {
                     review != null && review.problem != null -> ProblemPanel(review, nav, actions, req)
-                    review != null -> ReviewPanel(state, review, nav, actions, req, connect)
-                    else -> MethodPanel(nav.importMethod, state, nav, actions, req, phoneBridge)
+                    review != null -> ReviewPanel(state, review, nav, actions, req)
+                    else -> MethodPanel(nav.importMethod, state, nav, actions, req, session)
                 }
             }
         }
@@ -168,20 +133,21 @@ fun ImportScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (
 }
 
 @Composable
-private fun MethodRow(m: ImportMethod, state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters) {
+private fun MethodRow(m: ImportMethod, state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, session: PhoneSession?) {
+    // Without a file picker there is nothing to pick from, so the row says so and focus passes it by.
+    val usable = m != ImportMethod.Files || actions.hasFilePicker
     ListRow(
         m.title,
-        {
-            if (m == ImportMethod.Files) actions.pickFile() else req["im-entry"].tryFocus()
-        },
-        subtitle = m.sub,
+        { if (m == ImportMethod.Files) actions.pickFile() else req["im-entry"].tryFocus() },
+        subtitle = if (usable) m.sub else "This device has no file picker",
         kind = RowKind.Method,
         selected = nav.importMethod == m,
+        enabled = usable,
         focusRequester = req["m-${m.name}"],
         onFocus = {
             if (nav.importMethod != m) {
                 nav.importMethod = m
-                if (state.review != null) actions.cancelReview()
+                dropReview(nav, actions, session)
             }
         },
         leading = { IconSquare(m.icon, it, size = 44f, radius = 13f) },
@@ -189,63 +155,70 @@ private fun MethodRow(m: ImportMethod, state: VpnUiState, nav: Nav, actions: Tun
 }
 
 @Composable
-private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, phone: dev.shieldvpn.phone.PhoneBridge?) {
+private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, session: PhoneSession?) {
+    val picker = actions.hasFilePicker
+    val fromPhone = {
+        nav.importMethod = ImportMethod.Phone
+        nav.contentFocus = Screen.Import
+    }
     when (m) {
         ImportMethod.Files -> {
-            PanelHeading("On this device", "Pick a file", "Android’s file picker opens. Choose the .ovpn or .conf file from Downloads or a USB drive.")
+            PanelHeading("Import › On this device", "Pick a file", "Android’s file picker opens. Choose the .ovpn, .conf, .p12 or backup file from Downloads or a USB drive.")
             Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 TvButton("Choose a file", actions::pickFile, icon = Ic.File, focusRequester = req["im-entry"])
             }
             Steps(
                 listOf(
-                    "Save the .ovpn file in Downloads, or on a USB drive in this device",
+                    "Save the file in Downloads, or on a USB drive in this device",
                     "Pick it in the file picker",
                     "Check it here before it is saved",
                 ),
                 Modifier.padding(top = 28.dp),
             )
         }
-        ImportMethod.Phone -> PhonePanel(req, phone)
-        ImportMethod.Link -> LinkPanel(nav, actions, req)
+        ImportMethod.Phone -> PhonePanel(nav, actions, req, session)
+        ImportMethod.Link -> LinkPanel(nav, actions, req, session)
         ImportMethod.Restore -> {
-            PanelHeading("Moving to a new device", "Restore a backup", "A backup holds every profile, saved password and setting, encrypted with the passphrase you chose when you made it.")
+            PanelHeading("Import › Moving to a new device", "Restore a backup", "A backup holds every profile, saved password and setting, encrypted with the passphrase chosen when it was made.")
             Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ListRow(
-                    "Send the backup from your phone", { nav.overlay = Overlay.Phone(PhoneKind.Restore) },
-                    subtitle = "Scan a code and pick the .${dev.shieldvpn.vpn.Backup.EXTENSION} file",
+                    "Send it from your phone", fromPhone,
+                    subtitle = "From your phone takes backups too, with the passphrase typed there",
                     focusRequester = req["im-entry"],
                     leading = { IconSquare(Ic.Phone, it) },
-                    trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+                    trailing = { Chevron(it) },
                 )
                 ListRow(
                     "Pick the backup on a USB drive", actions::pickFile,
-                    subtitle = "${APP_NAME} asks for the passphrase next",
+                    subtitle = if (picker) "${APP_NAME} asks for the passphrase next" else "This device has no file picker",
+                    enabled = picker,
                     leading = { IconSquare(Ic.Usb, it) },
-                    trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+                    trailing = { if (picker) Chevron(it) },
                 )
             }
         }
         ImportMethod.Certs -> {
-            PanelHeading("More ways", "Certificates", "For profiles that keep the certificate and key outside the .ovpn file.")
+            PanelHeading("Import › Certificates", "Certificates", "For profiles that keep the certificate and key outside the .ovpn file.")
             Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ListRow(
-                    "Send a .p12 file from your phone", { nav.overlay = Overlay.Phone(PhoneKind.P12) },
-                    subtitle = "Then enter its password and pick the profile",
+                    "Send the .p12 from your phone", fromPhone,
+                    subtitle = "Its password and the profile it is for are chosen there",
                     focusRequester = req["im-entry"],
                     leading = { IconSquare(Ic.Phone, it) },
-                    trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+                    trailing = { Chevron(it) },
                 )
                 ListRow(
                     "Pick a .p12 file on a USB drive", actions::pickFile,
-                    subtitle = "Or from Downloads",
+                    subtitle = if (picker) "Or from Downloads" else "This device has no file picker",
+                    enabled = picker,
                     leading = { IconSquare(Ic.Usb, it) },
-                    trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+                    trailing = { if (picker) Chevron(it) },
                 )
                 ListRow(
                     "Use a certificate installed on this device", {
                         actions.chooseKeyAlias { alias ->
                             if (alias != null) {
-                                nav.overlay = Overlay.PickProfile("Use it for which profile?", "The profile signs in with $alias. Its own certificate is kept, unused.") { id ->
+                                nav.overlay = Overlay.PickProfile("Use it for which profile?", "The profile signs in with $alias. Its own certificate is kept, unused.", eyebrow = "Import › Certificates") { id ->
                                     actions.setKeyAlias(id, alias)
                                     nav.toast("${state.connection(id)?.name} now uses ${dev.shieldvpn.vpn.Certificates.label(alias)}")
                                 }
@@ -256,86 +229,84 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
                     },
                     subtitle = "Pick one from Android’s keystore",
                     leading = { IconSquare(Ic.Lock, it) },
-                    trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
-                )
-            }
-        }
-        ImportMethod.Paste -> {
-            PanelHeading("More ways", "Paste config text", "Useful when your provider shows the config as text instead of a file.")
-            Column(Modifier.padding(top = 20.dp)) {
-                ListRow(
-                    "Paste it on your phone", { nav.overlay = Overlay.Phone(PhoneKind.Paste) },
-                    subtitle = "Scan a code, paste the text, send",
-                    focusRequester = req["im-entry"],
-                    leading = { IconSquare(Ic.Phone, it) },
-                    trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+                    trailing = { Chevron(it) },
                 )
             }
         }
     }
 }
 
-/** From your phone: the code is on screen and the TV listens while this panel is open. */
+/** From your phone: the code is on screen and the TV listens while Import is open. */
 @Composable
-private fun ColumnScope.PhonePanel(req: Requesters, bridge: dev.shieldvpn.phone.PhoneBridge?) {
-    PanelHeading("From your phone", "Send it from your phone")
-    Box(Modifier.padding(top = 22.dp)) {
-        PhoneCode(
-            bridge, 196f,
-            steps = listOf("Scan the code with your phone’s camera", "Pick the .ovpn file, or paste its text", "Check it here before it is saved"),
-        )
-    }
-    Spacer(Modifier.weight(1f))
-    ListRow(
-        "Waiting for your phone…", {},
-        subtitle = "The file appears here as soon as it is sent",
-        focusRequester = req["im-entry"],
-        leading = { Spinner(it) },
+private fun ColumnScope.PhonePanel(nav: Nav, actions: TunnelActions, req: Requesters, session: PhoneSession?) {
+    PanelHeading("Import › From your phone", "Send it from your phone")
+    PhoneBlock(
+        session, PhoneBlockSize.Panel, Modifier.padding(top = 22.dp),
+        steps = listOf("Scan the code with your phone’s camera", "Pick the file, paste its text or type a link", "Check it here before it is saved"),
     )
+    Spacer(Modifier.weight(1f))
+    // Something waits on the phone's page; it can be finished on the TV instead.
+    val item = nav.importItem
+    if (item != null) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Tv.white(0.05f)).padding(start = 18.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                when (item) {
+                    is ImportItem.Profile -> "${item.review.name} is on your phone’s page: name it and send it there, or check it here."
+                    is ImportItem.Backup -> "A backup is on your phone’s page: type its passphrase there, or here."
+                    is ImportItem.Pkcs12 -> "A certificate is on your phone’s page: type its password there, or here."
+                },
+                style = TvType.ui(15.5f, FontWeight.SemiBold),
+                modifier = Modifier.weight(1f),
+            )
+            TvButton("Continue here", {
+                nav.importItem = null
+                when (item) {
+                    is ImportItem.Profile -> actions.openReview(item.review)
+                    is ImportItem.Backup -> actions.receive(item.name, item.bytes)
+                    is ImportItem.Pkcs12 -> actions.receive(item.name, item.bytes)
+                }
+            }, small = true, focusRequester = req["im-entry"])
+        }
+    }
 }
 
-/** From a link: an address, and a login when the link needs one. */
+/** The one sheet for a link: its address, and a login when the link needs one. */
+fun linkSpec(nav: Nav, actions: TunnelActions): FormSpec = FormSpec(
+    eyebrow = "Import › From a link",
+    title = "Download from a link",
+    sub = "The address of the .ovpn file, and a username and password if the link asks for them. They are used for the download and not kept.",
+    fields = listOf(
+        FormField("url", "Link", nav.linkUrl.ifEmpty { "https://" }, mono = true, max = 2048),
+        FormField("luser", "Username", nav.linkUser, optional = true),
+        FormField("lpass", "Password", secret = true, optional = true),
+    ),
+    primary = "Download and review",
+    primaryIcon = Ic.Globe,
+    busyLabel = "Downloading…",
+    phone = "import",
+    phoneSection = "link",
+) { v, _ -> downloadLink(actions, nav, v["url"].orEmpty(), v["luser"].orEmpty(), v["lpass"].orEmpty()).toForm() }
+
+/** From a link, typed on the TV; the phone's page has a Link tab for typing it there. */
 @Composable
-private fun ColumnScope.LinkPanel(nav: Nav, actions: TunnelActions, req: Requesters) {
-    val scope = rememberCoroutineScope()
-    var busy by remember { mutableStateOf(false) }
-    PanelHeading("From a link", "Download from a link", "${APP_NAME} downloads the file and shows it to you before saving.")
+private fun ColumnScope.LinkPanel(nav: Nav, actions: TunnelActions, req: Requesters, session: PhoneSession?) {
+    PanelHeading("Import › From a link", "Download from a link", "${APP_NAME} downloads the file and shows it to you before saving.")
     InputBox(
         "Profile link", nav.linkUrl.ifEmpty { "https://" }, editing = false,
-        onClick = { nav.overlay = Overlay.Text(TextKind.LinkUrl, nav.linkUrl.ifEmpty { "https://" }) { nav.linkUrl = it } },
+        onClick = { nav.overlay = Overlay.Form(linkSpec(nav, actions)) },
         mono = true,
         modifier = Modifier.padding(top = 22.dp),
         focusRequester = req["im-entry"],
     )
-    ListRow(
-        "The link needs a username and password", { nav.linkLogin = !nav.linkLogin },
-        subtitle = "${APP_NAME} sends them with the download, and does not keep them",
-        modifier = Modifier.padding(top = 14.dp),
-        trailing = { TvSwitch(nav.linkLogin, it) },
-    )
-    if (nav.linkLogin) {
-        Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            InputBox("Username", nav.linkUser, editing = false, onClick = {
-                nav.overlay = Overlay.Text(TextKind.LinkUser, nav.linkUser) { nav.linkUser = it }
-            }, modifier = Modifier.weight(1f))
-            InputBox("Password", nav.linkPass, editing = false, secret = true, onClick = {
-                nav.overlay = Overlay.Text(TextKind.LinkPass, nav.linkPass) { nav.linkPass = it }
-            }, modifier = Modifier.weight(1f))
-        }
+    if (nav.linkUser.isNotEmpty()) {
+        Text("With the username ${nav.linkUser}", style = TvType.ui(15f, color = Tv.soft(0.62f)), modifier = Modifier.padding(top = 8.dp, start = 4.dp))
     }
     Spacer(Modifier.weight(1f))
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        TvButton(if (busy) "Downloading…" else "Download and review", {
-            if (!busy) {
-                busy = true
-                scope.launch {
-                    val problem = actions.download(nav.linkUrl, nav.linkUser.takeIf { nav.linkLogin }, nav.linkPass.takeIf { nav.linkLogin })
-                    if (problem != null) nav.toast(problem) else nav.linkPass = ""
-                    busy = false
-                }
-            }
-        }, icon = Ic.Globe)
-    }
+    PhoneBlock(session, PhoneBlockSize.Compact, title = "Or type it on your phone: choose Link there")
 }
 
 /** .spin: a small spinning ring. */
@@ -390,7 +361,7 @@ private fun ProblemPanel(review: ImportReview, nav: Nav, actions: TunnelActions,
     // No file was opened at all: this TV has no file picker, or the file could not be read.
     val noFile = review.fileName.isEmpty()
     PanelHeading(
-        if (noFile) "On this device" else "Can’t import ${review.fileName}",
+        if (noFile) "Import › On this device" else "Import › ${review.fileName}",
         if (noFile) "No file picker on this device" else "This isn’t an OpenVPN profile",
         review.problem,
     )
@@ -405,41 +376,76 @@ private fun ProblemPanel(review: ImportReview, nav: Nav, actions: TunnelActions,
             TvButton("Pick another file", {
                 actions.cancelReview()
                 actions.pickFile()
-            }, icon = Ic.Back, focusRequester = req["rv-back"])
+            }, icon = Ic.File, focusRequester = req["rv-back"])
         }
         TvButton("Cancel", actions::cancelReview, glass = true)
     }
 }
 
+/** The file has a client certificate of its own. */
+fun reviewHasCert(r: ImportReview): Boolean =
+    "<cert>" in r.text || "<pkcs12>" in r.text || r.text.lineSequence().any { it.trim().startsWith("cert ") || it.trim().startsWith("pkcs12 ") }
+
+/** How the reviewed profile signs in, for both the TV and the phone. */
+fun reviewSignIn(r: ImportReview): String {
+    val cert = reviewHasCert(r)
+    return when {
+        r.loginFromPhone && cert -> "Certificate + password · ${r.username}, from your phone"
+        r.loginFromPhone -> "Username + password · ${r.username}, from your phone"
+        r.needsLogin && cert -> "Certificate + password"
+        r.needsLogin -> "Username + password"
+        cert -> "Certificate"
+        else -> "Not in the file"
+    }
+}
+
+/**
+ * Saves the profile under review and shows it: on Connect with its Connect button focused, or
+ * in Profiles while a tunnel is up, so nothing switches away from it. Returns its name.
+ */
+/**
+ * The review is let go on the TV, and that is said there and on the phone that sent it, so
+ * nothing goes without a word.
+ */
+fun dropReview(nav: Nav, actions: TunnelActions, session: PhoneSession?) {
+    val r = actions.stateNow().review ?: return
+    actions.cancelReview()
+    if (r.problem != null) return
+    nav.toast("${r.name} was not saved")
+    // The line under the code shows what the phone did, with a tick: a file let go isn't that.
+    session?.tvLine = null
+    session?.say(PhoneStatus.error("${r.name} wasn’t saved: it was cancelled on the TV. Send it again to add it."))
+    session?.rebuild?.invoke()
+}
+
+fun saveImport(nav: Nav, actions: TunnelActions, session: PhoneSession?): String? {
+    val before = actions.stateNow()
+    val name = before.review?.name ?: return null
+    val live = before.status.isActive || before.pausedUntil != null
+    val id = actions.saveReview() ?: return null
+    nav.importSaved = name
+    nav.importItem = null
+    // The TV leaves Import; the phone's page stays and says the profile was saved, not that the TV moved on.
+    session?.tvLine = "Saved $name"
+    session?.holdFor(PhoneServer.KEEP_MS)
+    session?.say(null)
+    session?.rebuild?.invoke()
+    if (live) {
+        nav.go(Screen.Profiles, focusContent = false)
+        nav.profFocus = id
+        nav.moveStackFocus("pl-$id")
+    } else {
+        nav.go(Screen.Connect)
+    }
+    nav.toast("Saved $name")
+    return name
+}
+
 @Composable
-private fun ColumnScope.ReviewPanel(
-    state: VpnUiState,
-    review: ImportReview,
-    nav: Nav,
-    actions: TunnelActions,
-    req: Requesters,
-    connect: (String) -> Unit,
-) {
-    val hasClientCert = "<cert>" in review.text || "<pkcs12>" in review.text ||
-        review.text.lineSequence().any { it.trim().startsWith("cert ") || it.trim().startsWith("pkcs12 ") }
-    Text("REVIEW · ${review.fileName}".uppercase(), style = TvType.eyebrow(13.5f, 0.55f), maxLines = 1)
-    Column(Modifier.padding(top = 12.dp)) {
-        Text(review.name, style = TvType.display(34f), maxLines = 1)
-        Spacer(Modifier.size(12.dp))
-        DetailGrid(
-            listOf(
-                "Server" to "${review.host} · ${review.protocol.label} ${review.port}",
-                "Sign-in" to when {
-                    review.loginFromPhone && hasClientCert -> "Certificate + password · ${review.username}, from your phone"
-                    review.loginFromPhone -> "Username + password · ${review.username}, from your phone"
-                    review.needsLogin && hasClientCert -> "Certificate + password"
-                    review.needsLogin -> "Username + password"
-                    hasClientCert -> "Certificate"
-                    else -> "Not in the file"
-                },
-            ),
-            columns = 1,
-        )
+private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav: Nav, actions: TunnelActions, req: Requesters) {
+    PanelHeading("Import › Review · ${review.fileName}", review.name)
+    Box(Modifier.padding(top = 12.dp)) {
+        DetailGrid(listOf("Server" to "${review.host} · ${review.protocol.label} ${review.port}", "Sign-in" to reviewSignIn(review)), columns = 1)
     }
     if (review.warnings.isNotEmpty()) {
         Notice(Ic.Bang, review.warnings.joinToString(" "), amber = true, modifier = Modifier.padding(top = 14.dp))
@@ -453,53 +459,276 @@ private fun ColumnScope.ReviewPanel(
         Notice(Ic.Check, "Looks good.$note", modifier = Modifier.padding(top = 14.dp))
     }
     // Many servers also want a client certificate; say where to add one if the file has none.
-    if (!hasClientCert) {
+    if (!reviewHasCert(review)) {
         Text(
-            "There is no client certificate in this file. If the server asks for one, add it in More ways › Certificates.",
+            "There is no client certificate in this file. If the server asks for one, send the .p12 from your phone, or use Import › Certificates.",
             style = TvType.ui(15f, color = Tv.soft(0.62f)),
             modifier = Modifier.padding(top = 10.dp, start = 4.dp),
         )
     }
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         ListRow(
-            "Name", { nav.overlay = Overlay.Text(TextKind.ReviewName, review.name) { actions.renameReview(it) } },
+            "Name",
+            {
+                nav.overlay = Overlay.Form(
+                    FormSpec(
+                        "Import › Review", "Name", "Shown on cards and on Connect.",
+                        listOf(FormField("name", "Name", review.name)), primary = "Save", phone = "import", phoneSection = "review",
+                    ) { v, _ ->
+                        val name = v["name"].orEmpty().trim()
+                        if (name.isEmpty()) {
+                            FormResult.Problems("name", "Type a name")
+                        } else {
+                            actions.renameReview(name)
+                            nav.flash("rv-name")
+                            FormResult.Done
+                        }
+                    },
+                )
+            },
             subtitle = if (state.connections.any { it.name == review.name }) "A profile with this name exists. Saving adds another" else "You can change it later",
+            flash = nav.flashKey == "rv-name",
             trailing = { ValueChip(review.name, it) },
         )
         ListRow(
             "The file itself", {
-                nav.overlay = Overlay.File(review.fileName, review.name, ServerStore.hideSecrets(review.text))
+                nav.overlay = Overlay.File("Import › ${review.fileName}", review.name, ServerStore.hideSecrets(review.text))
             },
             subtitle = "Raw config, ciphers, certificates",
-            trailing = { ValueChip("View", it) },
+            leading = { IconSquare(Ic.File, it) },
+            trailing = { Chevron(it) },
         )
     }
     Spacer(Modifier.weight(1f))
     Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        TvButton("Save and connect", {
-            nav.guard(state) {
-                val id = actions.saveReview()
-                if (id != null) {
-                    nav.go(Screen.Connect)
-                    nav.toast("Saved ${review.name}")
-                    connect(id)
-                }
-            }
-        }, icon = Ic.Power, focusRequester = req["rv-connect"])
-        TvButton("Save", {
-            nav.guard(state) {
-                val id = actions.saveReview()
-                if (id != null) {
-                    nav.go(Screen.Profiles, focusContent = false)
-                    nav.profFocus = id
-                    nav.moveStackFocus("pl-$id")
-                    nav.toast("Saved ${review.name}")
-                }
-            }
-        }, glass = true, focusRequester = req["rv-save"])
+        val session = phoneSession("import")
+        TvButton("Save", { nav.guard(state) { saveImport(nav, actions, session) } }, icon = Ic.Check, focusRequester = req["rv-save"])
         TvButton("Cancel", {
-            actions.cancelReview()
+            dropReview(nav, actions, session)
             nav.contentFocus = Screen.Import
         }, glass = true)
+    }
+}
+
+// ---- The phone's Import page ---------------------------------------------------------
+
+private val ACCEPT = ".ovpn,.conf,.p12,.pfx,.${Backup.EXTENSION},text/plain,application/x-pkcs12,application/octet-stream"
+
+private fun kindOf(item: ImportItem): String = when (item) {
+    is ImportItem.Profile -> if (item.review.kind == VpnKind.WireGuard) "WireGuard profile" else "OpenVPN profile"
+    is ImportItem.Backup -> "Backup"
+    is ImportItem.Pkcs12 -> "Certificate"
+}
+
+/**
+ * Import's page on the phone: a file, pasted text or a link; then what that turned out to be
+ * asks for what it needs (a name and login, a backup's passphrase, a certificate's password and
+ * profile); and the review, saved on either side.
+ */
+fun importForm(state: VpnUiState, nav: Nav): PhoneForm {
+    val review = state.review?.takeIf { it.problem == null }
+    if (review != null) {
+        return PhoneForm(
+            "Import", "Check it, then save it", "The TV shows the same. Save it here or on the TV.",
+            listOf(
+                PhoneSection(
+                    "review", review.fileName.ifEmpty { "The profile" },
+                    fields = listOf(
+                        PhoneField.Info(
+                            "facts",
+                            rows = listOf("Server" to "${review.host} · ${review.protocol.label} ${review.port}", "Sign-in" to reviewSignIn(review)),
+                            text = review.warnings.joinToString(" ").ifEmpty { null },
+                            tone = if (review.warnings.isEmpty()) null else "warn",
+                        ),
+                        PhoneField.Text(
+                            "name", "Name", review.name, required = true,
+                            help = if (state.connections.any { it.name == review.name }) "A profile with this name is on the TV already. Saving adds another." else "Shown on the TV’s cards and on Connect.",
+                        ),
+                    ),
+                    actions = listOf(PhoneAction("save", "Save on the TV", primary = true, needs = listOf("name")), PhoneAction("cancel", "Don’t save it")),
+                ),
+            ),
+        )
+    }
+    val item = nav.importItem
+    val saved = nav.importSaved
+    if (saved != null && item == null) {
+        return PhoneForm(
+            "Import", "Added to the TV", "It is saved on the TV.",
+            listOf(
+                PhoneSection(
+                    "saved",
+                    fields = listOf(PhoneField.Info("done", text = "Saved on the TV as $saved. Connect from the TV.", tone = "ok")),
+                    actions = listOf(PhoneAction("again", "Add another")),
+                ),
+            ),
+        )
+    }
+    val pasted = item is ImportItem.Profile && item.pasted
+    val sections = mutableListOf(
+        PhoneSection("how", fields = listOf(PhoneField.Choice("mode", null, listOf("file" to "File", "paste" to "Paste", "link" to "Link"), if (pasted) "paste" else "file"))),
+        PhoneSection(
+            "file", showWhen = "mode" to "file",
+            fields = listOf(PhoneField.Upload("file", "Choose a file", "The .ovpn, .conf, .p12, .pfx or backup file", ACCEPT, item?.takeIf { !pasted }?.let { Staged(it.name, it.size, kindOf(it)) })),
+        ),
+        PhoneSection(
+            "paste", showWhen = "mode" to "paste",
+            fields = listOf(PhoneField.Paste("paste", "The profile’s text", "client\ndev tun\nremote vpn.example.net 1194", item?.takeIf { pasted }?.let { Staged(it.name, it.size, "OpenVPN profile") })),
+        ),
+        PhoneSection(
+            "link", showWhen = "mode" to "link", note = "The TV downloads it and shows it to you before saving.",
+            fields = listOf(
+                PhoneField.Text("url", "Link", "", input = "url", max = 2048, placeholder = "https://vpn.example.net/home.ovpn", required = true, mirror = true),
+                PhoneField.Text("luser", "Username, if the link asks for one", mirror = true),
+                PhoneField.Text("lpass", "Password, if the link asks for one", secret = true, help = "Used once for the download and not kept.", mirror = true),
+            ),
+            actions = listOf(PhoneAction("download", "Download on the TV", primary = true, needs = listOf("url"))),
+        ),
+    )
+    when (item) {
+        is ImportItem.Profile -> {
+            val asks = item.review.needsLogin && item.review.username.isEmpty()
+            sections += PhoneSection(
+                "profile", if (item.pasted) "The pasted profile" else item.name,
+                fields = listOfNotNull(
+                    PhoneField.Text("name", "Name", item.review.name, required = true, mirror = true, help = "Shown on the TV’s cards and on Connect."),
+                    if (asks) PhoneField.Text("user", "Username") else null,
+                    if (asks) {
+                        PhoneField.Text(
+                            "pw", "Password", secret = true,
+                            help = "It asks for a username and password. They are saved with it on the TV, encrypted. Leave both empty to type them on the TV when you connect.",
+                        )
+                    } else {
+                        null
+                    },
+                ),
+                actions = listOf(PhoneAction("send", "Send to the TV", primary = true, needs = listOf("name"))),
+            )
+        }
+        is ImportItem.Backup -> sections += PhoneSection(
+            "backup", "Restore this backup", note = "It holds the profiles, saved passwords and settings of the device it came from.",
+            fields = listOf(
+                PhoneField.Text("passphrase", "Its passphrase", secret = true, required = true),
+                PhoneField.Choice("same", "When a profile with the same name is on the TV", listOf("both" to "Keep both", "replace" to "Replace it"), "both"),
+            ),
+            actions = listOf(PhoneAction("restore", "Restore on the TV", primary = true, needs = listOf("passphrase"))),
+        )
+        is ImportItem.Pkcs12 -> sections += if (state.connections.isEmpty()) {
+            PhoneSection("p12", "Add this certificate", fields = listOf(PhoneField.Info("none", text = "There is no profile on the TV yet. Add the profile first, then its certificate.", tone = "warn")))
+        } else {
+            PhoneSection("p12", "Add this certificate", fields = p12Fields(state, null), actions = listOf(PhoneAction("attach", "Add the certificate", primary = true, needs = listOf("p12pass", "target"))))
+        }
+        null -> Unit
+    }
+    return PhoneForm("Import", "Add to the TV", "Send a profile, a backup or a certificate. The TV checks it before anything is saved.", sections)
+}
+
+/** Import's phone session, for the Import screen and for Connect when there is no profile yet. */
+@Composable
+fun rememberImportSession(state: VpnUiState, nav: Nav, actions: TunnelActions): PhoneSession? = rememberPhoneSession(
+    "import", state, actions,
+    form = { s -> importForm(s, nav) },
+    // "Add another" goes on working after a save has taken the TV to Connect.
+    keepsWorking = true,
+    onUpload = { field, name, bytes -> importUpload(this, nav, actions, field, name, bytes) },
+    onAction = { action, v -> importAction(this, nav, actions, action, v) },
+)
+
+private fun importUpload(session: PhoneSession, nav: Nav, actions: TunnelActions, field: String, name: String, bytes: ByteArray): PhoneReply {
+    val label = if (field == "paste") "pasted text" else name
+    return when (val found = actions.inspect(name, bytes)) {
+        is Inspected.Problem -> PhoneReply.error(field, found.message)
+        is Inspected.Profile -> {
+            nav.importItem = ImportItem.Profile(name, bytes.size, found.review, field == "paste")
+            nav.importSaved = null
+            session.tvLine = "Received $label"
+            PhoneReply()
+        }
+        Inspected.Backup -> {
+            nav.importItem = ImportItem.Backup(name, bytes)
+            nav.importSaved = null
+            session.tvLine = "Received a backup: $name"
+            PhoneReply()
+        }
+        Inspected.Pkcs12 -> {
+            nav.importItem = ImportItem.Pkcs12(name, bytes)
+            nav.importSaved = null
+            session.tvLine = "Received a certificate: $name"
+            PhoneReply()
+        }
+    }
+}
+
+private suspend fun importAction(session: PhoneSession, nav: Nav, actions: TunnelActions, action: String, v: Map<String, String>): PhoneReply {
+    val state = actions.stateNow()
+    val isLocked = locked(state, nav)
+    return when (action) {
+        "send" -> {
+            val item = nav.importItem as? ImportItem.Profile ?: return PhoneReply.error(null, "The TV doesn’t have the file any more. Send it again.")
+            val name = v["name"].orEmpty().trim()
+            val user = v["user"].orEmpty().trim()
+            val pw = v["pw"].orEmpty()
+            when {
+                name.isEmpty() -> PhoneReply.error("name", "Type a name")
+                user.isEmpty() != pw.isEmpty() -> PhoneReply.error(if (user.isEmpty()) "user" else "pw", "Type both the username and the password, or leave both empty.")
+                else -> {
+                    var review = item.review.copy(name = name)
+                    if (user.isNotEmpty()) review = review.copy(username = user, password = pw, loginFromPhone = true)
+                    nav.importItem = null
+                    actions.openReview(review)
+                    session.tvLine = "${review.name} is on the TV to check"
+                    PhoneReply(PhoneStatus.waiting("On the TV now. Check it, then save it here or on the TV."), clear = listOf("pw"))
+                }
+            }
+        }
+        "download" -> {
+            val outcome = downloadLink(actions, nav, v["url"].orEmpty(), v["luser"].orEmpty(), v["lpass"].orEmpty())
+            if (outcome is Outcome.Done) session.saved("link")
+            if (outcome is Outcome.Done) PhoneReply(PhoneStatus.waiting(outcome.text), clear = listOf("lpass")) else outcome.toReply()
+        }
+        "save" -> {
+            val review = state.review ?: return PhoneReply.error(null, "There is nothing on the TV to save. Send it again.")
+            val name = v["name"].orEmpty().trim()
+            when {
+                name.isEmpty() -> PhoneReply.error("name", "Type a name")
+                isLocked -> PhoneReply.error(null, LOCKED_ON_TV)
+                else -> {
+                    if (name != review.name) actions.renameReview(name)
+                    saveImport(nav, actions, session)
+                    session.saved("review")
+                    PhoneReply(holdMs = PhoneServer.KEEP_MS)
+                }
+            }
+        }
+        "cancel" -> {
+            state.review?.let { nav.toast("${it.name} was not saved") }
+            actions.cancelReview()
+            PhoneReply()
+        }
+        "restore" -> {
+            val item = nav.importItem as? ImportItem.Backup ?: return PhoneReply.error(null, "The TV doesn’t have the backup any more. Send it again.")
+            if (isLocked) return PhoneReply.error(null, LOCKED_ON_TV)
+            val outcome = restoreBackup(actions, nav, item.bytes, v["passphrase"].orEmpty(), v["same"] == "replace", "passphrase")
+            if (outcome is Outcome.Done) {
+                nav.importItem = null
+                session.tvLine = outcome.text.trimEnd('.')
+            }
+            outcome.toReply(clear = listOf("passphrase"), holdMs = PhoneServer.KEEP_MS)
+        }
+        "attach" -> {
+            val item = nav.importItem as? ImportItem.Pkcs12 ?: return PhoneReply.error(null, "The TV doesn’t have the certificate any more. Send it again.")
+            if (isLocked) return PhoneReply.error(null, LOCKED_ON_TV)
+            val outcome = attachCertificate(state, actions, nav, item.bytes, v, null)
+            if (outcome is Outcome.Done) {
+                nav.importItem = null
+                session.tvLine = "Added the certificate to ${state.connection(v["target"])?.name ?: "the profile"}"
+            }
+            outcome.toReply(clear = listOf("p12pass"), holdMs = PhoneServer.KEEP_MS)
+        }
+        "again" -> {
+            nav.importSaved = null
+            PhoneReply()
+        }
+        else -> PhoneReply()
     }
 }

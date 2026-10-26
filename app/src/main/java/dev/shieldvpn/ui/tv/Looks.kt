@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -145,6 +146,7 @@ fun LookCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     onFocus: () -> Unit = {},
+    onBlur: () -> Unit = {},
     focusRequester: FocusRequester? = null,
 ) {
     val f = rememberFocusState()
@@ -174,7 +176,7 @@ fun LookCard(
                 drawRect(Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.3f)))
             }
             .then(if (f.focused) Modifier.border(3.dp, Tv.Focus, shape) else Modifier)
-            .then(if (onClick != null) Modifier.tvFocus(f, onClick, focusRequester, onFocus) else Modifier),
+            .then(if (onClick != null) Modifier.onFocusChanged { if (!it.isFocused) onBlur() }.tvFocus(f, onClick, focusRequester, onFocus) else Modifier),
     ) {
         MsIcon(iconPath, iconSize, modifier = Modifier.padding(14.dp))
         Column(

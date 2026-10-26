@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import org.json.JSONObject
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -13,7 +14,8 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Keeps a login for each server. Usernames are stored as plain text; passwords
- * are encrypted with a key held in the Android Keystore.
+ * are encrypted with a key held in the Android Keystore. A WireGuard profile's keys are
+ * kept the same way, as its login.
  */
 object CredentialStore {
 
@@ -25,7 +27,13 @@ object CredentialStore {
     private const val LEGACY_USER = "username"
     private const val LEGACY_PASS = "password"
 
-    data class Credentials(val username: String, val password: String)
+    data class Credentials(val username: String, val password: String) {
+        // So a log line or a crash report never carries the password.
+        override fun toString() = "Credentials($username, password hidden)"
+    }
+
+    // The keystore key, looked up once: each lookup is a call into keystore2.
+    @Volatile private var cachedKey: SecretKey? = null
 
     fun load(context: Context, profileId: String): Credentials {
         val prefs = prefs(context)
@@ -33,6 +41,17 @@ object CredentialStore {
         val password = prefs.getString(passKey(profileId), null)?.let(::decrypt).orEmpty()
         return Credentials(username, password)
     }
+
+    /** The username alone: no decrypting, for lists that only show it. */
+    fun username(context: Context, profileId: String): String =
+        prefs(context).getString(userKey(profileId), null).orEmpty()
+
+    /**
+     * Whether a password is saved, without decrypting it. One that no longer decrypts still counts;
+     * Connect then finds it empty and asks for the login.
+     */
+    fun hasPassword(context: Context, profileId: String): Boolean =
+        !prefs(context).getString(passKey(profileId), null).isNullOrEmpty()
 
     fun save(context: Context, profileId: String, username: String, password: String) {
         prefs(context).edit()
@@ -50,9 +69,27 @@ object CredentialStore {
 
     fun secret(context: Context, name: String): String? = prefs(context).getString("secret.$name", null)?.let(::decrypt)
 
+    fun hasSecret(context: Context, name: String): Boolean = prefs(context).contains("secret.$name")
+
+    /** A WireGuard profile's keys, or null when none are saved or they can't be read. */
+    fun wireGuard(context: Context, profileId: String): WireGuardFile.Secrets? {
+        val text = prefs(context).getString(wgKey(profileId), null)?.let(::decrypt)?.takeIf { it.isNotEmpty() } ?: return null
+        return runCatching {
+            val json = JSONObject(text)
+            val psk = json.optJSONObject("presharedKeys")
+            WireGuardFile.Secrets(json.getString("privateKey"), psk?.keys()?.asSequence()?.associateWith { psk.getString(it) }.orEmpty())
+        }.getOrNull()
+    }
+
+    fun saveWireGuard(context: Context, profileId: String, secrets: WireGuardFile.Secrets) {
+        val json = JSONObject().put("privateKey", secrets.privateKey).put("presharedKeys", JSONObject(secrets.presharedKeys))
+        prefs(context).edit().putString(wgKey(profileId), encrypt(json.toString())).apply()
+    }
+
     fun copy(context: Context, fromId: String, toId: String) {
         val login = load(context, fromId)
         save(context, toId, login.username, login.password)
+        wireGuard(context, fromId)?.let { saveWireGuard(context, toId, it) }
     }
 
     fun clear(context: Context) {
@@ -63,6 +100,7 @@ object CredentialStore {
         prefs(context).edit()
             .remove(userKey(profileId))
             .remove(passKey(profileId))
+            .remove(wgKey(profileId))
             .apply()
     }
 
@@ -84,6 +122,8 @@ object CredentialStore {
     private fun userKey(profileId: String) = "user.$profileId"
 
     private fun passKey(profileId: String) = "pass.$profileId"
+
+    private fun wgKey(profileId: String) = "wg.$profileId"
 
     /** Returns "iv:ciphertext", both parts Base64. */
     private fun encrypt(plain: String): String {
@@ -110,7 +150,9 @@ object CredentialStore {
         }.getOrDefault("")
     }
 
-    private fun key(): SecretKey {
+    private fun key(): SecretKey = cachedKey ?: synchronized(this) { cachedKey ?: loadKey().also { cachedKey = it } }
+
+    private fun loadKey(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")

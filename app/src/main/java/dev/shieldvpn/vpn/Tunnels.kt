@@ -30,6 +30,9 @@ object Tunnels {
             val roam: Boolean = true,
             val stayAwake: Boolean = false,
         ) : Plan {
+            // So a log line or a crash report never carries the file's keys or the password.
+            override fun toString() = "Plan.Ready($connectionId)"
+
             /** All of it goes to the VPN's process in the start intent. */
             fun toBundle(): Bundle = Bundle().apply {
                 putString("id", connectionId)
@@ -89,6 +92,10 @@ object Tunnels {
     fun plan(context: Context, id: String, login: CredentialStore.Credentials? = null): Plan {
         val connection = ConnectionStore.list(context).firstOrNull { it.id == id }
             ?: return Plan.Fails(id, "This profile no longer exists.")
+        if (ServerStore.hidden(context, connection.serverId)) return Plan.Fails(id, "This profile no longer exists.")
+        if (ServerStore.list(context).firstOrNull { it.id == connection.serverId }?.kind == VpnKind.WireGuard) {
+            return Plan.Fails(id, "WireGuard can’t connect yet in this build.")
+        }
         val base = ServerStore.effectiveConfig(context, connection.serverId)
             ?: return Plan.Fails(id, "The profile's file is missing. Import it again.")
         if (!ServerStore.hasCertificate(base)) {
@@ -148,12 +155,12 @@ object Tunnels {
         appendLine(if (s.compress) "compress=yes" else "compress=asym")
     }
 
-    fun start(context: Context, plan: Plan.Ready) {
+    /** Returns false when Android refused to start the service. */
+    fun start(context: Context, plan: Plan.Ready): Boolean =
         // Newer Android versions refuse this from the background unless the service is already running.
         runCatching { context.startForegroundService(ShieldVpnService.connectIntent(context, plan)) }.onFailure {
             VpnController.update(VpnStatus.Failed(plan.connectionId, "Android did not let ${APP_NAME} connect in the background. Open ${APP_NAME} and connect."))
-        }
-    }
+        }.isSuccess
 
     fun stop(context: Context) {
         // Refused only when the service is not running, and then there is no tunnel to stop.

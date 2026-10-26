@@ -3,21 +3,16 @@ package dev.shieldvpn.phone
 import dev.shieldvpn.APP_NAME
 
 /**
- * The page a phone opens from the TV's QR code: one file, no outside resources, in Tunnel's look.
- * Opened from the QR code, the link carries the code, and the page shows it for the person to
- * check against the TV; typed in by hand, it asks for it.
+ * The page a phone opens from the TV's QR code: one file, no outside resources, in the app's look.
+ * It is the same for every screen. Opened from the QR code, the link carries the code, and the
+ * page shows it for the person to check against the TV; typed in by hand, it asks for it. Then it
+ * asks the TV for the screen's form, draws it, and draws it again whenever the TV changes it.
  */
 object PhonePage {
 
-    /** The page; [codeOk] when the link's code is the TV's, so the file's name and size may show. */
-    fun html(page: PhoneBridge.Page, code: String, codeOk: Boolean = false): String {
-        val given = code.filter { it.isDigit() }.take(6)
-        val body = when (page) {
-            is PhoneBridge.Page.Upload -> upload(page.accept, page.paste, page.login)
-            is PhoneBridge.Page.Type -> typed(page.label, page.secret)
-            is PhoneBridge.Page.Download -> download(page.fileName, page.body.size, codeOk)
-        }
-        return """<!doctype html>
+    /** The page. Nothing about a session is in it: that comes from the TV once the code checks out. */
+    val shell: String by lazy {
+        """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#05070A">
@@ -27,114 +22,24 @@ object PhonePage {
 $WEB
 <main>
   <div class="brand"><span class="mark">$MARK</span>${esc(APP_NAME)}</div>
-  <h1>${esc(page.title)}</h1>
-  <p class="lede">${esc(page.lede)}</p>
-  ${codeCard(given)}
-  <section class="card">$body
-    <div id="status" class="status" role="status"></div>
-  </section>
+  <h1 id="title">${esc(APP_NAME)}</h1>
+  <p class="lede" id="lede">Looking for the TV…</p>
+  <section class="card" id="codecard"></section>
+  <div id="view"></div>
   <p class="foot">It stays on your home network. This page works while the TV shows its code.</p>
 </main>
 <script>
-const given = "$given";
+const APP = ${org.json.JSONObject.quote(APP_NAME).replace("</", "<\\/")};
 $SCRIPT
 </script>
 </body></html>"""
     }
-
-    /** The code from the QR link, to check against the TV; or a box to type it into. */
-    private fun codeCard(code: String): String = if (code.length == 6) {
-        val digit = { d: Char -> """<span class="digit">$d</span>""" }
-        """<section class="card"><div class="eyebrow">Code on the TV</div>
-    <div class="digits">${code.take(3).map(digit).joinToString("")}<span class="gap"></span>${code.drop(3).map(digit).joinToString("")}</div>
-    <p class="check">$CHECK Check that the TV shows this code.</p></section>"""
-    } else {
-        """<section class="card"><label class="eyebrow" for="code">Code on the TV</label>
-    <input id="code" class="codein" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000"></section>"""
-    }
-
-    /**
-     * Pick a file or paste it. With [login], a profile that asks for a username and password
-     * (checked here, as the TV checks it) gets a second step for them before it is sent.
-     */
-    private fun upload(accept: String, paste: Boolean, login: Boolean): String {
-        val what = "The ${kinds(accept)}"
-        val modes = if (paste) {
-            """<div class="seg" role="group"><button id="modeFile" type="button" aria-pressed="true">File</button><button id="modePaste" type="button" aria-pressed="false">Paste text</button></div>"""
-        } else {
-            ""
-        }
-        val area = if (paste) {
-            """<textarea id="text" hidden placeholder="client&#10;dev tun&#10;remote vpn.example.net 1194" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>"""
-        } else {
-            ""
-        }
-        val signIn = if (login) {
-            """
-    <div id="step2" hidden>
-      <div class="file chosen"><span class="icon">${doc("#4BE3A1")}</span><span class="txt"><b id="step2Name"></b><small id="step2Sub"></small></span><button id="back" class="link" type="button">Change</button></div>
-      <label class="lbl" for="user">Username</label>
-      <div class="fieldrow"><input id="user" class="field" type="text" maxlength="256" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off"></div>
-      <label class="lbl" for="pass">Password</label>
-      <div class="fieldrow"><input id="pass" class="field" type="password" maxlength="256" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off"><button id="eye2" class="eye" type="button" aria-label="Show">$EYE</button></div>
-      <p class="hint">Saved with the profile on the TV, encrypted. Leave them empty to type them on the TV when you connect.</p>
-    </div>"""
-        } else {
-            ""
-        }
-        return """<div id="step1">$modes
-    <label class="pick" id="pick"><input id="file" type="file" accept="${esc(accept)}"><span class="icon">${doc("rgba(235,242,248,.8)")}</span>
-      <span class="txt"><b id="pickName">Choose a file</b><small id="pickSub" data-sub="${esc(what)}">${esc(what)}</small></span><span class="change" id="pickChange" hidden>Change</span></label>
-    $area</div>$signIn
-    <button id="go" class="btn" type="button" disabled><span id="goLabel">Send to the TV</span>$ARROW</button>"""
-    }
-
-    private fun typed(label: String, secret: Boolean): String {
-        val eye = if (secret) """<button id="eye" class="eye" type="button" aria-label="Show">$EYE</button>""" else ""
-        return """<label class="lbl" for="text">${esc(label)}</label>
-    <div class="fieldrow"><input id="text" class="field" type="${if (secret) "password" else "text"}" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off">$eye</div>
-    <button id="go" class="btn" type="button" disabled>Send to the TV$ARROW</button>"""
-    }
-
-    private fun download(name: String, size: Int, codeOk: Boolean): String {
-        val (title, sub) = if (codeOk) name to size(size) else "The file" to "Its name shows once the code is right"
-        return """<div class="file"><span class="icon">${doc("#4BE3A1")}</span><span><b>${esc(title)}</b><small>${esc(sub)}</small></span></div>
-    <a id="dl" class="btn" href="#" data-name="${esc(name)}">Download$DOWN</a>"""
-    }
-
-    /** "the .ovpn, .conf or backup file", from an input's accept list. */
-    private fun kinds(accept: String): String {
-        val exts = accept.split(',').map { it.trim() }.filter { it.startsWith('.') }
-            .map { if (it.endsWith("backup")) "backup" else it }.distinct()
-        return when (exts.size) {
-            0 -> "file"
-            1 -> "${exts[0]} file"
-            else -> exts.dropLast(1).joinToString(", ") + " or " + exts.last() + " file"
-        }
-    }
-
-    private fun size(bytes: Int): String = when {
-        bytes < 1024 -> "$bytes bytes"
-        bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024f)
-        else -> "%.1f MB".format(bytes / 1048576f)
-    }
-
-    private fun doc(stroke: String) =
-        """<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="$stroke" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>"""
 
     private fun esc(s: String): String = s
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
 
     private const val MARK =
         """<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F3F6F8" stroke-width="2" stroke-linecap="round"><path d="M4 20v-9a8 8 0 0 1 16 0v9"/><path d="M8.5 20v-8a3.5 3.5 0 0 1 7 0v8"/></svg>"""
-    private const val CHECK =
-        """<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4BE3A1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.8"/></svg>"""
-    private const val ARROW =
-        """<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#071018" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>"""
-    private const val DOWN =
-        """<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#071018" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="M6 11l6 6 6-6"/><path d="M5 20h14"/></svg>"""
-    private const val EYE =
-        """<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(235,242,248,.6)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>"""
 
     /** A faint corner of the TV's network background. */
     private const val WEB = """<svg class="web" viewBox="0 0 400 260" preserveAspectRatio="xMidYMin slice" aria-hidden="true">
@@ -143,7 +48,7 @@ $SCRIPT
 </svg>"""
 
     private const val CSS = """
-:root{color-scheme:dark;--page:#05070A;--ink:#F3F6F8;--soft:rgba(235,242,248,.64);--faint:rgba(235,242,248,.42);--mint:#4BE3A1;--red:#FF8A7A;--glass:rgba(16,23,33,.72);--edge:rgba(255,255,255,.10);--well:rgba(255,255,255,.055)}
+:root{color-scheme:dark;--page:#05070A;--ink:#F3F6F8;--soft:rgba(235,242,248,.64);--faint:rgba(235,242,248,.42);--mint:#4BE3A1;--red:#FF8A7A;--amber:#FFB547;--glass:rgba(16,23,33,.72);--edge:rgba(255,255,255,.10);--well:rgba(255,255,255,.055)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 [hidden]{display:none!important}
 html{background:var(--page)}
@@ -154,7 +59,12 @@ main{position:relative;max-width:440px;margin:0 auto;padding:calc(26px + env(saf
 .mark{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;background:var(--glass);box-shadow:inset 0 0 0 1px var(--edge)}
 h1{margin:34px 0 0;font-size:31px;line-height:1.08;letter-spacing:-.025em;font-weight:800}
 .lede{margin:10px 0 0;color:var(--soft);font-size:16px}
-.card{margin-top:22px;padding:18px;border-radius:24px;background:var(--glass);box-shadow:inset 0 0 0 1px var(--edge),0 24px 60px -30px rgba(0,0,0,.8);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.card{margin-top:22px;padding:18px;border-radius:24px;background:var(--glass);box-shadow:inset 0 0 0 1px var(--edge),0 24px 60px -30px rgba(0,0,0,.8);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);transition:box-shadow .3s}
+.bare{margin-top:22px}
+.bare .seg{margin-bottom:0}
+.card.editing{box-shadow:inset 0 0 0 2px rgba(75,227,161,.7),0 24px 60px -30px rgba(0,0,0,.8)}
+.card h2{margin:0 0 14px;font-size:18px;line-height:1.25;font-weight:750;letter-spacing:-.01em}
+.tvnow{display:inline-block;margin:-4px 0 12px;padding:4px 10px;border-radius:99px;background:rgba(75,227,161,.14);color:var(--mint);font-size:12.5px;font-weight:700}
 .eyebrow{display:block;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
 .digits{display:flex;justify-content:center;gap:8px;margin:14px 0 4px}
 .digits .gap{width:10px}
@@ -164,168 +74,701 @@ h1{margin:34px 0 0;font-size:31px;line-height:1.08;letter-spacing:-.025em;font-w
 .codein{display:block;width:100%;margin-top:12px;padding:14px 0;border:0;border-radius:16px;background:var(--well);box-shadow:inset 0 0 0 1px var(--edge);color:var(--ink);text-align:center;font:700 30px/1 ui-rounded,-apple-system,Roboto,sans-serif;letter-spacing:.32em;font-variant-numeric:tabular-nums;outline:none}
 .codein:focus{box-shadow:inset 0 0 0 2px var(--mint)}
 .codein::placeholder{color:rgba(235,242,248,.18)}
-.seg{display:grid;grid-template-columns:1fr 1fr;padding:4px;border-radius:14px;background:var(--well);margin-bottom:14px}
-.seg button{padding:10px;border:0;border-radius:11px;background:none;color:var(--soft);font-family:inherit;font-size:15px;font-weight:600;line-height:1;cursor:pointer}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;padding:4px;border-radius:14px;background:var(--well);margin-bottom:14px}
+.seg button{padding:10px 6px;border:0;border-radius:11px;background:none;color:var(--soft);font-family:inherit;font-size:15px;font-weight:600;line-height:1;cursor:pointer}
 .seg button[aria-pressed=true]{background:rgba(255,255,255,.12);color:var(--ink)}
 .pick{display:flex;align-items:center;gap:14px;padding:16px;border-radius:18px;background:var(--well);box-shadow:inset 0 0 0 1px var(--edge);cursor:pointer}
 .pick input{display:none}
+.pick.bad{box-shadow:inset 0 0 0 2px var(--red)}
 .icon{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;flex:none;background:rgba(255,255,255,.07)}
-.pick.chosen .icon{background:rgba(75,227,161,.14)}
+.pick.chosen .icon,.file .icon{background:rgba(75,227,161,.14)}
 .pick b{display:block;font-size:16px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pick small{display:block;color:var(--faint);font-size:13.5px;margin-top:2px}
-.pick .txt{min-width:0;flex:1}
+.pick small,.file small{display:block;color:var(--faint);font-size:13.5px;margin-top:2px}
+.txt{min-width:0;flex:1}
 .pick .change{color:var(--mint);font-weight:650;font-size:14.5px}
 textarea,.field{width:100%;border:0;border-radius:16px;background:var(--well);box-shadow:inset 0 0 0 1px var(--edge);color:var(--ink);outline:none}
-textarea{display:block;padding:14px 16px;min-height:190px;resize:vertical;font:13.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
+textarea{display:block;padding:14px 16px;min-height:120px;resize:vertical;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
+textarea.paste{min-height:190px;font-size:13.5px}
 textarea:focus,.field:focus{box-shadow:inset 0 0 0 2px var(--mint)}
+textarea.bad,.field.bad{box-shadow:inset 0 0 0 2px var(--red)}
 textarea::placeholder,.field::placeholder{color:rgba(235,242,248,.28)}
+textarea:disabled,.field:disabled{opacity:.55}
 .lbl{display:block;margin:0 0 10px;font-size:14px;font-weight:650;color:var(--soft)}
+.fld+.fld{margin-top:16px}
 .fieldrow{position:relative}
 .field{padding:16px 54px 16px 16px;font-family:inherit;font-size:19px;font-weight:500;line-height:1.2}
 .eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:40px;height:40px;border:0;border-radius:12px;background:none;display:grid;place-items:center;cursor:pointer}
+.help{margin:8px 2px 0;color:var(--faint);font-size:13.5px}
+.err{margin:8px 2px 0;color:var(--red);font-size:14px;font-weight:600}
+.note{margin:0 0 14px;color:var(--soft);font-size:14.5px}
 .file{display:flex;align-items:center;gap:14px}
 .file b{display:block;font-size:16px;font-weight:650;word-break:break-all}
-.file small{color:var(--faint);font-size:13.5px}
-.file .txt{min-width:0;flex:1}
-.chosen{margin-bottom:20px}
-.link{padding:8px 4px;border:0;background:none;color:var(--mint);font-family:inherit;font-size:14.5px;font-weight:650;cursor:pointer}
-.fieldrow+.lbl{margin-top:16px}
-.hint{margin:12px 2px 0;color:var(--faint);font-size:13.5px}
-.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;margin-top:16px;padding:17px;border:0;border-radius:999px;background:#F4F7FA;color:#071018;font-family:inherit;font-size:17px;font-weight:700;line-height:1;text-decoration:none;cursor:pointer;transition:transform .12s,opacity .2s}
+.swrow{display:flex;align-items:center;gap:14px;padding:6px 2px;cursor:pointer}
+.swrow b{display:block;font-size:16px;font-weight:650}
+.swrow small{display:block;color:var(--faint);font-size:13.5px;margin-top:2px}
+.sw{appearance:none;-webkit-appearance:none;margin:0;width:52px;height:30px;border-radius:99px;background:rgba(255,255,255,.18);position:relative;flex:none;cursor:pointer;transition:background .2s}
+.sw::after{content:"";position:absolute;top:4px;left:4px;width:22px;height:22px;border-radius:50%;background:rgba(235,242,248,.75);transition:transform .2s,background .2s}
+.sw:checked{background:var(--mint)}
+.sw:checked::after{transform:translateX(22px);background:#06140D}
+.opts{display:flex;flex-direction:column;gap:8px}
+.opt{display:flex;align-items:center;gap:12px;width:100%;padding:14px 16px;border:0;border-radius:16px;background:var(--well);box-shadow:inset 0 0 0 1px var(--edge);color:var(--ink);font-family:inherit;text-align:left;cursor:pointer}
+.opt b{display:block;font-size:16px;font-weight:650}
+.opt small{display:block;color:var(--faint);font-size:13.5px;margin-top:2px}
+.opt .dot{width:22px;height:22px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 2px rgba(235,242,248,.35);display:grid;place-items:center}
+.opt[aria-pressed=true]{box-shadow:inset 0 0 0 2px var(--mint)}
+.opt[aria-pressed=true] .dot{background:var(--mint);box-shadow:none}
+.facts{margin:0;display:grid;gap:12px}
+.facts dt{color:var(--faint);font-size:13px;font-weight:650}
+.facts dd{margin:2px 0 0;font:15px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-word}
+.info{margin:12px 0 0;padding:12px 14px;border-radius:14px;background:var(--well);color:var(--soft);font-size:14.5px}
+.info.ok{background:rgba(75,227,161,.12);color:var(--mint)}
+.info.warn{background:rgba(255,181,71,.12);color:var(--amber)}
+.info.bad{background:rgba(255,138,122,.12);color:var(--red)}
+.copy pre{margin:0;padding:14px;border-radius:14px;background:rgba(0,0,0,.35);white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(235,242,248,.86)}
+.copy .mini{margin-top:8px}
+.mini{padding:9px 14px;border:0;border-radius:99px;background:var(--well);box-shadow:inset 0 0 0 1px var(--edge);color:var(--ink);font-family:inherit;font-size:14px;font-weight:650;cursor:pointer}
+details.fold summary{list-style:none;display:flex;align-items:center;justify-content:space-between;font-size:16px;font-weight:700;cursor:pointer}
+details.fold summary::-webkit-details-marker{display:none}
+details.fold summary::after{content:"";width:9px;height:9px;border-right:2px solid var(--soft);border-bottom:2px solid var(--soft);transform:rotate(45deg);margin-right:6px;transition:transform .2s}
+details.fold[open] summary{margin-bottom:14px}
+details.fold[open] summary::after{transform:rotate(-135deg)}
+.actions{display:flex;flex-direction:column;gap:10px;margin-top:18px}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:17px;border:0;border-radius:999px;background:#F4F7FA;color:#071018;font-family:inherit;font-size:17px;font-weight:700;line-height:1;text-decoration:none;cursor:pointer;transition:transform .12s,opacity .2s}
+.btn.ghost{background:var(--well);color:var(--ink);box-shadow:inset 0 0 0 1px var(--edge)}
+.btn.danger{background:rgba(255,138,122,.14);color:var(--red)}
 .btn:active{transform:scale(.98)}
 .btn:disabled{opacity:.35}
+.btn svg{flex:none}
+.confirm{margin-top:18px;padding:16px;border-radius:18px;background:rgba(255,138,122,.12)}
+.confirm p{margin:0 0 12px;font-weight:600}
+.confirm .actions{margin-top:0}
 .status{display:none;align-items:flex-start;gap:10px;margin-top:14px;padding:13px 15px;border-radius:16px;font-size:15px;font-weight:550}
 .status.show{display:flex}
-.status.ok{background:rgba(75,227,161,.12);color:var(--mint)}
-.status.bad{background:rgba(255,138,122,.12);color:var(--red)}
-.status.busy{background:var(--well);color:var(--soft)}
+.status.done{background:rgba(75,227,161,.12);color:var(--mint)}
+.status.error{background:rgba(255,138,122,.12);color:var(--red)}
+.status.busy,.status.waiting{background:var(--well);color:var(--soft)}
 .status svg{flex:none;margin-top:1px}
+.state{display:flex;gap:12px;align-items:flex-start;color:var(--soft);font-size:15.5px}
+.state svg{flex:none;margin-top:2px}
+.state b{color:var(--ink)}
 .spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .foot{margin:22px 4px 0;color:var(--faint);font-size:13px;text-align:center}
 """
 
     private const val SCRIPT = """
-const ${'$'} = (id) => document.getElementById(id);
-const code = () => given || (${'$'}('code') ? ${'$'}('code').value.replace(/\D/g, '') : '');
+const byId = (id) => document.getElementById(id);
 const ICON = {
-  ok: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.8"/></svg>',
-  bad: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.5h.01"/></svg>',
+  done: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.8"/></svg>',
+  error: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.5h.01"/></svg>',
   busy: '<svg class="spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9"/></svg>',
+  waiting: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="11" rx="2"/><path d="M8 20h8"/></svg>',
+  check: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4BE3A1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.8"/></svg>',
+  eye: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(235,242,248,.6)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  arrow: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>',
+  down: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="M6 11l6 6 6-6"/><path d="M5 20h14"/></svg>',
+  dot: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#071018" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
 };
-const status = (kind, text) => {
-  const s = ${'$'}('status');
-  s.className = 'status show ' + kind;
-  s.innerHTML = ICON[kind] + '<span></span>';
-  s.lastChild.textContent = text;
-};
+const doc = (stroke) => '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="' + stroke + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+const OFFLINE = 'Can’t reach the TV. Your phone must be on the same Wi-Fi as the TV, with mobile data and any VPN off.';
 const size = (n) => n < 1024 ? n + ' bytes' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
-const file = ${'$'}('file'), text = ${'$'}('text'), go = ${'$'}('go'), step2 = ${'$'}('step2');
-let mode = file ? 'file' : 'text';
-// A profile asks for a login when it has an auth-user-pass line and no login inside it, as the TV reads it.
-let needsLogin = false;
-const asksLogin = (t) => !/<auth-user-pass>[\s\S]*?<\/auth-user-pass>/.test(t) && /^[ \t]*auth-user-pass\b/m.test(t);
-const onStep2 = () => !!step2 && !step2.hidden;
-const label = () => { if (${'$'}('goLabel')) ${'$'}('goLabel').textContent = needsLogin && !onStep2() ? 'Next' : 'Send to the TV'; };
-const ready = () => code().length === 6 && (onStep2() || (mode === 'file' ? !!(file.files && file.files[0]) : !!(text && text.value.trim())));
-const update = () => { if (go) go.disabled = !ready(); };
-const check = async () => {
-  if (!step2) return;
-  const f = mode === 'file' && file.files && file.files[0];
-  const t = mode === 'file' ? (f && f.size < 524288 ? await f.text() : '') : text.value;
-  needsLogin = asksLogin(t);
-  label();
-};
-const codeIn = ${'$'}('code');
-if (codeIn) codeIn.oninput = () => {
-  const d = codeIn.value.replace(/\D/g, '').slice(0, 6);
-  codeIn.value = d.length > 3 ? d.slice(0, 3) + ' ' + d.slice(3) : d;
-  update();
-};
-const showFile = (name, bytes) => {
-  ${'$'}('pick').classList.toggle('chosen', !!name);
-  ${'$'}('pickName').textContent = name || 'Choose a file';
-  ${'$'}('pickSub').textContent = name ? size(bytes) : ${'$'}('pickSub').dataset.sub;
-  ${'$'}('pickChange').hidden = !name;
-};
-if (file) file.onchange = () => { const f = file.files[0]; showFile(f && f.name, f && f.size); update(); check(); };
-const setMode = (m) => {
-  mode = m;
-  ${'$'}('modeFile').setAttribute('aria-pressed', m === 'file');
-  ${'$'}('modePaste').setAttribute('aria-pressed', m === 'text');
-  ${'$'}('pick').hidden = m !== 'file';
-  text.hidden = m !== 'text';
-  update();
-  check();
-};
-if (${'$'}('modeFile')) { ${'$'}('modeFile').onclick = () => setMode('file'); ${'$'}('modePaste').onclick = () => { setMode('text'); text.focus(); }; }
-if (text) { text.oninput = () => { update(); check(); }; text.onkeydown = (e) => { if (e.key === 'Enter' && text.tagName === 'INPUT' && go && !go.disabled) go.click(); }; }
-if (${'$'}('eye')) ${'$'}('eye').onclick = () => { text.type = text.type === 'password' ? 'text' : 'password'; text.focus(); };
-const lede = document.querySelector('.lede'), ledeText = lede.textContent;
-const showStep = (two) => {
-  ${'$'}('step1').hidden = two;
-  step2.hidden = !two;
-  lede.textContent = two ? 'It asks for a username and password. Type them here, and they go to the TV with it.' : ledeText;
-  if (two) {
-    const f = mode === 'file' && file.files[0];
-    ${'$'}('step2Name').textContent = f ? f.name : 'Pasted profile';
-    ${'$'}('step2Sub').textContent = size(f ? f.size : new Blob([text.value]).size);
-    ${'$'}('user').focus();
-  }
-  ${'$'}('status').className = 'status';
-  label();
-  update();
-};
-if (step2) {
-  ${'$'}('back').onclick = () => showStep(false);
-  ${'$'}('eye2').onclick = () => { const p = ${'$'}('pass'); p.type = p.type === 'password' ? 'text' : 'password'; p.focus(); };
-  ${'$'}('pass').onkeydown = (e) => { if (e.key === 'Enter' && !go.disabled) go.click(); };
-}
-if (go) go.onclick = async () => {
-  if (needsLogin && step2 && !onStep2()) return showStep(true);
-  const f = mode === 'file' && file.files[0];
-  const headers = { 'X-Code': code(), 'X-Name': encodeURIComponent(f ? f.name : 'pasted.ovpn') };
-  if (onStep2()) {
-    const u = ${'$'}('user').value.trim(), pw = ${'$'}('pass').value;
-    // Both or neither: a username alone would be saved as a login that can't connect.
-    if ((u === '') !== (pw === '')) return status('bad', 'Type both the username and the password, or leave both empty.');
-    if (u) {
-      headers['X-User'] = encodeURIComponent(u);
-      headers['X-Pass'] = encodeURIComponent(pw);
-    }
-  }
-  go.disabled = true;
-  status('busy', 'Sending…');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const json = async (r) => { try { return await r.json(); } catch (e) { return null; } };
+
+/**
+ * Every request to the TV goes through here, so each answer the TV can give is handled once:
+ * a wrong or ended code, too many tries, or a refusal said in words.
+ */
+async function call(url, opts, where) {
+  let r;
   try {
-    const r = await fetch('/send', { method: 'POST', headers, body: f || text.value });
-    status(r.ok ? 'ok' : 'bad', await r.text());
-    if (r.ok && step2) ${'$'}('pass').value = '';
+    r = await fetch(url, opts);
   } catch (e) {
-    status('bad', 'Can’t reach the TV. Your phone must be on the same Wi-Fi as the TV, with mobile data and any VPN off.');
+    showStatus(where, { kind: 'error', text: OFFLINE });
+    return null;
   }
-  update();
-};
+  const j = (r.headers.get('content-type') || '').startsWith('application/json') ? await json(r) : null;
+  if (r.status === 403 && j && j.error === 'code') { wrongCode(j.text); return null; }
+  if (r.status === 410) { pollId++; stateView('ended'); return null; }
+  if (r.status === 429) { stateView('wait', j && j.text); return null; }
+  if (!r.ok) { showStatus(where, { kind: 'error', text: (j && j.text) || 'The TV refused that.' }); return null; }
+  return { r: r, j: j };
+}
+
+/** What a POST to the TV carries: the page's own header, which another site can't send. */
+const post = (body, type) => ({ method: 'POST', headers: Object.assign({ 'X-Phone': '1' }, type ? { 'Content-Type': type } : {}), body: body });
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+const fromLink = (new URLSearchParams(location.search).get('c') || '').replace(/\D/g, '').slice(0, 6);
+let code = fromLink;
+let rev = 0, form = null, pollId = 0, sending = null, lastFocus = null, statusNow = null, view = 'none';
+// What the person typed, by field, and whether it differs from what the TV last said.
+const local = {}, dirty = {}, pending = {}, errors = {}, openFolds = {}, mirrorTimers = {};
+
+// ---- The code ------------------------------------------------------------------
+function codeCard(problem) {
+  const c = byId('codecard');
+  c.innerHTML = '';
+  if (code.length === 6 && !problem) {
+    c.appendChild(el('div', 'eyebrow', 'Code on the TV'));
+    const d = el('div', 'digits');
+    code.split('').forEach((n, i) => { if (i === 3) d.appendChild(el('span', 'gap')); d.appendChild(el('span', 'digit', n)); });
+    c.appendChild(d);
+    const p = el('p', 'check');
+    p.innerHTML = ICON.check + '<span>Check that the TV shows this code.</span>';
+    c.appendChild(p);
+    return;
+  }
+  const lab = el('label', 'eyebrow', 'Code on the TV');
+  lab.htmlFor = 'code';
+  c.appendChild(lab);
+  const inp = el('input', 'codein');
+  inp.id = 'code'; inp.inputMode = 'numeric'; inp.autocomplete = 'one-time-code'; inp.maxLength = 7; inp.placeholder = '000 000';
+  c.appendChild(inp);
+  if (problem) c.appendChild(el('p', 'err', problem));
+  inp.oninput = () => {
+    const d = inp.value.replace(/\D/g, '').slice(0, 6);
+    inp.value = d.length > 3 ? d.slice(0, 3) + ' ' + d.slice(3) : d;
+    if (d.length === 6) { code = d; codeCard(); start(); }
+  };
+  setTimeout(() => inp.focus(), 50);
+}
+
+// ---- Asking the TV --------------------------------------------------------------
+function start() {
+  rev = 0;
+  poll();
+}
+
+async function poll() {
+  const me = ++pollId;
+  // A short gap, such as the TV bringing a tunnel up, is retried quietly before the page says so.
+  let failSince = 0;
+  const failed = async (timedOut) => {
+    if (!failSince) failSince = Date.now();
+    // A request that got no answer at all is no blip: the TV is gone.
+    const long = timedOut || Date.now() - failSince > 8000;
+    if (long) offline();
+    await sleep(long ? 3000 : 1000);
+  };
+  while (me === pollId) {
+    let r;
+    // The TV answers within 25 s even with nothing new, so no answer in 30 s means it is unreachable.
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 30000);
+    try {
+      r = await fetch('/api/state?c=' + code + '&rev=' + rev, { cache: 'no-store', signal: ctl.signal });
+    } catch (e) {
+      clearTimeout(timer);
+      await failed(ctl.signal.aborted);
+      continue;
+    }
+    clearTimeout(timer);
+    if (me !== pollId) return;
+    if (r.ok) failSince = 0;
+    if (r.status === 403) { const j = await json(r); pollId++; return wrongCode(j && j.text); }
+    if (r.status === 410) { pollId++; return stateView('ended'); }
+    if (r.status === 429) { const j = await json(r); stateView('wait', j && j.text); rev = 0; await sleep(60000); continue; }
+    if (!r.ok) { await failed(); continue; }
+    const s = await json(r);
+    if (!s) { await sleep(1000); continue; }
+    apply(s);
+  }
+}
+
+function apply(s) {
+  rev = s.rev;
+  if (s.state === 'moved') return stateView('moved', s.place);
+  form = s.form;
+  statusNow = s.status;
+  render(s.focus);
+}
+
+function wrongCode(text) {
+  form = null;
+  byId('view').innerHTML = '';
+  byId('title').textContent = 'Type the code';
+  byId('lede').textContent = 'Type the code the TV shows now.';
+  code = '';
+  codeCard(text || 'That code isn’t on the TV now. Check the code on the TV.');
+}
+
+function offline() {
+  // Asked again with no revision, the TV answers at once when it is back.
+  rev = 0;
+  if (view === 'offline') return;
+  stateView('offline');
+}
+
+/** A whole-page message instead of the form: the TV moved on, the code ended, no connection. */
+function stateView(kind, text) {
+  view = kind;
+  // The app's name is already at the top, so the title says what happened.
+  byId('title').textContent = kind === 'moved' ? 'The TV moved on' : kind === 'ended' ? 'This code has ended' : kind === 'offline' ? 'Can’t reach the TV' : 'Too many wrong codes';
+  byId('lede').textContent = kind === 'moved' ? 'Waiting for the TV to come back.' : kind === 'ended' ? 'Scan the new code on the TV.' : kind === 'offline' ? 'Trying again every few seconds.' : 'Wait a minute, then try again.';
+  const v = byId('view');
+  v.innerHTML = '';
+  const card = el('section', 'card');
+  const row = el('div', 'state');
+  const say = (icon, html) => { row.innerHTML = icon + '<span>' + html + '</span>'; };
+  if (kind === 'moved') {
+    say(ICON.waiting, '');
+    row.lastChild.textContent = 'To carry on, open ' + (text && text !== 'this screen' ? text : 'the same screen') + ' on the TV again, or scan the code on the screen it shows now. This page comes back by itself.';
+  }
+  else if (kind === 'ended') say(ICON.error, '<b>This code has ended.</b> Open the screen on the TV again and scan its new code.');
+  else if (kind === 'wait') say(ICON.error, '');
+  else say(ICON.error, '');
+  if (kind === 'wait' || kind === 'offline') row.lastChild.textContent = kind === 'wait' ? (text || 'Wait a minute, then try again.') : OFFLINE;
+  card.appendChild(row);
+  if (kind === 'offline') {
+    const again = el('button', 'btn ghost', 'Try again');
+    again.style.marginTop = '16px';
+    again.onclick = () => { view = 'none'; start(); };
+    card.appendChild(again);
+  }
+  v.appendChild(card);
+}
+
+// ---- Drawing the form -------------------------------------------------------------
+const fields = () => form ? form.sections.flatMap((s) => s.fields) : [];
+const fieldById = (id) => fields().find((f) => f.id === id);
+const tvValue = (f) => f.type === 'switch' ? (f.value ? 'true' : 'false') : (f.value == null ? '' : String(f.value));
+const valueOf = (f) => (f.id in local && (dirty[f.id] || (pending[f.id] && rev <= pending[f.id]))) ? local[f.id] : tvValue(f);
+const textish = (f) => f.type === 'text' || f.type === 'lines';
+
+function render(focusSection) {
+  view = 'form';
+  const active = document.activeElement;
+  const keep = active && active.id;
+  let s0 = null, s1 = null;
+  try { if (keep && 'selectionStart' in active) { s0 = active.selectionStart; s1 = active.selectionEnd; } } catch (e) {}
+  byId('title').textContent = form.title;
+  byId('lede').textContent = form.lede;
+  const v = byId('view');
+  v.innerHTML = '';
+  const top = el('div', 'status');
+  top.id = 'st-top';
+  v.appendChild(top);
+  // Pointing at the part the TV edits only helps when there is more than one, and only for a part with fields to edit.
+  const editable = (sec) => sec.fields.some((f) => ['text', 'lines', 'switch', 'choice', 'select'].includes(f.type));
+  const point = form.sections.filter(editable).length > 1 && form.sections.some((sec) => sec.id === focusSection && editable(sec)) ? focusSection : null;
+  form.sections.forEach((sec) => v.appendChild(sectionEl(sec, sec.id === point)));
+  visibility();
+  readiness();
+  showErrors();
+  placeStatus();
+  if (keep && byId(keep)) {
+    const e = byId(keep);
+    e.focus({ preventScroll: true });
+    try { if (s0 != null) e.setSelectionRange(s0, s1); } catch (err) {}
+  }
+  if (focusSection && focusSection !== lastFocus) {
+    const e = byId('s-' + focusSection);
+    if (e && !e.hidden) e.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  lastFocus = focusSection;
+}
+
+function sectionEl(sec, editing) {
+  // Tabs on their own sit on the page, not in a card of their own.
+  const bare = !sec.title && !sec.note && !sec.actions.length && sec.fields.length === 1 && sec.fields[0].type === 'choice';
+  const card = el('section', bare ? 'bare' : 'card' + (editing ? ' editing' : ''));
+  card.id = 's-' + sec.id;
+  if (sec.showWhen) card.dataset.when = JSON.stringify(sec.showWhen);
+  let body = card;
+  if (sec.folded) {
+    const d = el('details', 'fold');
+    d.appendChild(el('summary', null, sec.title || ''));
+    d.open = !!openFolds[sec.id] || editing;
+    d.ontoggle = () => { openFolds[sec.id] = d.open; };
+    card.appendChild(d);
+    body = d;
+  } else if (sec.title) {
+    card.appendChild(el('h2', null, sec.title));
+  }
+  if (editing) body.appendChild(el('span', 'tvnow', 'The TV is editing this'));
+  if (sec.note) body.appendChild(el('p', 'note', sec.note));
+  sec.fields.forEach((f) => body.appendChild(fieldEl(f, sec)));
+  if (sec.actions.length) {
+    const row = el('div', 'actions');
+    row.id = 'a-' + sec.id;
+    sec.actions.forEach((a) => row.appendChild(actionEl(a, sec)));
+    body.appendChild(row);
+  }
+  const st = el('div', 'status');
+  st.id = 'st-' + sec.id;
+  body.appendChild(st);
+  return card;
+}
+
+function edit(f, value) {
+  local[f.id] = value;
+  dirty[f.id] = true;
+  if (errors[f.id]) { delete errors[f.id]; showErrors(); }
+  visibility();
+  readiness();
+  if (f.mirror) {
+    clearTimeout(mirrorTimers[f.id]);
+    mirrorTimers[f.id] = setTimeout(() => {
+      fetch('/api/input?c=' + code, post(JSON.stringify({ field: f.id, value: value }), 'application/json')).catch(() => {});
+    }, 200);
+  }
+}
+
+function labelFor(f, target) {
+  const lab = el('label', 'lbl', f.label);
+  lab.htmlFor = target;
+  return lab;
+}
+
+function fieldEl(f, sec) {
+  const wrap = el('div', 'fld');
+  wrap.id = 'w-' + f.id;
+  const err = el('p', 'err');
+  err.id = 'e-' + f.id;
+  err.hidden = true;
+  if (f.type === 'text') {
+    wrap.appendChild(labelFor(f, 'f-' + f.id));
+    const row = el('div', 'fieldrow');
+    const inp = el('input', 'field');
+    inp.id = 'f-' + f.id;
+    inp.type = f.secret ? 'password' : (f.input === 'email' ? 'email' : 'text');
+    if (f.input === 'numeric') { inp.inputMode = 'numeric'; inp.pattern = '[0-9]*'; }
+    if (f.input === 'url') inp.inputMode = 'url';
+    inp.maxLength = f.max || 256;
+    inp.placeholder = f.placeholder || '';
+    inp.autocomplete = 'off';
+    inp.setAttribute('autocapitalize', 'off');
+    inp.setAttribute('autocorrect', 'off');
+    inp.spellcheck = false;
+    inp.value = valueOf(f);
+    inp.oninput = () => edit(f, inp.value);
+    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); pressPrimary(sec); } };
+    row.appendChild(inp);
+    if (f.secret) {
+      const eye = el('button', 'eye');
+      eye.type = 'button';
+      eye.setAttribute('aria-label', 'Show');
+      eye.innerHTML = ICON.eye;
+      eye.onclick = () => { inp.type = inp.type === 'password' ? 'text' : 'password'; inp.focus(); };
+      row.appendChild(eye);
+    } else {
+      inp.style.paddingRight = '16px';
+    }
+    wrap.appendChild(row);
+  } else if (f.type === 'lines' || f.type === 'paste') {
+    wrap.appendChild(labelFor(f, 'f-' + f.id));
+    const t = el('textarea', f.type === 'paste' ? 'paste' : null);
+    t.id = 'f-' + f.id;
+    t.placeholder = f.placeholder || '';
+    t.spellcheck = false;
+    t.setAttribute('autocapitalize', 'off');
+    t.setAttribute('autocorrect', 'off');
+    if (f.type === 'lines') {
+      t.value = valueOf(f);
+      t.oninput = () => edit(f, t.value);
+    } else {
+      // Pasted text is checked on the TV like a file, a moment after the typing stops.
+      t.value = local[f.id] || '';
+      let timer = null;
+      const sendIt = () => { if (t.value.trim()) upload(f, sec, new Blob([t.value], { type: 'text/plain' }), 'pasted.ovpn'); };
+      t.oninput = () => { local[f.id] = t.value; dirty[f.id] = true; clearTimeout(timer); timer = setTimeout(sendIt, 700); readiness(); };
+      t.onblur = () => { clearTimeout(timer); if (dirty[f.id]) sendIt(); };
+      if (f.file) wrap.appendChild(el('p', 'help', 'The TV has it: ' + size(f.file.size) + (f.file.sub ? ' · ' + f.file.sub : '')));
+    }
+    wrap.appendChild(t);
+  } else if (f.type === 'switch') {
+    const row = el('label', 'swrow');
+    const txt = el('span', 'txt');
+    txt.appendChild(el('b', null, f.label));
+    if (f.sub) txt.appendChild(el('small', null, f.sub));
+    const sw = el('input', 'sw');
+    sw.type = 'checkbox';
+    sw.id = 'f-' + f.id;
+    sw.checked = valueOf(f) === 'true';
+    sw.onchange = () => edit(f, sw.checked ? 'true' : 'false');
+    row.appendChild(txt);
+    row.appendChild(sw);
+    wrap.appendChild(row);
+  } else if (f.type === 'choice') {
+    if (f.label) wrap.appendChild(el('div', 'lbl', f.label));
+    const seg = el('div', 'seg');
+    seg.setAttribute('role', 'group');
+    f.options.forEach((o) => {
+      const b = el('button', null, o[1]);
+      b.type = 'button';
+      b.id = 'f-' + f.id + '-' + o[0];
+      b.setAttribute('aria-pressed', valueOf(f) === o[0]);
+      b.onclick = () => {
+        edit(f, o[0]);
+        seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b));
+      };
+      seg.appendChild(b);
+    });
+    wrap.appendChild(seg);
+  } else if (f.type === 'select') {
+    wrap.appendChild(el('div', 'lbl', f.label));
+    const list = el('div', 'opts');
+    f.options.forEach((o) => {
+      const b = el('button', 'opt');
+      b.type = 'button';
+      b.id = 'f-' + f.id + '-' + o.value;
+      b.setAttribute('aria-pressed', valueOf(f) === o.value);
+      const dot = el('span', 'dot');
+      dot.innerHTML = ICON.dot;
+      const t = el('span', 'txt');
+      t.appendChild(el('b', null, o.label));
+      if (o.sub) t.appendChild(el('small', null, o.sub));
+      b.appendChild(dot);
+      b.appendChild(t);
+      b.onclick = () => {
+        edit(f, o.value);
+        list.querySelectorAll('.opt').forEach((x) => x.setAttribute('aria-pressed', x === b));
+      };
+      list.appendChild(b);
+    });
+    wrap.appendChild(list);
+  } else if (f.type === 'upload') {
+    const pick = el('label', 'pick' + (f.file ? ' chosen' : ''));
+    pick.id = 'f-' + f.id;
+    const inp = el('input');
+    inp.type = 'file';
+    inp.accept = f.accept;
+    const icon = el('span', 'icon');
+    icon.innerHTML = doc(f.file ? '#4BE3A1' : 'rgba(235,242,248,.8)');
+    const t = el('span', 'txt');
+    t.appendChild(el('b', null, f.file ? f.file.name : f.label));
+    t.appendChild(el('small', null, f.file ? size(f.file.size) + (f.file.sub ? ' · ' + f.file.sub : '') : f.sub));
+    pick.appendChild(inp);
+    pick.appendChild(icon);
+    pick.appendChild(t);
+    if (f.file) pick.appendChild(el('span', 'change', 'Change'));
+    inp.onchange = () => { const file = inp.files[0]; if (file) upload(f, sec, file, file.name); };
+    wrap.appendChild(pick);
+  } else if (f.type === 'download') {
+    const row = el('div', 'file');
+    const icon = el('span', 'icon');
+    icon.innerHTML = doc('#4BE3A1');
+    const t = el('span', 'txt');
+    t.appendChild(el('b', null, f.name));
+    if (f.size > 0) t.appendChild(el('small', null, size(f.size)));
+    row.appendChild(icon);
+    row.appendChild(t);
+    wrap.appendChild(row);
+    if (f.note) { const n = el('p', 'help', f.note); wrap.appendChild(n); }
+    const b = el('button', 'btn');
+    b.type = 'button';
+    b.innerHTML = '<span></span>' + ICON.down;
+    b.firstChild.textContent = f.label;
+    b.onclick = () => download(f.id, f.name, sec.id, b);
+    wrap.appendChild(b);
+  } else if (f.type === 'info') {
+    if (f.rows && f.rows.length) {
+      const dl = el('dl', 'facts');
+      f.rows.forEach((r) => { const d = el('div'); d.appendChild(el('dt', null, r[0])); d.appendChild(el('dd', null, r[1])); dl.appendChild(d); });
+      wrap.appendChild(dl);
+    }
+    if (f.text) wrap.appendChild(el('p', 'info' + (f.tone ? ' ' + f.tone : ''), f.text));
+  } else if (f.type === 'copy') {
+    wrap.className = 'fld copy';
+    if (f.label) wrap.appendChild(el('div', 'lbl', f.label));
+    const pre = el('pre', null, f.text);
+    wrap.appendChild(pre);
+    const b = el('button', 'mini', 'Copy');
+    b.type = 'button';
+    b.onclick = () => copyText(f.text, b);
+    wrap.appendChild(b);
+  }
+  if (f.help && f.type !== 'paste') wrap.appendChild(el('p', 'help', f.help));
+  wrap.appendChild(err);
+  return wrap;
+}
+
+function actionEl(a, sec) {
+  const b = el('button', 'btn' + (a.primary ? '' : a.danger ? ' danger' : ' ghost'));
+  b.type = 'button';
+  b.id = 'b-' + a.id;
+  b.innerHTML = '<span></span>' + (a.primary ? ICON.arrow : '');
+  b.firstChild.textContent = a.label;
+  b.dataset.needs = JSON.stringify(a.needs || []);
+  b.onclick = () => {
+    const ask = a.confirm || chosenConfirm(sec);
+    if (ask) confirmFirst(sec, a, ask); else act(a, sec);
+  };
+  return b;
+}
+
+/** A choice that replaces something asks first: "Hatlevika has its own certificate. Replace it?" */
+function chosenConfirm(sec) {
+  for (const f of sec.fields) {
+    if (f.type !== 'select') continue;
+    const o = f.options.find((x) => x.value === valueOf(f));
+    if (o && o.confirm) return o.confirm;
+  }
+  return null;
+}
+
+function confirmFirst(sec, a, text) {
+  const row = byId('a-' + sec.id);
+  if (!row) return act(a, sec);
+  row.hidden = true;
+  const box = el('div', 'confirm');
+  box.appendChild(el('p', null, text));
+  const btns = el('div', 'actions');
+  const yes = el('button', 'btn danger', a.confirmLabel || a.label);
+  const keep = el('button', 'btn ghost', 'Keep');
+  yes.onclick = () => { box.remove(); row.hidden = false; act(a, sec); };
+  keep.onclick = () => { box.remove(); row.hidden = false; };
+  btns.appendChild(yes);
+  btns.appendChild(keep);
+  box.appendChild(btns);
+  row.parentNode.insertBefore(box, row);
+}
+
+function pressPrimary(sec) {
+  const a = sec.actions.find((x) => x.primary) || sec.actions[0];
+  const b = a && byId('b-' + a.id);
+  if (b && !b.disabled) b.click();
+}
+
+function visibility() {
+  document.querySelectorAll('[data-when]').forEach((card) => {
+    const w = JSON.parse(card.dataset.when);
+    const f = fieldById(w[0]);
+    card.hidden = !f || valueOf(f) !== w[1];
+  });
+}
+
+function readiness() {
+  document.querySelectorAll('.actions .btn[data-needs]').forEach((b) => {
+    const needs = JSON.parse(b.dataset.needs);
+    const ok = needs.every((id) => { const f = fieldById(id); return f && String(valueOf(f)).trim() !== ''; });
+    b.disabled = !ok || !!sending;
+  });
+}
+
+function showErrors() {
+  fields().forEach((f) => {
+    const e = byId('e-' + f.id);
+    const input = byId('f-' + f.id);
+    const text = errors[f.id];
+    if (e) { e.hidden = !text; e.textContent = text || ''; }
+    if (input) input.classList.toggle('bad', !!text);
+  });
+}
+
+function showStatus(where, st) {
+  document.querySelectorAll('.status').forEach((s) => { s.className = 'status'; s.innerHTML = ''; });
+  if (!st) return;
+  let box = byId('st-' + where);
+  if (!box || box.closest('[hidden]')) box = byId('st-top');
+  if (!box) return;
+  box.className = 'status show ' + st.kind;
+  box.innerHTML = (ICON[st.kind] || ICON.waiting) + '<span></span>';
+  box.lastChild.textContent = st.text;
+  const r = box.getBoundingClientRect();
+  if (r.top < 0 || r.bottom > innerHeight) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function placeStatus() {
+  showStatus(statusNow && statusNow.section ? statusNow.section : 'top', statusNow);
+}
+
+function lock(on) {
+  document.querySelectorAll('#view input, #view textarea, #view .seg button, #view .opt').forEach((e) => { e.disabled = on; });
+}
+
+function values() {
+  const out = {};
+  fields().forEach((f) => {
+    if (f.type === 'upload' || f.type === 'download' || f.type === 'info' || f.type === 'copy' || f.type === 'paste') return;
+    out[f.id] = valueOf(f);
+  });
+  return out;
+}
+
+function settle(j, where) {
+  if (!j) return;
+  if (j.moved) return stateView('moved');
+  Object.keys(errors).forEach((k) => delete errors[k]);
+  Object.assign(errors, j.errors || {});
+  if (j.ok) {
+    fields().forEach((f) => { if (textish(f) && dirty[f.id]) { pending[f.id] = j.rev; dirty[f.id] = false; } });
+  }
+  (j.clear || []).forEach((id) => {
+    delete local[id];
+    dirty[id] = false;
+    delete pending[id];
+    const inp = byId('f-' + id);
+    if (inp) inp.value = '';
+  });
+  showErrors();
+  statusNow = j.status;
+  if (statusNow) placeStatus(); else showStatus(where, null);
+  if (j.download) download(j.download.id, j.download.name, where, null);
+}
+
+async function act(a, sec) {
+  if (sending) return;
+  sending = a.id;
+  readiness();
+  lock(true);
+  showStatus(sec.id, { kind: 'busy', text: 'Sending…' });
+  const got = await call('/api/act?c=' + code, post(JSON.stringify({ action: a.id, section: sec.id, values: values() }), 'application/json'), sec.id);
+  if (got) settle(got.j, sec.id);
+  sending = null;
+  lock(false);
+  readiness();
+}
+
+async function upload(f, sec, blob, name) {
+  showStatus(sec.id, { kind: 'busy', text: 'Sending ' + name + '…' });
+  const url = '/api/file?c=' + code + '&field=' + encodeURIComponent(f.id) + '&section=' + encodeURIComponent(sec.id) + '&name=' + encodeURIComponent(name);
+  const got = await call(url, post(blob), sec.id);
+  if (!got) return;
+  if (got.j && got.j.ok && f.type === 'paste') dirty[f.id] = false;
+  settle(got.j, sec.id);
+}
+
 // The file is fetched in the background and saved from here, so the page stays and can say what happened.
-const dl = ${'$'}('dl');
-if (dl) dl.onclick = async (e) => {
-  e.preventDefault();
-  if (code().length !== 6) return status('bad', 'Type the code on the TV first.');
-  status('busy', 'Downloading…');
-  try {
-    const r = await fetch('/file?c=' + code(), { cache: 'no-store' });
-    if (!r.ok) return status('bad', await r.text());
-    const url = URL.createObjectURL(await r.blob());
+async function download(id, name, where, b) {
+  if (b) b.disabled = true;
+  showStatus(where, { kind: 'busy', text: 'Downloading…' });
+  const got = await call('/api/download?c=' + code + '&id=' + encodeURIComponent(id) + '&section=' + encodeURIComponent(where), { cache: 'no-store' }, where);
+  if (got) {
+    const url = URL.createObjectURL(await got.r.blob());
     const a = document.createElement('a');
     a.href = url;
-    a.download = dl.dataset.name;
+    a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
-    status('ok', 'Downloaded. Look in Files › Downloads on your phone.');
-  } catch (err) {
-    status('bad', 'Can’t reach the TV. Your phone must be on the same Wi-Fi as the TV, with mobile data and any VPN off.');
+    statusNow = { kind: 'done', text: 'Downloaded ' + name + '. Look in Files › Downloads on your phone.', section: where };
+    placeStatus();
   }
-};
-update();
+  if (b) b.disabled = false;
+}
+
+function copyText(text, b) {
+  const done = () => { b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1600); };
+  // The clipboard API needs https; on the home network, or when it is refused, an old-style copy does it.
+  const old = () => {
+    const t = document.createElement('textarea');
+    t.value = text;
+    t.style.position = 'fixed';
+    t.style.opacity = '0';
+    document.body.appendChild(t);
+    t.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    t.remove();
+    if (ok) done(); else b.textContent = 'Select it and copy';
+  };
+  if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, old); return; }
+  old();
+}
+
+codeCard();
+if (code.length === 6) start(); else byId('lede').textContent = 'Type the code the TV shows.';
 """
 }

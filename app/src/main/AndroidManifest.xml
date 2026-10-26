@@ -36,6 +36,8 @@
 
     <application
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
         android:banner="@drawable/banner"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
@@ -79,6 +81,11 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- Asked by the VPN's service when Android's Always-on VPN starts it. -->
+        <receiver
+            android:name=".AlwaysOnReceiver"
+            android:exported="false" />
 
         <!-- Android's package installer reports how an update went (vpn/Updates.kt). -->
         <receiver

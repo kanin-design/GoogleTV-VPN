@@ -23,7 +23,7 @@ import javax.net.ssl.SSLSocketFactory
 
 /**
  * Measures the connection against Cloudflare's speed test (speed.cloudflare.com): the round trip
- * of a TCP handshake, then download and upload over a few connections at once. Tunnel's own
+ * of a TCP handshake, then download and upload over a few connections at once. The app's own
  * traffic goes through the tunnel like every other app's, so while connected this measures the VPN.
  * It runs only when the user starts it, and each phase stops after a few seconds.
  */

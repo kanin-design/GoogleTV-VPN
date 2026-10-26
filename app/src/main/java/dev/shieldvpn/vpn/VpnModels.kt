@@ -6,15 +6,15 @@ data class Server(
     val host: String,
     val port: Int,
     val protocol: Protocol,
-) {
-    val address: String get() = "$host:$port"
-}
+    val kind: VpnKind = VpnKind.OpenVpn,
+)
+
+/** What kind of file a server is, and so which engine connects it. WireGuard is behind [dev.shieldvpn.Features]. */
+enum class VpnKind { OpenVpn, WireGuard }
 
 enum class Protocol(val label: String, val token: String) {
     UDP("UDP", "udp"),
-    TCP("TCP", "tcp");
-
-    val other: Protocol get() = if (this == UDP) TCP else UDP
+    TCP("TCP", "tcp"),
 }
 
 /** A profile: what the user connects with. Its login is kept in [CredentialStore]. */
@@ -93,8 +93,13 @@ data class ConfigInfo(
     val fileProtocol: Protocol?,
     val remotes: Int,
     val warnings: List<String>,
-    /** The file has the server's CA certificate, so Tunnel can check the server. */
+    /** The file has the server's CA certificate, so the server can be checked. */
     val hasCa: Boolean = true,
+    /** The file picks its servers in <connection> blocks, so Server and port can't change them. */
+    val connectionBlocks: Boolean = false,
+    val kind: VpnKind = VpnKind.OpenVpn,
+    /** For a WireGuard file, what it says. */
+    val wg: WireGuardFile.Facts? = null,
 )
 
 /** The interface Android set up for the tunnel. */
@@ -130,7 +135,22 @@ data class ImportReview(
     val problem: String? = null,
     /** The login was typed on the phone that sent the file, not found in it. */
     val loginFromPhone: Boolean = false,
-)
+    val kind: VpnKind = VpnKind.OpenVpn,
+    val wg: WireGuardFile.Facts? = null,
+    /** A WireGuard file's keys, taken out of [text], held until the profile is saved. */
+    val wgSecrets: WireGuardFile.Secrets? = null,
+) {
+    // So a log line or a crash report never carries the file's keys or the password.
+    override fun toString() = "ImportReview($fileName, $host:$port)"
+}
+
+/** What a file from a phone is, checked before anything happens to it. */
+sealed interface Inspected {
+    data class Profile(val review: ImportReview) : Inspected
+    data object Backup : Inspected
+    data object Pkcs12 : Inspected
+    data class Problem(val message: String) : Inspected
+}
 
 data class AppSettings(
     val killSwitch: Boolean = true,
@@ -172,7 +192,7 @@ data class AppSettings(
     val pushedDns: Boolean = true,
     val customDns: List<String> = emptyList(),
     val searchDomains: List<String> = emptyList(),
-    /** Let other apps connect and disconnect Tunnel with intents. */
+    /** Let other apps connect and disconnect the app with intents. */
     val automation: Boolean = false,
     /** Look for a newer build on GitHub each time the app opens. */
     val autoUpdate: Boolean = true,
@@ -205,7 +225,6 @@ data class VpnUiState(
     val activeId: String? = null,
     val status: VpnStatus = VpnStatus.Disconnected,
     val settings: AppSettings = AppSettings(),
-    val log: List<LogLine> = emptyList(),
     val tunnel: TunnelInfo? = null,
     /** Set while the tunnel is paused, until it comes back by itself. */
     val pausedUntil: Long? = null,
@@ -216,6 +235,8 @@ data class VpnUiState(
     val pendingP12: ByteArray? = null,
     val hasBackupPassphrase: Boolean = false,
     val hasPin: Boolean = false,
+    /** When a phone last downloaded a backup, and how many profiles it held. */
+    val lastBackup: Pair<Long, Int>? = null,
     /** The last speed test of each profile, and [SpeedTest.DIRECT] for one without the VPN. */
     val speeds: Map<String, SpeedTest.Result> = emptyMap(),
     val update: UpdateState = UpdateState.Idle,

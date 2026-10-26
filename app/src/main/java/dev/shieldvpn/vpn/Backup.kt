@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Base64
 import dev.shieldvpn.APP_FILE_NAME
 import dev.shieldvpn.APP_NAME
+import dev.shieldvpn.Features
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.SecureRandom
@@ -14,12 +15,15 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * A .tunnelbackup file: every profile with its file and login, and the settings, encrypted
+ * A .openvpnclientbackup file: every profile with its file and login, and the settings, encrypted
  * with a passphrase (PBKDF2-SHA256, then AES-256-GCM). Only someone with the passphrase can
  * read it, so it is safe to keep on a phone.
+ *
+ * WireGuard profiles go in an array of their own, "wireguard", so older builds, which read only
+ * "profiles", restore the rest and skip them. "position" keeps the order across both.
  */
 object Backup {
-    /** "tunnelbackup", from the app's name. A backup is known by what is inside, not by this. */
+    /** "openvpnclientbackup", from the app's name. A backup is known by what is inside, not by this. */
     val EXTENSION = "${APP_FILE_NAME}backup"
 
     // What a backup is known by. It never changes with the app's name, so older backups still restore.
@@ -30,24 +34,28 @@ object Backup {
     fun create(context: Context, passphrase: String): ByteArray {
         val s = SettingsStore.load(context)
         val profiles = JSONArray()
-        ConnectionStore.list(context).forEach { c ->
-            val config = ServerStore.effectiveConfig(context, c.serverId) ?: return@forEach
-            val login = CredentialStore.load(context, c.id)
-            profiles.put(
-                JSONObject()
-                    .put("name", c.name)
-                    .put("ovpn", config)
-                    .put("pinned", c.pinned)
-                    .put("killMode", c.killMode)
-                    .put("dnsMode", c.dnsMode)
-                    .put("order", c.order)
-                    .put("lookIcon", c.lookIcon ?: JSONObject.NULL)
-                    .put("lookColour", c.lookColour ?: JSONObject.NULL)
-                    .put("username", login.username)
-                    .put("password", login.password)
-                    // Ids are new on the other device, so the startup profile is marked on itself.
-                    .put("startup", c.id == s.startupId),
-            )
+        val wireguard = JSONArray()
+        val kinds = ServerStore.list(context).associate { it.id to it.kind }
+        ConnectionStore.list(context).forEachIndexed { position, c ->
+            val config = ServerStore.effectiveConfig(context, c.serverId) ?: return@forEachIndexed
+            val item = JSONObject()
+                .put("name", c.name)
+                .put("pinned", c.pinned)
+                .put("killMode", c.killMode)
+                .put("dnsMode", c.dnsMode)
+                .put("lookIcon", c.lookIcon ?: JSONObject.NULL)
+                .put("lookColour", c.lookColour ?: JSONObject.NULL)
+                // Ids are new on the other device, so the startup profile is marked on itself.
+                .put("startup", c.id == s.startupId)
+                .put("position", position)
+            if (kinds[c.serverId] == VpnKind.WireGuard) {
+                // The data keeps WireGuard profiles whatever the build, so a backup does too.
+                val keys = CredentialStore.wireGuard(context, c.id) ?: return@forEachIndexed
+                wireguard.put(item.put("conf", config).put("privateKey", keys.privateKey).put("presharedKeys", JSONObject(keys.presharedKeys)))
+            } else {
+                val login = CredentialStore.load(context, c.id)
+                profiles.put(item.put("ovpn", config).put("order", c.order).put("username", login.username).put("password", login.password))
+            }
         }
         // Every setting but the PIN: the PIN is not in a backup, so neither is what it locks.
         val settings = JSONObject()
@@ -74,7 +82,9 @@ object Backup {
             .put("automation", s.automation)
             .put("autoUpdate", s.autoUpdate)
         val plain = JSONObject().put("format", FORMAT).put("version", 1).put("created", System.currentTimeMillis())
-            .put("profiles", profiles).put("settings", settings).toString().toByteArray()
+            .put("profiles", profiles).put("settings", settings)
+            .apply { if (wireguard.length() > 0) put("wireguard", wireguard) }
+            .toString().toByteArray()
 
         val salt = random(16)
         val iv = random(12)
@@ -89,56 +99,81 @@ object Backup {
     fun isBackup(bytes: ByteArray): Boolean = runCatching { JSONObject(String(bytes)).getString("format") == FORMAT }.getOrDefault(false)
 
     sealed interface Restored {
-        /** [profiles] were added; [already] were on this device already, exactly the same, so they were left alone. */
-        data class Done(val profiles: Int, val already: Int = 0) : Restored
+        /**
+         * [profiles] were added; [already] were on this device already, exactly the same, so they
+         * were left alone; [replaced] took the place of one with the same name.
+         */
+        data class Done(val profiles: Int, val already: Int = 0, val replaced: Int = 0) : Restored
         data class Problem(val message: String) : Restored
     }
 
     /**
      * Adds every profile in the backup to this device, and takes its settings. A profile that is
-     * here already, with the same name, file and login, is left alone; one that only shares a
-     * name is added as "Name (restored)", so nothing is replaced.
+     * here already, with the same name, file and login, is left alone. One that only shares a name
+     * is added as "Name (restored)", or with [replace] takes the place of the one here.
      */
-    fun restore(context: Context, bytes: ByteArray, passphrase: String): Restored {
+    fun restore(context: Context, bytes: ByteArray, passphrase: String, replace: Boolean = false): Restored {
         val outer = runCatching { JSONObject(String(bytes)) }.getOrNull()?.takeIf { it.optString("format") == FORMAT }
             ?: return Restored.Problem("This isn’t a ${APP_NAME} backup.")
+        // The file picks its own count; a huge one would keep the TV busy for hours.
+        val iterations = outer.optInt("iterations", ITERATIONS)
+        if (iterations !in 10_000..2_000_000) return Restored.Problem("This backup can’t be read.")
         val plain = runCatching {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(
                 Cipher.DECRYPT_MODE,
-                key(passphrase, unb64(outer.getString("salt")), outer.optInt("iterations", ITERATIONS)),
+                key(passphrase, unb64(outer.getString("salt")), iterations),
                 GCMParameterSpec(128, unb64(outer.getString("iv"))),
             )
             JSONObject(String(cipher.doFinal(unb64(outer.getString("data")))))
         }.getOrNull() ?: return Restored.Problem("Wrong passphrase, or the file is damaged.")
+        // Each profile is checked before anything is written, so a damaged one changes nothing.
+        val profiles = runCatching {
+            fun items(key: String, file: String) = plain.optJSONArray(key)?.let { a -> List(a.length()) { i -> a.getJSONObject(i).also { it.getString("name"); it.getString(file) } } }.orEmpty()
+            val wireguard = items("wireguard", "conf").onEach { require(WireGuardFile.isKey(it.getString("privateKey"))) }
+            // In the order they were on the other device; a backup without positions keeps its own.
+            (items("profiles", "ovpn") + wireguard).withIndex().sortedBy { (i, p) -> p.optInt("position", i) }.map { it.value }
+        }.getOrNull() ?: return Restored.Problem("The backup is damaged, so nothing was restored.")
+        return runCatching { restore(context, plain, profiles, replace) }
+            .getOrElse { Restored.Problem("Restoring stopped part way: ${it.message}") }
+    }
 
-        val profiles = plain.optJSONArray("profiles") ?: JSONArray()
+    private fun restore(context: Context, plain: JSONObject, profiles: List<JSONObject>, replace: Boolean): Restored {
         val here = ConnectionStore.list(context)
+        val kinds = ServerStore.list(context).associate { it.id to it.kind }
         val names = here.map { it.name }.toMutableSet()
         var added = 0
         var already = 0
+        var replaced = 0
         var startupId: String? = null
-        for (i in 0 until profiles.length()) {
-            val p = profiles.getJSONObject(i)
+        var startupWas: String? = null
+        for (p in profiles) {
             val name = p.getString("name")
-            val ovpn = p.getString("ovpn")
+            val wg = p.has("conf")
+            val kind = if (wg) VpnKind.WireGuard else VpnKind.OpenVpn
+            val file = if (wg) p.getString("conf") else p.getString("ovpn")
+            val keys = if (wg) WireGuardFile.Secrets(p.getString("privateKey"), p.optJSONObject("presharedKeys")?.let { k -> k.keys().asSequence().associateWith { k.getString(it) } }.orEmpty()) else null
+            // A build without WireGuard keeps these but doesn't count or show them.
+            val counted = !wg || Features.WIREGUARD
             val same = here.firstOrNull {
-                it.name == name && ServerStore.effectiveConfig(context, it.serverId) == ovpn &&
-                    CredentialStore.load(context, it.id).let { l -> l.username == p.optString("username") && l.password == p.optString("password") }
+                it.name == name && kinds[it.serverId] == kind && ServerStore.effectiveConfig(context, it.serverId) == file &&
+                    if (wg) CredentialStore.wireGuard(context, it.id) == keys
+                    else CredentialStore.load(context, it.id).let { l -> l.username == p.optString("username") && l.password == p.optString("password") }
             }
             if (same != null) {
-                already++
+                if (counted) already++
                 if (p.optBoolean("startup")) startupId = same.id
                 continue
             }
+            val old = if (replace) here.firstOrNull { it.name == name && kinds[it.serverId] == kind } else null
             var unique = name
-            if (unique in names) {
+            if (old == null && unique in names) {
                 unique = "$name (restored)"
                 var n = 2
                 while (unique in names) unique = "$name (restored ${n++})"
             }
             names += unique
-            val server = ServerStore.add(context, ovpn)
+            val server = ServerStore.add(context, file)
             val c = ConnectionStore.add(context, unique, server.id)
             if (p.optBoolean("startup")) startupId = c.id
             ConnectionStore.update(context, c.id) {
@@ -153,7 +188,17 @@ object Backup {
             }
             val user = p.optString("username")
             if (user.isNotEmpty()) CredentialStore.save(context, c.id, user, p.optString("password"))
-            added++
+            keys?.let { CredentialStore.saveWireGuard(context, c.id, it) }
+            if (old != null) {
+                // The one here goes, with its login, and its server unless another profile shares it.
+                ConnectionStore.delete(context, old.id)
+                CredentialStore.remove(context, old.id)
+                if (ConnectionStore.list(context).none { it.serverId == old.serverId }) ServerStore.delete(context, old.serverId)
+                if (SettingsStore.load(context).startupId == old.id) startupWas = c.id
+                if (counted) replaced++
+            } else if (counted) {
+                added++
+            }
         }
         plain.optJSONObject("settings")?.let { s ->
             val now = SettingsStore.load(context)
@@ -175,8 +220,8 @@ object Backup {
                     customDns = s.optJSONArray("customDns")?.let { a -> (0 until a.length()).map(a::getString) } ?: now.customDns,
                     searchDomains = s.optJSONArray("searchDomains")?.let { a -> (0 until a.length()).map(a::getString) } ?: now.searchDomains,
                     // An older backup has no startup profile; then this device keeps its own.
-                    boot = if (s.has("boot")) s.optBoolean("boot") && (startupId ?: now.startupId) != null else now.boot,
-                    startupId = startupId ?: now.startupId,
+                    boot = if (s.has("boot")) s.optBoolean("boot") && (startupId ?: startupWas ?: now.startupId) != null else now.boot,
+                    startupId = startupId ?: startupWas ?: now.startupId,
                     stayAwake = s.optBoolean("stayAwake", now.stayAwake),
                     legacyCiphers = s.optBoolean("legacyCiphers", now.legacyCiphers),
                     compress = s.optBoolean("compress", now.compress),
@@ -187,7 +232,7 @@ object Backup {
                 ),
             )
         }
-        return Restored.Done(added, already)
+        return Restored.Done(added, already, replaced)
     }
 
     private fun key(passphrase: String, salt: ByteArray, iterations: Int = ITERATIONS): SecretKeySpec {

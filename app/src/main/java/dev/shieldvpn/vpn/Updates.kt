@@ -81,6 +81,8 @@ object Updates {
      * wrong, or null when the file is complete and its SHA-256 matches.
      */
     fun download(build: Published, file: File, progress: (Int) -> Unit): String? {
+        // A listing without a size can't be checked, and the percent would divide by zero.
+        if (build.size <= 0) return "The update’s listing is incomplete. Try again later."
         val digest = MessageDigest.getInstance("SHA-256")
         val c = URL(build.url).openConnection() as HttpURLConnection
         try {

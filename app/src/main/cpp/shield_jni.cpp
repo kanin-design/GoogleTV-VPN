@@ -8,6 +8,7 @@
 #include <android/log.h>
 #include <jni.h>
 
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,44 @@ JNIEnv *currentEnv() {
         g_vm->AttachCurrentThread(&env, nullptr);
     }
     return env;
+}
+
+// A Java exception left pending makes the next JNI call abort the process, so each call
+// into Kotlin is followed by this. Returns true when the call threw.
+bool threw(JNIEnv *env) {
+    if (!env->ExceptionCheck()) return false;
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+    return true;
+}
+
+jclass g_string = nullptr;
+jmethodID g_stringFromBytes = nullptr;
+
+// A Java string from UTF-8 that may be invalid: server text and log lines come from outside.
+// NewStringUTF wants modified UTF-8 and aborts on anything else under CheckJNI.
+jstring javaString(JNIEnv *env, const std::string &s) {
+    jbyteArray bytes = env->NewByteArray(static_cast<jsize>(s.size()));
+    if (bytes == nullptr) {
+        threw(env);
+        return nullptr;
+    }
+    env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(s.size()), reinterpret_cast<const jbyte *>(s.data()));
+    jstring charset = env->NewStringUTF("UTF-8");
+    auto out = static_cast<jstring>(env->NewObject(g_string, g_stringFromBytes, bytes, charset));
+    env->DeleteLocalRef(bytes);
+    env->DeleteLocalRef(charset);
+    if (threw(env)) return nullptr;
+    return out;
+}
+
+// The bytes of a Kotlin ByteArray, which the app fills with UTF-8.
+std::string utf8(JNIEnv *env, jbyteArray array) {
+    if (array == nullptr) return "";
+    const jsize n = env->GetArrayLength(array);
+    std::string out(static_cast<size_t>(n), '\0');
+    env->GetByteArrayRegion(array, 0, n, reinterpret_cast<jbyte *>(out.data()));
+    return out;
 }
 
 class ShieldClient : public ovpn::OpenVPNClient {
@@ -69,10 +108,7 @@ class ShieldClient : public ovpn::OpenVPNClient {
     template <typename... Args>
     std::string callString(JNIEnv *env, jmethodID method, Args... args) {
         auto result = static_cast<jstring>(env->CallObjectMethod(callbacks_, method, args...));
-        if (env->ExceptionCheck()) {
-            env->ExceptionClear();
-            return "";
-        }
+        if (threw(env)) return "";
         if (result == nullptr) return "";
         const char *chars = env->GetStringUTFChars(result, nullptr);
         std::string out = chars;
@@ -85,17 +121,22 @@ class ShieldClient : public ovpn::OpenVPNClient {
 
     void event(const ovpn::Event &ev) override {
         JNIEnv *env = currentEnv();
-        jstring name = env->NewStringUTF(ev.name.c_str());
-        jstring info = env->NewStringUTF(ev.info.c_str());
-        env->CallVoidMethod(callbacks_, onEvent_, name, info, ev.error ? JNI_TRUE : JNI_FALSE);
+        jstring name = javaString(env, ev.name);
+        jstring info = javaString(env, ev.info);
+        if (name != nullptr && info != nullptr) {
+            env->CallVoidMethod(callbacks_, onEvent_, name, info, ev.error ? JNI_TRUE : JNI_FALSE);
+            threw(env);
+        }
         env->DeleteLocalRef(name);
         env->DeleteLocalRef(info);
     }
 
     void log(const ovpn::LogInfo &li) override {
         JNIEnv *env = currentEnv();
-        jstring text = env->NewStringUTF(li.text.c_str());
+        jstring text = javaString(env, li.text);
+        if (text == nullptr) return;
         env->CallVoidMethod(callbacks_, onLog_, text);
+        threw(env);
         env->DeleteLocalRef(text);
     }
 
@@ -105,7 +146,7 @@ class ShieldClient : public ovpn::OpenVPNClient {
 
     void external_pki_cert_request(ovpn::ExternalPKICertRequest &req) override {
         JNIEnv *env = currentEnv();
-        jstring alias = env->NewStringUTF(req.alias.c_str());
+        jstring alias = javaString(env, req.alias);
         req.cert = callString(env, pkiCert_, alias);
         req.supportingChain = callString(env, pkiChain_, alias);
         env->DeleteLocalRef(alias);
@@ -118,11 +159,11 @@ class ShieldClient : public ovpn::OpenVPNClient {
 
     void external_pki_sign_request(ovpn::ExternalPKISignRequest &req) override {
         JNIEnv *env = currentEnv();
-        jstring alias = env->NewStringUTF(req.alias.c_str());
-        jstring data = env->NewStringUTF(req.data.c_str());
-        jstring algorithm = env->NewStringUTF(req.algorithm.c_str());
-        jstring hashalg = env->NewStringUTF(req.hashalg.c_str());
-        jstring saltlen = env->NewStringUTF(req.saltlen.c_str());
+        jstring alias = javaString(env, req.alias);
+        jstring data = javaString(env, req.data);
+        jstring algorithm = javaString(env, req.algorithm);
+        jstring hashalg = javaString(env, req.hashalg);
+        jstring saltlen = javaString(env, req.saltlen);
         req.sig = callString(env, pkiSign_, alias, data, algorithm, hashalg, saltlen);
         env->DeleteLocalRef(alias);
         env->DeleteLocalRef(data);
@@ -138,7 +179,9 @@ class ShieldClient : public ovpn::OpenVPNClient {
     // ---- TUN builder: forwarded to VpnService.Builder on the Kotlin side ----
 
     bool tun_builder_new() override {
-        return currentEnv()->CallBooleanMethod(callbacks_, newBuilder_) == JNI_TRUE;
+        JNIEnv *env = currentEnv();
+        jboolean ok = env->CallBooleanMethod(callbacks_, newBuilder_);
+        return !threw(env) && ok == JNI_TRUE;
     }
 
     bool tun_builder_set_remote_address(const std::string &address, bool ipv6) override {
@@ -175,7 +218,9 @@ class ShieldClient : public ovpn::OpenVPNClient {
     }
 
     bool tun_builder_set_mtu(int mtu) override {
-        return currentEnv()->CallBooleanMethod(callbacks_, setMtu_, static_cast<jint>(mtu)) == JNI_TRUE;
+        JNIEnv *env = currentEnv();
+        jboolean ok = env->CallBooleanMethod(callbacks_, setMtu_, static_cast<jint>(mtu));
+        return !threw(env) && ok == JNI_TRUE;
     }
 
     bool tun_builder_set_session_name(const std::string &name) override {
@@ -194,42 +239,49 @@ class ShieldClient : public ovpn::OpenVPNClient {
     bool tun_builder_add_wins_server(const std::string & /*address*/) override { return true; }
 
     int tun_builder_establish() override {
-        return static_cast<int>(currentEnv()->CallIntMethod(callbacks_, establish_));
+        JNIEnv *env = currentEnv();
+        jint fd = env->CallIntMethod(callbacks_, establish_);
+        return threw(env) ? -1 : static_cast<int>(fd);
     }
 
     bool tun_builder_persist() override { return false; }
 
     void tun_builder_teardown(bool disconnect) override {
-        currentEnv()->CallVoidMethod(callbacks_, teardown_, disconnect ? JNI_TRUE : JNI_FALSE);
+        JNIEnv *env = currentEnv();
+        env->CallVoidMethod(callbacks_, teardown_, disconnect ? JNI_TRUE : JNI_FALSE);
+        threw(env);
     }
 
     // The transport socket must bypass the tunnel, otherwise the VPN would
     // try to carry its own packets.
     bool socket_protect(openvpn_io::detail::socket_type socket, std::string remote, bool ipv6) override {
         JNIEnv *env = currentEnv();
-        jstring host = env->NewStringUTF(remote.c_str());
+        jstring host = javaString(env, remote);
+        if (host == nullptr) return false;
         jboolean ok = env->CallBooleanMethod(callbacks_, protect_, static_cast<jint>(socket), host,
                                              ipv6 ? JNI_TRUE : JNI_FALSE);
         env->DeleteLocalRef(host);
-        return ok == JNI_TRUE;
+        return !threw(env) && ok == JNI_TRUE;
     }
 
   private:
     bool callStrBool(jmethodID method, const std::string &s, bool flag = false) {
         JNIEnv *env = currentEnv();
-        jstring js = env->NewStringUTF(s.c_str());
+        jstring js = javaString(env, s);
+        if (js == nullptr) return false;
         jboolean ok = env->CallBooleanMethod(callbacks_, method, js, flag ? JNI_TRUE : JNI_FALSE);
         env->DeleteLocalRef(js);
-        return ok == JNI_TRUE;
+        return !threw(env) && ok == JNI_TRUE;
     }
 
     bool callStrIntBool(jmethodID method, const std::string &s, int n, bool flag) {
         JNIEnv *env = currentEnv();
-        jstring js = env->NewStringUTF(s.c_str());
+        jstring js = javaString(env, s);
+        if (js == nullptr) return false;
         jboolean ok = env->CallBooleanMethod(callbacks_, method, js, static_cast<jint>(n),
                                              flag ? JNI_TRUE : JNI_FALSE);
         env->DeleteLocalRef(js);
-        return ok == JNI_TRUE;
+        return !threw(env) && ok == JNI_TRUE;
     }
 
     jobject callbacks_ = nullptr;
@@ -252,7 +304,16 @@ class ShieldClient : public ovpn::OpenVPNClient {
 };
 
 jstring errorOrEmpty(JNIEnv *env, bool error, const std::string &message) {
-    return env->NewStringUTF(error ? message.c_str() : "");
+    if (!error) return env->NewStringUTF("");
+    jstring out = javaString(env, message);
+    return out != nullptr ? out : env->NewStringUTF("Unknown error");
+}
+
+// A whole number from our own options, or [fallback] when it is missing or not a number.
+int number(const std::string &text, int fallback) {
+    char *end = nullptr;
+    const long n = std::strtol(text.c_str(), &end, 10);
+    return text.empty() || *end != '\0' ? fallback : static_cast<int>(n);
 }
 
 }  // namespace
@@ -261,6 +322,12 @@ extern "C" {
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void * /*reserved*/) {
     g_vm = vm;
+    JNIEnv *env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
+    jclass local = env->FindClass("java/lang/String");
+    g_string = static_cast<jclass>(env->NewGlobalRef(local));
+    env->DeleteLocalRef(local);
+    g_stringFromBytes = env->GetMethodID(g_string, "<init>", "([BLjava/lang/String;)V");
     return JNI_VERSION_1_6;
 }
 
@@ -283,20 +350,17 @@ std::string option(const std::string &options, const std::string &key) {
 }
 
 JNIEXPORT jstring JNICALL
-Java_dev_shieldvpn_vpn_OpenVpnEngine_evaluate(JNIEnv *env, jclass /*cls*/, jlong handle, jstring config, jstring options) {
+Java_dev_shieldvpn_vpn_OpenVpnEngine_evaluate(JNIEnv *env, jclass /*cls*/, jlong handle, jbyteArray config, jbyteArray options) {
     auto *client = reinterpret_cast<ShieldClient *>(handle);
-    const char *text = env->GetStringUTFChars(config, nullptr);
-    const char *opts = env->GetStringUTFChars(options, nullptr);
-    const std::string o = opts;
+    const std::string o = utf8(env, options);
     ovpn::Config cfg;
-    cfg.content = text;
+    cfg.content = utf8(env, config);
     // "asym" accepts compression the server pushes but never compresses what the TV sends.
     // The core rejects pushed compression by default, which drops the tunnel.
     const std::string compress = option(o, "compress");
     cfg.compressionMode = compress.empty() ? "asym" : compress;
     // Give up on a server that never answers, instead of retrying forever.
-    const std::string timeout = option(o, "timeout");
-    cfg.connTimeout = timeout.empty() ? 30 : std::stoi(timeout);
+    cfg.connTimeout = number(option(o, "timeout"), 30);
     cfg.protoOverride = option(o, "proto");
     cfg.tlsVersionMinOverride = option(o, "tlsMin");
     cfg.enableLegacyAlgorithms = option(o, "legacy") == "1";
@@ -304,8 +368,6 @@ Java_dev_shieldvpn_vpn_OpenVpnEngine_evaluate(JNIEnv *env, jclass /*cls*/, jlong
     cfg.externalPkiAlias = option(o, "epki");
     // A profile without a client certificate, which signs in with a password alone.
     cfg.disableClientCert = option(o, "nocert") == "1";
-    env->ReleaseStringUTFChars(options, opts);
-    env->ReleaseStringUTFChars(config, text);
 
     ovpn::EvalConfig eval = client->eval_config(cfg);
     client->autologin = eval.autologin;
@@ -320,15 +382,12 @@ Java_dev_shieldvpn_vpn_OpenVpnEngine_needsCredentials(JNIEnv * /*env*/, jclass /
 
 JNIEXPORT jstring JNICALL
 Java_dev_shieldvpn_vpn_OpenVpnEngine_provideCredentials(JNIEnv *env, jclass /*cls*/, jlong handle,
-                                                        jstring username, jstring password) {
+                                                        jbyteArray username, jbyteArray password) {
     auto *client = reinterpret_cast<ShieldClient *>(handle);
-    const char *user = env->GetStringUTFChars(username, nullptr);
-    const char *pass = env->GetStringUTFChars(password, nullptr);
+    // As UTF-8 bytes: GetStringUTFChars would send an emoji in a password as other bytes.
     ovpn::ProvideCreds creds;
-    creds.username = user;
-    creds.password = pass;
-    env->ReleaseStringUTFChars(username, user);
-    env->ReleaseStringUTFChars(password, pass);
+    creds.username = utf8(env, username);
+    creds.password = utf8(env, password);
 
     ovpn::Status status = client->provide_creds(creds);
     return errorOrEmpty(env, status.error, status.message);

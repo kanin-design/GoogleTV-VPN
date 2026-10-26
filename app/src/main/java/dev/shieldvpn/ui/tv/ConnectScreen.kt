@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import dev.shieldvpn.vpn.Connection
 import dev.shieldvpn.vpn.VpnStatus
 import dev.shieldvpn.vpn.VpnUiState
+import dev.shieldvpn.vpn.isActive
 
 /**
  * Connect: the current profile, huge, over the background, with the one button most visits need
@@ -65,6 +66,11 @@ fun ConnectScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: 
         if (heroFocused || System.currentTimeMillis() - heroLostAt < 800) primaryFocus.focusWhenReady()
     }
     Box(Modifier.fillMaxSize()) {
+        // The first profile: the phone's code is right here, so it can be scanned with no press at all.
+        if (state.connections.isEmpty()) {
+            Box(Modifier.align(Alignment.BottomStart).padding(start = 64.dp, bottom = 64.dp)) { FirstProfile(state, nav, actions, primaryFocus) }
+            return@Box
+        }
         Box(
             Modifier
                 .align(Alignment.BottomStart)
@@ -94,24 +100,17 @@ private fun Hero(
     primaryFocus: FocusRequester,
 ) {
     Column(horizontalAlignment = Alignment.Start) {
-        if (c == null) {
-            Title("Add a profile")
-            Lede(null, "Send your .ovpn file from your phone, or bring it in from a USB drive or a link.")
-            Actions {
-                TvButton("Add a profile", { nav.go(Screen.Import) }, icon = Ic.Plus, focusRequester = primaryFocus)
-            }
-            return@Column
-        }
+        if (c == null) return@Column
         val current = c.id == state.activeId
         val mode = modeOf(state)
         val server = state.serverOf(c)
         val info = state.infoOf(c)
         val blocked = state.status is VpnStatus.Blocked
-        val now = rememberNow()
         val edit = {
             nav.guard(state) {
                 nav.go(Screen.Profiles, focusContent = false)
                 nav.profFocus = c.id
+                nav.stack.clear()
                 nav.push(Col.Profile(c.id), "pe-name")
             }
         }
@@ -120,10 +119,9 @@ private fun Hero(
         when {
             !current -> Lede(null, authText(state, c))
             mode == Mode.On -> {
-                val since = (state.status as? VpnStatus.Connected)?.sinceMillis ?: now
                 // The address sites see once it is looked up; until then the tunnel's own.
                 val ip = state.tunnel?.publicIp?.let { "VPN IP $it" } ?: state.tunnel?.address?.substringBefore('/')?.let { "Tunnel IP $it" }
-                Lede("Connected", " for ${fmtDuration((now - since).coerceAtLeast(0) / 1000)}" + (ip?.let { " · $it" } ?: ""))
+                ConnectedFor((state.status as? VpnStatus.Connected)?.sinceMillis, ip)
                 Traffic("Traffic from your device goes through your VPN")
             }
             mode == Mode.Busy -> {
@@ -131,7 +129,7 @@ private fun Hero(
                 // An empty line, so the name stays put from not connected to connecting to connected.
                 Traffic("")
             }
-            mode == Mode.Paused -> Lede("Paused", " · back on in ${fmtMinutes(((state.pausedUntil ?: now) - now).coerceAtLeast(0) / 1000)}")
+            mode == Mode.Paused -> PausedFor(state.pausedUntil)
             mode == Mode.Error && blocked -> Lede("Connection dropped", " · The kill switch is blocking traffic.")
             mode == Mode.Error -> {
                 val why = (state.status as? VpnStatus.Failed)?.message ?: "Could not connect"
@@ -143,14 +141,20 @@ private fun Hero(
             }
         }
         Meta(listOfNotNull(server?.host, server?.let { "${it.protocol.label} ${it.port}" }, info?.cipher))
-        Actions {
+        // The buttons change with the tunnel (Resume now goes, Pause comes), and the one pressed
+        // goes with them: focus moves to the new first button instead of falling to the cards.
+        var inActions by remember { mutableStateOf(false) }
+        val hadFocus = inActions
+        LaunchedEffect(mode) { if (hadFocus) primaryFocus.focusWhenReady() }
+        Actions({ inActions = it }) {
             when {
                 !current -> {
-                    TvButton("Connect", {
+                    // While another tunnel is up, the word says this one takes its place.
+                    TvButton(if (state.status.isActive || state.pausedUntil != null) "Connect instead" else "Connect", {
                         nav.preview = null
                         connect(c.id)
                     }, icon = Ic.Power, focusRequester = primaryFocus)
-                    TvButton("Edit", edit, icon = Ic.Pencil, glass = true)
+                    TvButton("Edit profile", edit, icon = Ic.Pencil, glass = true)
                 }
                 mode == Mode.On -> {
                     TvButton("Disconnect", actions::disconnect, icon = Ic.Power, focusRequester = primaryFocus)
@@ -172,11 +176,7 @@ private fun Hero(
                 }
                 mode == Mode.Error -> {
                     TvButton("Try again", { connect(c.id) }, icon = Ic.Swap, focusRequester = primaryFocus)
-                    TvButton("View log", {
-                        nav.settingsCat = Category.Diagnostics
-                        nav.go(Screen.Settings)
-                        nav.showLog = true
-                    }, icon = Ic.Log, glass = true)
+                    TvButton("View log", { nav.openLog(from = Screen.Connect) }, icon = Ic.Log, glass = true)
                     TvButton("Edit profile", edit, icon = Ic.Pencil, glass = true)
                     if (blocked) {
                         TvButton("Allow internet", {
@@ -191,10 +191,41 @@ private fun Hero(
     }
 }
 
+/** No profile yet: the Import page's code, and the other ways in. */
+@Composable
+private fun FirstProfile(state: VpnUiState, nav: Nav, actions: TunnelActions, primaryFocus: FocusRequester) {
+    val session = rememberImportSession(state, nav, actions)
+    Column(horizontalAlignment = Alignment.Start) {
+        Title("Add your VPN profile", size = 72f)
+        Lede(null, "Scan the code with your phone and send the .ovpn file.")
+        PhoneBlock(session, PhoneBlockSize.Wide, Modifier.padding(top = 26.dp), steps = listOf("Scan the code with your phone’s camera", "Pick the .ovpn file, paste it or type a link", "Check it here and save it"))
+        Actions {
+            TvButton("Other ways", {
+                nav.importMethod = if (actions.hasFilePicker) ImportMethod.Files else ImportMethod.Link
+                nav.go(Screen.Import)
+            }, icon = Ic.Plus, glass = true, focusRequester = primaryFocus)
+        }
+    }
+}
+
 /** .ttl */
 @Composable
-private fun Title(text: String) {
-    Text(text, style = TvType.title(104f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 1100.dp))
+private fun Title(text: String, size: Float = 104f) {
+    Text(text, style = TvType.title(size), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 1100.dp))
+}
+
+/** How long the tunnel has been up. Only this line ticks each second, not the whole hero. */
+@Composable
+private fun ConnectedFor(since: Long?, ip: String?) {
+    val now = rememberNow()
+    Lede("Connected", " for ${fmtDuration((now - (since ?: now)).coerceAtLeast(0) / 1000)}" + (ip?.let { " · $it" } ?: ""))
+}
+
+/** How long the pause has left, ticking on its own. */
+@Composable
+private fun PausedFor(until: Long?) {
+    val now = rememberNow()
+    Lede("Paused", " · back on in ${fmtMinutes(((until ?: now) - now).coerceAtLeast(0) / 1000)}")
 }
 
 /** .lede: the state in bold, then what it means. */
@@ -234,9 +265,9 @@ private fun Meta(parts: List<String>) {
 }
 
 @Composable
-private fun Actions(content: @Composable () -> Unit) {
+private fun Actions(focused: (Boolean) -> Unit = {}, content: @Composable () -> Unit) {
     Row(
-        modifier = Modifier.padding(top = 26.dp),
+        modifier = Modifier.padding(top = 26.dp).onFocusChanged { focused(it.hasFocus) },
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) { content() }
@@ -269,11 +300,13 @@ private fun QuickRow(state: VpnUiState, nav: Nav, connect: (String) -> Unit, pri
                     iconPath = look.icon.path,
                     iconSize = 30f,
                     title = c.name,
-                    subtitle = if (current) state.serverOf(c)?.host.orEmpty() else statusText(state, c),
+                    // The current card names its server while nothing happens, and says what is happening otherwise.
+                    subtitle = if (current && modeOf(state) == Mode.Off) state.serverOf(c)?.host.orEmpty() else statusText(state, c),
                     onFocus = {
                         nav.preview = if (current) null else c.id
                         nav.focusedPid = c.id
                     },
+                    onBlur = { if (nav.focusedPid == c.id) nav.focusedPid = null },
                     onClick = {
                         val live = current && (modeOf(state) == Mode.On || modeOf(state) == Mode.Busy)
                         if (live) primaryFocus.tryFocus() else connect(c.id)

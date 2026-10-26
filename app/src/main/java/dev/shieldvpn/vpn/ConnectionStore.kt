@@ -11,17 +11,26 @@ import java.util.UUID
  * Profiles (connections) live in filesDir/connections.json, in the order the list shows
  * them. Their logins are kept apart, encrypted, in [CredentialStore]. The VPN's process writes
  * here too (when a profile last connected or failed), so each change holds a file lock across
- * both processes, and the file is replaced whole, never read half-written.
+ * both processes, and the file is replaced whole ([writeAtomically]), never read half-written.
  */
 object ConnectionStore {
 
     private const val FILE = "connections.json"
 
+    // The last list read, for a file that later turns out damaged.
+    private var lastGood: List<Connection>? = null
+
     @Synchronized
     fun list(context: Context): List<Connection> {
         val file = File(context.filesDir, FILE)
         if (!file.exists()) return migrate(context)
-        val array = JSONArray(file.readText())
+        return runCatching { parse(readAtomically(file).orEmpty()) }
+            .onSuccess { lastGood = it }
+            .getOrElse { setAside(file, it); lastGood ?: emptyList() }
+    }
+
+    private fun parse(text: String): List<Connection> {
+        val array = JSONArray(text)
         return List(array.length()) { i ->
             val item = array.getJSONObject(i)
             Connection(
@@ -91,9 +100,8 @@ object ConnectionStore {
             c.keyAlias?.let { item.put("keyAlias", it) }
             array.put(item)
         }
-        val next = File(context.filesDir, "$FILE.new")
-        next.writeText(array.toString())
-        next.renameTo(File(context.filesDir, FILE))
+        writeAtomically(File(context.filesDir, FILE), array.toString())
+        lastGood = connections
     }
 
     private fun JSONObject.optStringOrNull(key: String): String? = if (has(key)) getString(key) else null

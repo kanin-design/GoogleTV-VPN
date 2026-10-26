@@ -1,4 +1,4 @@
-Tunnel uses these open-source projects. Thank you to their authors.
+This app uses these open-source projects. Thank you to their authors.
 
   OpenVPN 3 core: Used under the Mozilla Public License 2.0 (OpenVPN 3 is offered under AGPL-3.0 or MPL-2.0).
   OpenSSL: Apache License 2.0.

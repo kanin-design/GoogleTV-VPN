@@ -8,7 +8,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Tunnel state. In the VPN's process (":vpn") the service writes it and [VpnLink] passes every
+ * The tunnel's state. In the VPN's process (":vpn") the service writes it and [VpnLink] passes every
  * change on; in the app's process it mirrors what the link reports, and the UI reads it.
  */
 object VpnController {

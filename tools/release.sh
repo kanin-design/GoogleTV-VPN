@@ -18,12 +18,34 @@ if [[ -n $(git status --porcelain) ]]; then
 fi
 
 version=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts)
+if [[ ${tag#v} != $version* ]]; then
+  echo "The tag $tag does not match versionName $version in app/build.gradle.kts." >&2
+  exit 1
+fi
 build=$(git rev-list --count HEAD)
 commit=$(git rev-parse --short=7 HEAD)
 name=$(sed -n 's/^appName=//p' gradle.properties | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
 base="$name-${tag#v}"
 
-./gradlew -q assembleRelease
+# WireGuard is work in progress and never published: the flag on the command line wins over any
+# gradle.properties, and the APKs are checked for its library.
+./gradlew -q assembleRelease -Pwireguard=false
+for apk in app/build/outputs/apk/release/app-*-release.apk; do
+  if unzip -l "$apk" | grep -q 'libwg'; then
+    echo "$apk carries WireGuard's library. Published builds must not." >&2
+    exit 1
+  fi
+done
+
+# Every installed copy refuses an update signed with another key, so check it before uploading.
+cert=e5dd5da370db3301f9f7f5e80190d6b342500f20c5c404ef71588def6c0adba3
+apksigner=$(ls -d ${ANDROID_HOME:-$HOME/Library/Android/sdk}/build-tools/*/apksigner | tail -1)
+for apk in app/build/outputs/apk/release/app-*-release.apk; do
+  if ! $apksigner verify --print-certs "$apk" | grep -q "SHA-256 digest: $cert"; then
+    echo "$apk is not signed with the key the published builds use. Build on the Mac that has it." >&2
+    exit 1
+  fi
+done
 
 out=build/release
 rm -rf $out && mkdir -p $out

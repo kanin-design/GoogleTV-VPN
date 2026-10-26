@@ -6,11 +6,12 @@ import android.net.VpnService
 import android.os.Bundle
 import android.widget.Toast
 import dev.shieldvpn.vpn.ConnectionStore
+import dev.shieldvpn.vpn.ServerStore
 import dev.shieldvpn.vpn.SettingsStore
 import dev.shieldvpn.vpn.Tunnels
 
 /**
- * Settings › Automation: other apps and ADB connect or disconnect Tunnel by starting
+ * Settings › Automation: other apps and ADB connect or disconnect the app by starting
  * dev.shieldvpn/.Connect (with an optional "profile" name) or dev.shieldvpn/.Disconnect.
  * It shows nothing and finishes at once. It does nothing until the user turns it on.
  */
@@ -33,7 +34,7 @@ class AutomationActivity : Activity() {
             return
         }
         val name = intent.getStringExtra(EXTRA_PROFILE)?.trim()
-        val connections = ConnectionStore.list(this)
+        val connections = ConnectionStore.list(this).filterNot { ServerStore.hidden(this, it.serverId) }
         val target = when {
             !name.isNullOrEmpty() -> connections.firstOrNull { it.name.equals(name, ignoreCase = true) }
             else -> connections.firstOrNull { it.id == SettingsStore.activeConnection(this) } ?: connections.firstOrNull()

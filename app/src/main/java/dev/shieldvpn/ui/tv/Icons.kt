@@ -21,16 +21,13 @@ enum class Ic(vararg val paths: String) {
     Pencil("M4 20h4L19 9l-4-4L4 16z"),
     Log("M5 6h14", "M5 10h14", "M5 14h9", "M5 18h6"),
     Swap("M4 8h13", "M14 4l4 4-4 4", "M20 16H7", "M10 12l-4 4 4 4"),
-    Grid(rect(4f, 4f, 6.5f, 6.5f, 1.5f), rect(13.5f, 4f, 6.5f, 6.5f, 1.5f), rect(4f, 13.5f, 6.5f, 6.5f, 1.5f), rect(13.5f, 13.5f, 6.5f, 6.5f, 1.5f)),
     Plus("M12 5v14", "M5 12h14"),
     Chev("M9 6l6 6-6 6"),
-    Back("M15 6l-6 6 6 6"),
     Phone(rect(7f, 2.5f, 10f, 19f, 2.5f), "M11 18h2"),
     Usb("M9 2.5h6v5H9z", "M7 7.5h10v8a5 5 0 0 1-10 0z"),
     Link("M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1", "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"),
     Archive("M4 8h16v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z", "M3 4h18v4H3z", "M10 12h4"),
     Cert(rect(4f, 4f, 16f, 12f, 2f), "M8 9h8", "M8 12h5", "M15 16v4l2-1 2 1v-4"),
-    Paste(rect(6f, 4f, 12f, 17f, 2f), "M9 4V3h6v1", "M9 10h6", "M9 14h6"),
     File("M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5"),
     Check("M5 12.5l4.5 4.5L19 7.5"),
     Bang("M12 6v8", "M12 18h.01"),
@@ -47,7 +44,7 @@ enum class Ic(vararg val paths: String) {
     Trash("M4 7h16", "M10 11v6", "M14 11v6", "M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12", "M9 7V4h6v3"),
     Copy(rect(8f, 8f, 12f, 12f, 2f), "M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"),
     Pin("M9 4h6l-1 6 3 3H7l3-3z", "M12 16v4"),
-    Dns(rect(4f, 4f, 16f, 6f, 1.5f), rect(4f, 14f, 16f, 6f, 1.5f), "M8 7h.01", "M8 17h.01"),
+    Download("M12 4v11", "M7 10.5l5 5 5-5", "M5 20h14"),
 }
 
 private val vectors = HashMap<Pair<Ic, Float>, ImageVector>()

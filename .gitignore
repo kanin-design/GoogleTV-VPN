@@ -27,3 +27,4 @@ third_party/asio/
 *.pem
 *.key
 *.tunnelbackup
+*.openvpnclientbackup

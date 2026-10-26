@@ -56,13 +56,13 @@ object Certificates {
         return Read.Done(Bundle(pem("CERTIFICATE", leaf.encoded), pem("PRIVATE KEY", key.encoded), ca, leaf.subjectX500Principal.name))
     }
 
-    /** Aliases of keys Tunnel keeps in Android's keystore itself, as opposed to ones installed on the TV. */
+    /** Aliases of keys the app keeps in Android's keystore itself, as opposed to ones installed on the TV. */
     // Never changes with the app's name: keys kept under it must still be found.
     private const val OWN = "tunnel:"
 
     /**
      * Moves the key and certificates of a .p12 into Android's keystore, where the key can sign
-     * but never be read back, not even by Tunnel. Returns the alias to use, or null if
+     * but never be read back, not even by the app. Returns the alias to use, or null if
      * [password] does not open [bytes]. This works on every TV; many TVs have no screen for
      * installing certificates system-wide.
      */
@@ -95,7 +95,7 @@ object Certificates {
 
     private fun keystore(): KeyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
-    /** The key and certificate chain for [alias]: one Tunnel keeps, or one installed on the TV. */
+    /** The key and certificate chain for [alias]: one the app keeps, or one installed on the TV. */
     fun entry(context: Context, alias: String): Pair<PrivateKey, List<X509Certificate>>? = runCatching {
         if (alias.startsWith(OWN)) {
             val e = keystore().getEntry(alias.removePrefix(OWN), null) as KeyStore.PrivateKeyEntry
@@ -106,7 +106,7 @@ object Certificates {
         }
     }.getOrNull()
 
-    /** Removes a key Tunnel kept, once no profile uses it. Keys installed on the TV are left alone. */
+    /** Removes a key the app kept, once no profile uses it. Keys installed on the TV are left alone. */
     fun forget(alias: String) {
         if (alias.startsWith(OWN)) runCatching { keystore().deleteEntry(alias.removePrefix(OWN)) }
     }

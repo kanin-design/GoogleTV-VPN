@@ -6,5 +6,5 @@ package dev.shieldvpn
  */
 const val APP_NAME: String = BuildConfig.APP_NAME
 
-/** The name in file names: lowercase letters and digits, as in "tunnel-log.txt". */
+/** The name in file names: lowercase letters and digits, as in "openvpnclient-log.txt". */
 val APP_FILE_NAME: String = APP_NAME.lowercase().filter { it.isLetterOrDigit() }.ifEmpty { "vpn" }

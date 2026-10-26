@@ -1,5 +1,6 @@
 package dev.shieldvpn.ui.tv
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
@@ -32,6 +33,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -75,9 +77,11 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 /** The design's motion curve for focus and small moves: cubic-bezier(.2,.7,.2,1). */
 val FocusEase = CubicBezierEasing(0.2f, 0.7f, 0.2f, 1f)
@@ -253,6 +257,18 @@ fun Modifier.scrollFade(list: LazyListState, edge: Dp = 14.dp): Modifier = this
     }
 
 /**
+ * Places this at [x], [y] with the width [width], read while laying out: an animated place or
+ * width then moves it without composing it again on every frame.
+ */
+fun Modifier.placed(x: () -> Dp, y: Dp, width: () -> Dp): Modifier = this
+    .offset { IntOffset(x().roundToPx(), y.roundToPx()) }
+    .layout { measurable, constraints ->
+        val w = width().roundToPx()
+        val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+        layout(w, placeable.height) { placeable.place(0, 0) }
+    }
+
+/**
  * Widens a list by [x] on both sides without moving its rows, when the list's content padding
  * gives the same [x] back. A focused row grows a little, and this keeps its edges from being cut.
  */
@@ -345,7 +361,8 @@ enum class RowKind(val minHeight: Float, val radius: Float, val scale: Float, va
 /**
  * A focusable row with a title, an optional line under it, and slots on both sides.
  * [open] marks the row whose column is open next to it; [mini] is the narrow column,
- * where only names show.
+ * where only names show. [flash] shows "Saved" on it for a moment; a row that can't be used
+ * here ([enabled] false) is dimmed and focus passes it by.
  */
 @Composable
 fun ListRow(
@@ -359,6 +376,8 @@ fun ListRow(
     danger: Boolean = false,
     mini: Boolean = false,
     monoTitle: Boolean = false,
+    enabled: Boolean = true,
+    flash: Boolean = false,
     focusRequester: FocusRequester? = null,
     onFocus: (() -> Unit)? = null,
     leading: (@Composable (focused: Boolean) -> Unit)? = null,
@@ -401,7 +420,7 @@ fun ListRow(
             .clip(shape)
             .background(bg)
             .then(if (ring) Modifier.border(1.dp, Tv.white(0.16f), shape) else Modifier)
-            .tvFocus(f, onClick, focusRequester, onFocus)
+            .then(if (enabled) Modifier.tvFocus(f, onClick, focusRequester, onFocus) else Modifier.fade { 0.42f })
             .padding(horizontal = if (kind == RowKind.Row) 16.dp else 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -427,12 +446,37 @@ fun ListRow(
                 )
             }
         }
+        SavedPill(flash && foldAlpha > 0.01f)
         if (trailing != null && foldAlpha > 0.01f) {
             Row(
                 modifier = Modifier.fade { foldAlpha },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) { trailing(f.focused) }
+        }
+    }
+}
+
+/** The chevron at the end of a row that opens something. */
+@Composable
+fun Chevron(focused: Boolean) {
+    TvIcon(Ic.Chev, 18f, if (focused) Tv.OnFocus else Tv.Ink, stroke = 2.4f)
+}
+
+/** The mint "Saved" pill a row shows for a moment after its value was saved. */
+@Composable
+fun SavedPill(visible: Boolean, modifier: Modifier = Modifier) {
+    AnimatedVisibility(visible, modifier = modifier, enter = fadeIn(tween(200)), exit = fadeOut(tween(300))) {
+        Row(
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(Tv.Mint.copy(alpha = 0.16f))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            TvIcon(Ic.Check, 15f, Tv.Mint, stroke = 3f)
+            Text("Saved", style = TvType.ui(14f, FontWeight.ExtraBold, Tv.Mint))
         }
     }
 }
@@ -550,22 +594,41 @@ sealed interface TvKey {
     data object Space : TvKey
     data object Del : TvKey
     data object Done : TvKey
+
+    /** Switches between letters and symbols. */
+    data object Page : TvKey
 }
 
-private val KeyRows: List<List<Pair<TvKey, Int>>> = listOf(
-    "1234567890".map { TvKey.Ch(it) to 1 },
-    "qwertyuiop".map { TvKey.Ch(it) to 1 },
-    "asdfghjkl@".map { TvKey.Ch(it) to 1 },
-    listOf<Pair<TvKey, Int>>(TvKey.Shift to 1) + "zxcvbnm._".map { TvKey.Ch(it) to 1 },
-    listOf(TvKey.Space to 5, TvKey.Ch('-') to 1, TvKey.Del to 2, TvKey.Done to 2),
+private fun keys(text: String) = text.map { TvKey.Ch(it) to 1 }
+
+private val Bottom = listOf(TvKey.Page to 1, TvKey.Space to 4, TvKey.Ch('-') to 1, TvKey.Del to 2, TvKey.Done to 2)
+
+private val Letters: List<List<Pair<TvKey, Int>>> = listOf(
+    keys("1234567890"),
+    keys("qwertyuiop"),
+    keys("asdfghjkl@"),
+    listOf<Pair<TvKey, Int>>(TvKey.Shift to 1) + keys("zxcvbnm._"),
+    Bottom,
+)
+
+// What links, addresses and strong passwords need beyond letters and digits.
+private val Symbols: List<List<Pair<TvKey, Int>>> = listOf(
+    keys("1234567890"),
+    keys("!#$%&*()+="),
+    keys("/:;?'\",<>~"),
+    keys("[]{}|\\^`_."),
+    Bottom,
 )
 
 /**
- * The design's keyboard: typing on a TV without the system keyboard, so the remote's
- * focus never gets stuck in a text field. [entry] goes on the "a" key, where focus starts.
+ * The design's keyboard: typing on a TV without the system keyboard, so the remote's focus never
+ * gets stuck in a text field. It keeps its own Shift and its page of symbols; [onType] gets each
+ * character, space included. [entry] goes on the key focus starts on, the "a" (or "!" on symbols).
  */
 @Composable
-fun Keyboard(shift: Boolean, onKey: (TvKey) -> Unit, compact: Boolean = false, entry: FocusRequester? = null) {
+fun Keyboard(onType: (Char) -> Unit, onDelete: () -> Unit, onDone: () -> Unit, compact: Boolean = false, entry: FocusRequester? = null) {
+    var shift by remember { mutableStateOf(false) }
+    var symbols by remember { mutableStateOf(false) }
     val gap = if (compact) 6f else 7f
     Column(
         modifier = Modifier
@@ -575,14 +638,30 @@ fun Keyboard(shift: Boolean, onKey: (TvKey) -> Unit, compact: Boolean = false, e
             .padding((if (compact) 12 else 14).dp),
         verticalArrangement = Arrangement.spacedBy(gap.dp),
     ) {
-        KeyRows.forEachIndexed { r, row ->
+        (if (symbols) Symbols else Letters).forEachIndexed { r, row ->
             Row(horizontalArrangement = Arrangement.spacedBy(gap.dp)) {
                 row.forEachIndexed { c, (key, span) ->
                     KeyCap(
                         key = key,
                         shift = shift,
+                        symbols = symbols,
                         height = if (compact) 40f else 46f,
-                        onClick = { onKey(key) },
+                        onClick = {
+                            when (key) {
+                                is TvKey.Ch -> {
+                                    onType(if (shift) key.c.uppercaseChar() else key.c)
+                                    shift = false
+                                }
+                                TvKey.Space -> onType(' ')
+                                TvKey.Del -> onDelete()
+                                TvKey.Done -> onDone()
+                                TvKey.Shift -> shift = !shift
+                                TvKey.Page -> {
+                                    symbols = !symbols
+                                    shift = false
+                                }
+                            }
+                        },
                         focusRequester = if (r == 2 && c == 0) entry else null,
                         modifier = Modifier.weight(span.toFloat()),
                     )
@@ -593,7 +672,7 @@ fun Keyboard(shift: Boolean, onKey: (TvKey) -> Unit, compact: Boolean = false, e
 }
 
 @Composable
-private fun KeyCap(key: TvKey, shift: Boolean, height: Float, onClick: () -> Unit, focusRequester: FocusRequester?, modifier: Modifier) {
+private fun KeyCap(key: TvKey, shift: Boolean, symbols: Boolean, height: Float, onClick: () -> Unit, focusRequester: FocusRequester?, modifier: Modifier) {
     val f = rememberFocusState()
     val scale by animateFloatAsState(if (f.focused) 1.1f else 1f, tween(120, easing = FocusEase), label = "key")
     val special = key !is TvKey.Ch
@@ -604,6 +683,7 @@ private fun KeyCap(key: TvKey, shift: Boolean, height: Float, onClick: () -> Uni
         TvKey.Space -> "space"
         TvKey.Del -> "⌫"
         TvKey.Done -> "Done"
+        TvKey.Page -> if (symbols) "abc" else "#+="
     }
     val bg = when {
         f.focused -> Tv.Focus
@@ -629,16 +709,7 @@ private fun KeyCap(key: TvKey, shift: Boolean, height: Float, onClick: () -> Uni
     }
 }
 
-/** Applies a key to a text value. Returns the new value, or null for Done. */
-fun typeKey(value: String, key: TvKey, shift: Boolean, max: Int = 256): String? = when (key) {
-    is TvKey.Ch -> (value + if (shift) key.c.uppercaseChar() else key.c).take(max)
-    TvKey.Space -> (value + " ").take(max)
-    TvKey.Del -> value.dropLast(1)
-    TvKey.Shift -> value
-    TvKey.Done -> null
-}
-
-/** .input: a field that shows what the on-screen keyboard types into it. */
+/** .input: a field that shows what the on-screen keyboard types into it, and what is wrong with it under it. */
 @Composable
 fun InputBox(
     label: String,
@@ -650,6 +721,7 @@ fun InputBox(
     showSecret: Boolean = false,
     mono: Boolean = false,
     focusRequester: FocusRequester? = null,
+    error: String? = null,
 ) {
     val f = rememberFocusState()
     val shape = RoundedCornerShape(15.dp)
@@ -662,7 +734,7 @@ fun InputBox(
                 .height(58.dp)
                 .clip(shape)
                 .background(if (f.focused) Tv.white(0.12f) else Tv.white(0.07f))
-                .border(2.dp, if (f.focused) Tv.Focus else if (editing) Tv.white(0.3f) else Color.Transparent, shape)
+                .border(2.dp, if (f.focused) Tv.Focus else if (error != null) Tv.Red else if (editing) Tv.white(0.3f) else Color.Transparent, shape)
                 .tvFocus(f, onClick, focusRequester)
                 .padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -681,29 +753,22 @@ fun InputBox(
             }
             if (editing) Caret()
         }
+        if (error != null) Text(error, style = TvType.ui(14.5f, FontWeight.SemiBold, Tv.Red), maxLines = 2)
     }
 }
 
 @Composable
 private fun Caret() {
-    val blink = rememberInfiniteTransition(label = "caret")
-    val a by blink.animateFloat(
-        initialValue = 1f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            keyframes {
-                durationMillis = 1000
-                1f at 0
-                1f at 490
-                0f at 500
-                0f at 990
-            },
-            RepeatMode.Restart,
-        ),
-        label = "caretAlpha",
-    )
+    // Two frames a second; an endless animation would redraw the open sheet every frame.
+    var on by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(500)
+            on = !on
+        }
+    }
     Spacer(Modifier.width(2.dp))
-    Box(Modifier.fade { a }.size(2.dp, 26.dp).background(Color.White))
+    Box(Modifier.size(2.dp, 26.dp).background(if (on) Color.White else Color.Transparent))
 }
 
 // ---- Toast --------------------------------------------------------------------
@@ -787,6 +852,8 @@ fun ConfirmBar(text: String, confirm: String, keep: FocusRequester, onConfirm: (
         TvButton("Keep", onKeep, small = true, focusRequester = keep)
     }
     LaunchedEffect(Unit) { keep.focusWhenReady() }
+    // Back is Keep, and closes only the bar: added after the app's own handler, so it goes first.
+    BackHandler(onBack = onKeep)
 }
 
 /** The key came from a keyboard with letters, not from a remote. */

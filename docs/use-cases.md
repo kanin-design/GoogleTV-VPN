@@ -8,9 +8,9 @@ Typing is limited to the few places that need it: names, usernames, passwords, a
 ## Concepts
 
 - **Server**: where the tunnel goes. A host, a port, a protocol, and the certificate and TLS settings from an `.ovpn` file. A server comes from an imported file or from manual entry.
-- **Connection**: what the user connects with. A name, one server, a username, a password, and the options it uses. One server can have many connections, for example two logins on the same server.
-- **Active connection**: the connection the Home screen is using. It is set when the user connects one.
-- **Status**: what the tunnel is doing right now. It is shown on Home and as an indicator on each connection.
+- **Profile**: what the user connects with (`Connection` in the code). A name, one server, a username, a password, and the options it uses. One server can have many profiles, for example two logins on the same server.
+- **Active profile**: the profile the Home screen is using. It is set when the user connects one.
+- **Status**: what the tunnel is doing right now. It is shown on Home and as an indicator on each profile.
 
 | Status | Meaning | Indicator |
 |---|---|---|
@@ -22,10 +22,10 @@ Typing is limited to the few places that need it: names, usernames, passwords, a
 
 ## Tabs
 
-Three tabs, in this order: **Home**, **Connections**, **Settings**.
-There is no tab for passwords or servers. Those live inside a connection.
+Three tabs, in this order: **Home**, **Profiles**, **Settings**.
+There is no tab for passwords or servers. Those live inside a profile.
 
-Assumption, to confirm: servers are not a separate tab. A server is created when a file is imported or a connection is added manually. Its address and options are edited in the connection's Advanced section.
+Assumption, to confirm: servers are not a separate tab. A server is created when a file is imported or a profile is added manually. Its address and options are edited in the profile's Advanced section.
 
 ## Screens
 
@@ -33,21 +33,21 @@ Assumption, to confirm: servers are not a separate tab. A server is created when
 
 - The animated shield, one status line, and one button. Nothing else.
 - Status line: "Not protected", "Connecting", "Protected", "Blocked", or "Failed", with the reason under it when failed.
-- Under the status: the active connection's name, for example "Home login, Client".
+- Under the status: the active profile's name, for example "Home login, Client".
 - Button: **Connect** when idle or failed, **Cancel** while connecting, **Disconnect** when connected or blocked.
-- With no connections yet, the button is replaced by the first-run card (UC-01).
+- With no profiles yet, the button is replaced by the first-run card (UC-01).
 
-### Connections
+### Profiles
 
-- A list of every connection. Each row shows the indicator, the name, the server address in smaller text, and a short state line such as "Connected" or "Failed: wrong password".
+- A list of every profile. Each row shows the indicator, the name, the server address in smaller text, and a short state line such as "Connected" or "Failed: wrong password".
 - Selecting a row opens its panel.
-- **Add connection** sits at the top of the list.
+- **Add a profile** sits at the top of the list.
 
-### Connection panel
+### Profile panel
 
 Opens when a row is selected, and animates in over the list.
 
-- First item, large: **Connect**. It reads **Disconnect** when this connection is the active one.
+- First item, large: **Connect**. It reads **Disconnect** when this profile is the active one.
 - Below it, in smaller text, the settings as rows:
   - Name
   - Server: the address, shown here and changed in Advanced
@@ -58,7 +58,7 @@ Opens when a row is selected, and animates in over the list.
   - Delete
 - Back closes the panel and returns to the list.
 
-### Advanced (inside a connection)
+### Advanced (inside a profile)
 
 - Collapsed by default, so the panel stays short.
 - Server address, port, and protocol.
@@ -74,13 +74,13 @@ Opens when a row is selected, and animates in over the list.
 
 ### UC-01: First launch, nothing set up
 
-**Trigger:** the app opens with no connections.
+**Trigger:** the app opens with no profiles.
 
-1. Home shows the first-run card: "Add your VPN connection", with two buttons, **Import .ovpn file** and **Add manually**.
-2. Either button goes to Connections and starts that flow: UC-02 or UC-03.
-3. When the first connection is saved, Home shows its name and the **Connect** button.
+1. Home shows the first-run card: "Add your VPN profile", with two buttons, **Import .ovpn file** and **Add manually**.
+2. Either button goes to Profiles and starts that flow: UC-02 or UC-03.
+3. When the first profile is saved, Home shows its name and the **Connect** button.
 
-**Result:** one connection exists, with status Idle. Nothing connects by itself.
+**Result:** one profile exists, with status Idle. Nothing connects by itself.
 
 ### UC-02: Import an `.ovpn` file
 
@@ -89,39 +89,39 @@ Opens when a row is selected, and animates in over the list.
 1. The system file picker opens. On the Shield this is the built-in Files picker.
 2. The user picks the file.
 3. The app reads it and checks that it contains a server line.
-4. A server and a connection are created. The name comes from the file name, so `client.ovpn` becomes "Client".
+4. A server and a profile are created. The name comes from the file name, so `client.ovpn` becomes "Client".
 5. If the file holds a username and password, they are filled in. If not, they are left empty, and Connect asks for them (UC-04).
 
 From a phone, the page checks the file the same way when it is picked or pasted. If it asks for a username and password and holds none, the button says Next, and a second step on the phone asks for them; Send to the TV sends them with the file. The review says "Certificate + password · name, from your phone", and Save keeps the login with the profile, so Connect needs nothing more. Left empty, they are asked for when connecting, as before. Tested 2026-10-26 in a phone-sized browser against the emulator: a profile with `auth-user-pass` got Next, one without it or with the login inside sent at once, pasted text the same, and the saved profile connected without asking.
 
-**Failures:** not an OpenVPN file, over 256 KB, or no `remote` line. Show the message on Connections and save nothing (UC-21).
+**Failures:** not an OpenVPN file, over 256 KB, or no `remote` line. Show the message on Profiles and save nothing (UC-21).
 
-### UC-03: Add a server and connection manually
+### UC-03: Add a server and profile manually
 
 **Trigger:** Add manually.
 
-1. Name the connection.
+1. Name the profile.
 2. Enter the server address, the port, and the protocol (UDP or TCP, picked from a list).
 3. Enter the username and password.
-4. Save. The connection appears in the list with status Idle.
+4. Save. The profile appears in the list with status Idle.
 
 **Limit:** most servers also need a certificate. Manual entry cannot create one. Until this is decided (see open decisions), Connect will fail with a certificate error and say so.
 
-### UC-04: Connect a connection that has no login
+### UC-04: Connect a profile that has no login
 
-**Trigger:** Connect on a connection with an empty username.
+**Trigger:** Connect on a profile with an empty username.
 
 1. The app does not try to connect.
-2. The connection panel opens at Username, with the keyboard up.
+2. The profile panel opens at Username, with the keyboard up.
 3. After the username and password are saved, the user presses **Connect** again. (Built this way: there is no single moment when "the login is done", so the app does not guess and connect on its own.)
 
 ### UC-05: Connect and it works
 
-**Trigger:** Connect on Home, or Connect in a connection panel.
+**Trigger:** Connect on Home, or Connect in a profile panel.
 
 1. Home shows Connecting, amber, with the animated shield.
 2. The tunnel comes up. Home shows Protected, green.
-3. The connection's row turns green, and Home shows its name.
+3. The profile's row turns green, and Home shows its name.
 
 **Result:** all traffic goes through the VPN.
 
@@ -129,7 +129,7 @@ From a phone, the page checks the file the same way when it is picked or pasted.
 
 1. Connect. The server rejects the login.
 2. The status becomes Failed: "Wrong username or password".
-3. The connection row turns red and shows the reason. Home shows the same reason, and the button reads **Connect**.
+3. The profile row turns red and shows the reason. Home shows the same reason, and the button reads **Connect**.
 4. The password is kept, so the user can open the panel and change only the password.
 
 ### UC-07: The server does not answer
@@ -138,47 +138,47 @@ From a phone, the page checks the file the same way when it is picked or pasted.
 2. The status becomes Failed: "Server did not respond".
 3. Retry is just **Connect** again. Nothing else needs to be changed.
 
-### UC-08: Two connections to the same server with different logins
+### UC-08: Two profiles to the same server with different logins
 
 **Example:** "Home login" as user A and "Work login" as user B, both on the same server address.
 
-1. Duplicate an existing connection (UC-10).
+1. Duplicate an existing profile (UC-10).
 2. Rename the copy (UC-11), then change its username and password (UC-12).
 3. Both rows now show the same server address under different names. Switching between them needs no typing.
 
-### UC-09: Choose which connection Home uses
+### UC-09: Choose which profile Home uses
 
-1. Open Connections, select a row, and press **Connect**.
-2. That connection becomes the active one. Home shows its name.
+1. Open Profiles, select a row, and press **Connect**.
+2. That profile becomes the active one. Home shows its name.
 
-**Note:** with a connection already active, this disconnects it first and then connects the new one (UC-18).
+**Note:** with a profile already active, this disconnects it first and then connects the new one (UC-18).
 
-### UC-10: Duplicate a connection
+### UC-10: Duplicate a profile
 
 1. Open the panel and press **Duplicate**.
 2. A copy appears in the list, named "Name (copy)", with the same server and login. Focus stays on Duplicate, and a toast says where the copy is.
 3. The user changes only what differs.
 
-### UC-11: Rename a connection
+### UC-11: Rename a profile
 
 1. Open the panel, select Name, and type the new name.
 2. The name updates on Home and in the list.
 
-**Note:** renaming the active connection does not disconnect it.
+**Note:** renaming the active profile does not disconnect it.
 
 ### UC-12: Change a password
 
 1. Open the panel and select Password. The keyboard opens.
 2. The Show toggle reveals the text while it is typed.
-3. The password is saved for this connection only. Other connections on the same server keep their own.
+3. The password is saved for this profile only. Other profiles on the same server keep their own.
 
 ### UC-13: Change server settings
 
 1. Open the panel, then Advanced.
 2. Change the port or protocol.
-3. The change applies at the next connect. A connection that is running keeps its current settings until it reconnects, and the panel says so.
+3. The change applies at the next connect. A profile that is running keeps its current settings until it reconnects, and the panel says so.
 
-**Note:** connections on the same server share its address, port and protocol. Changing them in one connection's Advanced section changes them for all of those connections.
+**Note:** profiles on the same server share its address, port and protocol. Changing them in one profile's Advanced section changes them for all of those profiles.
 
 ### UC-14: Replace the server file
 
@@ -186,14 +186,14 @@ From a phone, the page checks the file the same way when it is picked or pasted.
 
 1. Open Advanced and choose **Replace .ovpn file**. The picker opens.
 2. The server's address and options update.
-3. Every connection on that server keeps its own username and password.
-4. A connection that now has no login prompts for one (UC-04).
+3. Every profile on that server keeps its own username and password.
+4. A profile that now has no login prompts for one (UC-04).
 
-### UC-15: Delete a connection
+### UC-15: Delete a profile
 
 1. Open the panel and press **Delete**. It asks once more: "Press again to delete".
 2. The row is removed.
-3. If other connections use the same server, the server stays. If this was the last connection on it, the server is removed too.
+3. If other profiles use the same server, the server stays. If this was the last profile on it, the server is removed too.
 
 **Guard:** while a tunnel is up, Delete reads "Disconnect to delete" and does nothing.
 
@@ -211,17 +211,17 @@ From a phone, the page checks the file the same way when it is picked or pasted.
 2. Status becomes Failed with the reason "Connection dropped". Normal internet continues.
 3. The row turns red with the same reason.
 
-### UC-18: Switch to another connection while connected
+### UC-18: Switch to another profile while connected
 
-1. Connected to connection A. The user selects connection B and presses **Connect**.
+1. Connected to profile A. The user selects profile B and presses **Connect**.
 2. The app disconnects A and connects B, showing Connecting for B.
 3. Nothing is asked of the user, because only one tunnel runs at a time.
 
 ### UC-19: Reboot the Shield
 
-1. The app opens on Home with the last active connection selected.
+1. The app opens on Home with the last active profile selected.
 2. Status is Not protected, because nothing connects by itself.
-3. If **Connect at startup** is on, the app connects that connection at boot. This is not built yet.
+3. If **Connect at startup** is on, the app connects that profile at boot. This is not built yet.
 
 ### UC-20: Navigate with the remote only
 
@@ -237,7 +237,7 @@ From a phone, the page checks the file the same way when it is picked or pasted.
 
 ### UC-22: Upgrade from the current build
 
-1. The current single login moves to a connection named after the first server, "Client".
+1. The current single login moves to a profile named after the first server, "Client".
 2. Its password is read from the encrypted store. If it cannot be read, the field is empty and the next Connect asks for it.
 
 ### UC-23: Change the kill switch or startup setting
@@ -249,9 +249,9 @@ From a phone, the page checks the file the same way when it is picked or pasted.
 
 These are assumptions in this document. Each needs confirming before the rebuild.
 
-1. **Servers as a tab?** Assumed no. Servers live inside connections.
+1. **Servers as a tab?** Assumed no. Servers live inside profiles.
 2. **Certificates for manual entry.** Manual entry needs a certificate for most servers. Either require an `.ovpn` file for that, or allow a certificate to be pasted.
-3. **Connect makes the active connection.** Assumed yes. Pressing Connect on a row also makes it the one Home uses.
+3. **Connect makes the active profile.** Assumed yes. Pressing Connect on a row also makes it the one Home uses.
 4. **Kill switch and startup setting** sit on the Settings tab. Assumed yes.
 5. **One tunnel at a time.** Assumed yes.
 6. **Raw config is read-only.** Assumed yes, because typing it on a TV is slow.
@@ -266,9 +266,9 @@ These are assumptions in this document. Each needs confirming before the rebuild
 
 | Use case | Result |
 |---|---|
-| UC-22 upgrade | The old `profiles/client.ovpn` became server and connection "Client" with the same id. |
+| UC-22 upgrade | The old `profiles/client.ovpn` became a server and a profile "Client" with the same id. |
 | UC-04 no login | Home's Connect opened the Client panel at Username, with the keyboard up and the hint shown. |
-| UC-12 login | The username saved for that connection only; focus returned to the row. |
+| UC-12 login | The username saved for that profile only; focus returned to the row. |
 | UC-10 duplicate | The copy opened with focus on Name and the same login. |
 | UC-11 rename | Name saved; list and panel updated. |
 | UC-15 delete | Two presses; the copy and its login were removed, the shared server kept. |
@@ -346,6 +346,27 @@ Two beta-tester passes found what is fixed below; each fix was then checked on t
 | Focus | A profile opens on Connect, or on Name while a tunnel is up. Reopening a scrolled profile focuses its first row. The review of an import starts on Save while a tunnel is up, not on "Save and connect", and Cancel stays on Import. Back from the log, the connection test or a choice lands on the row that opened it. Testing another profile's speed while connected starts on Close. |
 | Smaller | Import opens on From your phone, and the empty Connect screen points there. A DNS server that is refused keeps its sheet open with the text, in Settings and in a profile. Link errors are plain ("There is no server called nosuchhost.invalid. Check the link.", "127.0.0.1 didn’t answer…"). The log scrolls with Up and Down. The second "Let local subnets bypass the tunnel" switch (the same setting as "Allow the local network") and the Version row are gone; About's heading shows the version and build. "Remember / On this device" fits. The profile editor shows the phone's address and code in full. A profile without its password no longer says "Connecting to …" when it opens the sign-in sheet. |
 
+### Fifth pass, 0.1.2 (2026-10-26, emulator, release builds 33 and 38, debug builds 34 to 37)
+
+A third beta-tester pass and a code review found what is fixed below. What the last row names was built but not tried on a device; the rest was checked on the emulator, with the phone pages in a phone-sized browser.
+
+| Area | Result |
+|---|---|
+| Kill switch | When the tunnel drops, the blackhole holds traffic back (a ping from the device fails). Try again keeps it until the new tunnel replaces it: sampled every half second, Android went from "OpenVPN client (blocked)" straight to the server's session, with no moment without a VPN, and the server's name still resolved while blocked. A retry that fails keeps blocking (16 samples over a minute, none got out). Allow internet ends it. |
+| Tunnel | Android counts the VPN as not metered (`NOT_METERED`), so streaming apps don't hold back. With Block IPv6 off, IPv6 is let out instead of being blocked by Android. Always-on VPN in Android's settings now connects the startup profile, or the one Connect shows. Session changes all run on one thread, so a Connect or Disconnect that lands as a tunnel ends can't stop the service under the new one. |
+| Stale failure | A profile saved or picked after another one failed shows "Not connected", not the other's failure. Lists say "Failed: Server did not respond" for every profile, the current one too. |
+| Connection test | Before a run, the checks are grey ("Needs the tunnel"). Connect and test shows Cancel while it connects; a failed connect says why ("R4 test couldn’t connect: Server did not respond.") with Try again focused. |
+| Back | On every red bar (Reset, Delete in the quick menu and the profile, Forget, Remove the passphrase) Back is Keep and puts focus back on the row. Back from the log opened on Connect goes back to Connect. |
+| Focus | Saving a PIN keeps focus on its row. After Pause, focus is on Resume now, and after Resume now on Disconnect, not on the cards. A preview of another profile while one is connected says "Connect instead". The startup column opens scrolled to the chosen profile. Long text sheets (licenses, commands, what the app stores) take focus, so Down scrolls them and then reaches Close. |
+| Keyboard | Enter on a keyboard moves to the next empty field, then to Save, as Done does: a passphrase typed twice with Enter between goes into both fields. |
+| PIN | After five wrong PINs each try waits: 30 seconds ("Too many wrong PINs. Try again in 26 s"), then twice as long each time. The right PIN works once the wait is over. With "For everything", the app is hidden behind the keypad. |
+| Phone | Saving an import on the TV tells the phone "Saved on the TV as R5 test", and Cancel on the TV says it wasn't saved, where before the phone said the TV moved on or kept the old review. Typing DNS servers, search domains, the import's name or a link on the phone shows in the TV's open sheet. The moved page names the screen to open ("open Settings › DNS on the TV again"). A gap of a few seconds, as when the TV brings a tunnel up, is retried quietly; a TV that doesn't answer for 30 seconds is "Can’t reach the TV". An old result line goes when the TV starts a new task. Copy falls back to the old way when the phone's clipboard refuses. |
+| Sign-in | An empty password keeps the saved one, on the TV and on the phone, so the username alone can change. Taking the startup slot says which profile no longer connects at startup. |
+| Wording | The .ovpn view shows the server set in Advanced, as the download has it. "It holds the profile’s private key" only for a file that has one. Server and port reads "192.0.2.91:1195". The profile's Custom DNS sheet says its list is the one in Settings › DNS, shared by every profile set to Custom. The phone says "the TV", not "this device". Staged files read "1.1 KB · OpenVPN profile". |
+| Stores | Profile files are written whole and flushed (`AtomicFile`), so a TV unplugged mid-save keeps the old file; one that can't be read is kept aside as `.damaged` and the app still starts. A backup's iteration count must be 10,000 to 2,000,000, and a damaged backup changes nothing. Refreshing reads usernames and whether a password is saved without decrypting them, and each profile file only when it changed. |
+| Release | Debug and verbose log lines are left out of release builds. `tools/release.sh` refuses an APK signed with another key than the published ones, a tag that doesn't match `versionName`, and any APK with WireGuard's library. Device-to-device transfers leave everything out (`data_extraction_rules.xml`). |
+| Not tried on a device | IPv6 with Block IPv6 off; Always-on VPN (the emulator has no such setting); the phone's quiet retry while a tunnel comes up and its 30-second timeout; Copy's fallback; the startup column with the chosen profile below the fold; changing only the username; the startup-slot message; the PIN lock hiding the app; the wording changes in Profiles; a damaged store file or backup (covered by reading the code, not by a test). The release script's checks run when a release is made. |
+
 ## Speed test (2026-10-24)
 
 Connect › Speed test, Profiles › a profile › Speed test, the quick menu, and Settings › Diagnostics › Speed test. It measures against speed.cloudflare.com: ping is the median of five TCP handshakes, download is four streams for 8 seconds without the first 1.5, and upload is four kept-alive TLS connections for 8 seconds, counting a request only when the server has answered it. (Counting written bytes measured the TV's send buffer, a megabyte or more: a burst, then nothing.) A profile that is not connected is connected first; with nothing connected, "Test without the VPN" gives a figure to compare with. The last result of each profile is kept (`shieldvpn_speed` preferences) and shown under its Speed test row.
@@ -376,7 +397,7 @@ How:
 
 Leak checks:
 - 30 rounds through every screen (Details, a profile, Import from your phone, Settings, Apps, the log): memory levels off at about 95 to 100 MB in a debug build; threads (28) and open files (125) stay flat.
-- The phone server listens only while a phone screen is open.
+- The phone server starts when a screen with a phone code opens, and stops two minutes after the last one closes.
 - Each tunnel connect leaves one connection-pool thread from Android's own HTTP client; six reconnects made six, and five minutes later only one was left.
 
 On the Shield (2026-10-24, release build, connected, 1920x1080):
@@ -441,7 +462,7 @@ Checked on the emulator: with a 15-second delay, the screens' process ended on t
 
 Reconnect after a network change, on the Shield: Wi-Fi off for 20 seconds, then on. Wi-Fi took about 25 seconds to rejoin; Tunnel logged "The network changed. Reconnecting." and the session was active 3 seconds later, with a new tunnel address and traffic flowing.
 
-Keep it this way: no cached full-screen bitmaps, no per-item thumbnails, small app icons (96 px), nothing animating behind panels, the phone server only while a phone screen is open, and measure `dumpsys meminfo` and `top` before calling a build done.
+Keep it this way: no cached full-screen bitmaps, no per-item thumbnails, small app icons (96 px), nothing animating behind panels, the phone server only while a screen with a phone code is open (and two minutes after), and measure `dumpsys meminfo` and `top` before calling a build done.
 
 ## The app's name
 
@@ -473,3 +494,14 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleRelease
 
 The APK is app/build/outputs/apk/release/app-release.apk. It is shrunk with R8 (keep rules in app/proguard-rules.pro for the JNI callbacks) and signed with the debug key, so it installs over a debug build without losing profiles. A beta for other people needs its own release key before the first public install, because Android only accepts updates signed with the same key.
 
+## WireGuard (not shown yet)
+
+WireGuard is planned, and the groundwork is in, behind a build flag: only `-Pwireguard=true` builds read WireGuard files (`Features.WIREGUARD`, from `BuildConfig.WIREGUARD`). Published builds are made without it (`tools/release.sh` passes `-Pwireguard=false` and refuses an APK with `libwg`), and there the code is compiled out.
+
+- A file with an `[Interface]` line is a WireGuard file, whatever its name (`vpn/WireGuardFile.kt`, tested on the JVM in `WireGuardFileTest`).
+- It is stored as `servers/<id>.conf` without its `PrivateKey` and `PresharedKey` lines, with `"kind":"wireguard"` in `servers/index.json`. The keys are kept encrypted like a password (`CredentialStore`, `wg.<profile id>`), and Duplicate and Delete take them along.
+- Backups put WireGuard profiles in an array of their own, `wireguard`, so older builds restore the rest and skip them.
+- A build without the flag keeps these profiles but doesn't show, count or connect them; a flag build installed over it shows them again.
+- In a flag build a WireGuard profile imports, reviews and saves, and Connect says "WireGuard can’t connect yet in this build." There is no engine yet, and the review still uses OpenVPN's words.
+
+Checked on the emulator (2026-10-26): a WireGuard file sent from the phone in a flag build was saved without its keys; a build without the flag showed 5 profiles of 6 and kept the sixth; the flag build showed it again.

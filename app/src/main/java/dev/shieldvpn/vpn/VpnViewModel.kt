@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.shieldvpn.APP_NAME
 import dev.shieldvpn.BuildConfig
+import dev.shieldvpn.Features
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -31,7 +32,6 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(settings = SettingsStore.load(app), speeds = SpeedTest.load(app)) }
         refresh(preferActive = SettingsStore.activeConnection(app))
         viewModelScope.launch { VpnController.status.collect { onStatus(it) } }
-        viewModelScope.launch { VpnController.log.collect { log -> _state.update { it.copy(log = log) } } }
         viewModelScope.launch { VpnController.tunnel.collect { t -> _state.update { it.copy(tunnel = t) } } }
         viewModelScope.launch { VpnController.pausedUntil.collect { until -> _state.update { it.copy(pausedUntil = until) } } }
         viewModelScope.launch {
@@ -82,6 +82,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             _state.update { it.copy(update = UpdateState.Installing(build)) }
+            installStarted = System.currentTimeMillis()
             // Installing ends the tunnel along with this process; the new build connects it again.
             val up = when (val s = _state.value.status) {
                 is VpnStatus.Connected -> s.connectionId
@@ -103,6 +104,19 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    /**
+     * The screens are back. An install still "in progress" means Android's confirm was closed or
+     * never shown (the process would have ended with the update), so the update is offered again.
+     */
+    fun screensShown() {
+        val u = _state.value.update
+        if (u is UpdateState.Installing && System.currentTimeMillis() - installStarted > 3_000) {
+            _state.update { it.copy(update = UpdateState.Available(u.build)) }
+        }
+    }
+
+    private var installStarted = 0L
 
     // ---- The tunnel ---------------------------------------------------------
 
@@ -173,10 +187,8 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
                     refresh()
                 }
             }
-            is VpnStatus.Connected -> {
-                ConnectionStore.update(app, status.connectionId) { it.copy(lastError = null, lastUsed = System.currentTimeMillis()) }
-                refresh()
-            }
+            // The service has recorded it as used; read that back.
+            is VpnStatus.Connected -> refresh()
             else -> Unit
         }
     }
@@ -222,13 +234,14 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
-    fun saveLogin(id: String, username: String, password: String) {
-        CredentialStore.save(app, id, username.trim(), password)
+    /** A null [password] keeps the saved one, so the username alone can change. */
+    fun saveLogin(id: String, username: String, password: String?) {
+        CredentialStore.save(app, id, username.trim(), password ?: CredentialStore.load(app, id).password)
         refresh()
     }
 
     fun forgetPassword(id: String) {
-        CredentialStore.save(app, id, CredentialStore.load(app, id).username, "")
+        CredentialStore.save(app, id, CredentialStore.username(app, id), "")
         if (_state.value.settings.startupId == id) changeSettings { it.copy(startupId = null, boot = false) }
         refresh()
     }
@@ -317,7 +330,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         }
         ConnectionStore.delete(app, id)
         CredentialStore.remove(app, id)
-        // A server goes with its last profile, and so does a key Tunnel kept for it.
+        // A server goes with its last profile, and so does a key the app kept for it.
         if (ConnectionStore.list(app).none { it.serverId == connection.serverId }) ServerStore.delete(app, connection.serverId)
         connection.keyAlias?.let(::releaseKey)
         SpeedTest.forget(app, id)
@@ -353,6 +366,17 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     fun renameReview(name: String) {
         if (name.isBlank()) return
         _state.update { it.copy(review = it.review?.copy(name = name.trim())) }
+    }
+
+    fun inspect(name: String, bytes: ByteArray): Inspected = when {
+        Backup.isBackup(bytes) -> Inspected.Backup
+        Certificates.isPkcs12(name, bytes) -> Inspected.Pkcs12
+        else -> ServerStore.review(name.ifBlank { "pasted.ovpn" }, bytes).let { r -> r.problem?.let { Inspected.Problem(it) } ?: Inspected.Profile(r) }
+    }
+
+    /** Shows [review] on the TV, to be saved there or from the phone. */
+    fun openReview(review: ImportReview) {
+        _state.update { it.copy(review = review) }
     }
 
     /**
@@ -416,35 +440,52 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Opens the waiting .p12 with [password]; null when it opens, or what is wrong. */
-    fun checkP12(password: String): String? {
+    suspend fun checkP12(password: String): String? {
         val bytes = _state.value.pendingP12 ?: return "There is no certificate waiting."
-        return (Certificates.readPkcs12(bytes, password) as? Certificates.Read.Problem)?.message
+        return checkP12(bytes, password)
     }
 
+    /** Opens the .p12 in [bytes] with [password]; null when it opens, or what is wrong. The key derivation runs off the main thread. */
+    suspend fun checkP12(bytes: ByteArray, password: String): String? =
+        withContext(Dispatchers.Default) { (Certificates.readPkcs12(bytes, password) as? Certificates.Read.Problem)?.message }
+
     /** Puts the waiting .p12's certificate and key into profile [id]'s file. Returns the problem, or null. */
-    fun attachP12(password: String, id: String): String? {
+    suspend fun attachP12(password: String, id: String): String? {
         val bytes = _state.value.pendingP12 ?: return "There is no certificate waiting."
-        val bundle = when (val r = Certificates.readPkcs12(bytes, password)) {
+        val problem = attachP12(bytes, password, id)
+        if (problem == null) _state.update { it.copy(pendingP12 = null) }
+        return problem
+    }
+
+    /** Puts the certificate and key of the .p12 in [bytes] into profile [id]'s file. Returns the problem, or null. */
+    suspend fun attachP12(bytes: ByteArray, password: String, id: String): String? {
+        val bundle = when (val r = withContext(Dispatchers.Default) { Certificates.readPkcs12(bytes, password) }) {
             is Certificates.Read.Done -> r.bundle
             is Certificates.Read.Problem -> return r.message
         }
         val c = _state.value.connection(id) ?: return "That profile is gone."
-        val config = ServerStore.rawConfig(app, c.serverId) ?: return "The profile's file is missing."
-        ServerStore.replaceConfig(app, c.serverId, Certificates.attach(config, bundle))
+        val server = ownServer(id) ?: return "The profile's file is missing."
+        val config = ServerStore.rawConfig(app, server.id) ?: return "The profile's file is missing."
+        ServerStore.replaceConfig(app, server.id, Certificates.attach(config, bundle))
         // The file's own certificate is used again.
+        val before = c.keyAlias
         ConnectionStore.update(app, id) { it.copy(keyAlias = null) }
-        _state.update { it.copy(pendingP12 = null) }
+        before?.let(::releaseKey)
         refresh()
         return null
     }
 
     /** Moves the waiting .p12's key into Android's keystore. Returns the alias, or null. */
-    fun keepP12(password: String): String? {
+    suspend fun keepP12(password: String): String? {
         val bytes = _state.value.pendingP12 ?: return null
-        val alias = Certificates.keepInKeystore(bytes, password) ?: return null
+        val alias = keepP12(bytes, password) ?: return null
         _state.update { it.copy(pendingP12 = null) }
         return alias
     }
+
+    /** Moves the key of the .p12 in [bytes] into Android's keystore. Returns the alias, or null. */
+    suspend fun keepP12(bytes: ByteArray, password: String): String? =
+        withContext(Dispatchers.Default) { Certificates.keepInKeystore(bytes, password) }
 
     fun cancelP12() {
         _state.update { it.copy(pendingP12 = null) }
@@ -457,7 +498,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         if (before != null && before != alias) releaseKey(before)
     }
 
-    /** Forgets a key Tunnel kept once no profile uses it. */
+    /** Forgets a key the app kept once no profile uses it. */
     private fun releaseKey(alias: String) {
         if (ConnectionStore.list(app).none { it.keyAlias == alias }) Certificates.forget(alias)
     }
@@ -466,15 +507,34 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(pendingRestore = null) }
     }
 
-    /** Restores the waiting backup. Returns a line for the user. */
-    suspend fun restore(passphrase: String): Backup.Restored {
+    /** Restores the waiting backup; with [replace], profiles with the same name are replaced. */
+    suspend fun restore(passphrase: String, replace: Boolean = false): Backup.Restored {
         val bytes = _state.value.pendingRestore ?: return Backup.Restored.Problem("There is no backup to restore.")
-        val result = withContext(Dispatchers.Default) { Backup.restore(app, bytes, passphrase) }
+        val result = restore(bytes, passphrase, replace)
+        if (result is Backup.Restored.Done) _state.update { it.copy(pendingRestore = null) }
+        return result
+    }
+
+    /** Restores the backup in [bytes]. */
+    suspend fun restore(bytes: ByteArray, passphrase: String, replace: Boolean): Backup.Restored {
+        val result = withContext(Dispatchers.Default) { Backup.restore(app, bytes, passphrase, replace) }
         if (result is Backup.Restored.Done) {
-            _state.update { it.copy(pendingRestore = null, settings = SettingsStore.load(app)) }
+            _state.update { it.copy(settings = SettingsStore.load(app)) }
             refresh()
         }
         return result
+    }
+
+    /** A phone has downloaded a backup: Settings › Backup says when, and of how many profiles. */
+    fun backupDownloaded() {
+        SettingsStore.setLastBackup(app, System.currentTimeMillis(), ConnectionStore.list(app).size)
+        refresh()
+    }
+
+    /** [passphrase] is the one set now, compared in constant time. */
+    fun checkBackupPassphrase(passphrase: String): Boolean {
+        val set = CredentialStore.secret(app, BACKUP_SECRET) ?: return false
+        return java.security.MessageDigest.isEqual(set.toByteArray(), passphrase.toByteArray())
     }
 
     fun setBackupPassphrase(passphrase: String?) {
@@ -494,7 +554,13 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         return ServerStore.effectiveConfig(app, c.serverId)?.toByteArray()
     }
 
-    fun logText(): String = _state.value.log.joinToString("\n") { "${it.time}  ${it.text}" }
+    /**
+     * The connection log, apart from the rest of the state: it changes with every line while a
+     * tunnel connects, and only the log's own views need it.
+     */
+    val log: StateFlow<List<LogLine>> get() = VpnController.log
+
+    fun logText(): String = VpnController.log.value.joinToString("\n") { "${it.time}  ${it.text}" }
 
     fun setPin(pin: String?) {
         SettingsStore.setPin(app, pin)
@@ -511,9 +577,11 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         val server = ServerStore.add(app, review.text)
         val connection = ConnectionStore.add(app, review.name, server.id)
         if (review.username.isNotEmpty()) CredentialStore.save(app, connection.id, review.username, review.password)
+        review.wgSecrets?.let { CredentialStore.saveWireGuard(app, connection.id, it) }
         _state.update { it.copy(review = null) }
         refresh()
-        if (_state.value.activeId == null) setActive(connection.id)
+        // Connect shows the new profile, unless a tunnel is up: that one stays on Connect.
+        if (_state.value.activeId == null || (!_state.value.status.isActive && _state.value.pausedUntil == null)) setActive(connection.id)
         return connection.id
     }
 
@@ -539,6 +607,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         ServerStore.clear(app)
         CredentialStore.clear(app)
         SpeedTest.forget(app, null)
+        SettingsStore.setLastBackup(app, 0, 0)
         _state.update { it.copy(speeds = emptyMap()) }
         changeSettings { AppSettings() }
         VpnController.update(VpnStatus.Disconnected)
@@ -554,21 +623,21 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Re-reads profiles, servers and logins, and keeps the active profile pointing at one that exists. */
     private fun refresh(preferActive: String? = null) {
-        val connections = ConnectionStore.list(app)
         val servers = ServerStore.list(app).associateBy { it.id }
-        val logins = connections.associate { c ->
-            val login = CredentialStore.load(app, c.id)
-            c.id to Login(login.username, login.password.isNotEmpty())
-        }
+        // A WireGuard profile stays stored in a build without WireGuard, but isn't shown.
+        val connections = ConnectionStore.list(app).filter { Features.WIREGUARD || servers[it.serverId]?.kind != VpnKind.WireGuard }
+        // Read without decrypting: this runs after nearly every change.
+        val logins = connections.associate { c -> c.id to Login(CredentialStore.username(app, c.id), CredentialStore.hasPassword(app, c.id)) }
         val infos = servers.keys.mapNotNull { id -> ServerStore.info(app, id)?.let { id to it } }.toMap()
-        val hasPassphrase = CredentialStore.secret(app, BACKUP_SECRET) != null
+        val hasPassphrase = CredentialStore.hasSecret(app, BACKUP_SECRET)
         val hasPin = SettingsStore.hasPin(app)
+        val lastBackup = SettingsStore.lastBackup(app)
         _state.update { s ->
             val wanted = preferActive ?: s.activeId
             val active = connections.firstOrNull { it.id == wanted } ?: connections.firstOrNull()
             s.copy(
                 connections = connections, servers = servers, logins = logins, infos = infos, activeId = active?.id,
-                hasBackupPassphrase = hasPassphrase, hasPin = hasPin,
+                hasBackupPassphrase = hasPassphrase, hasPin = hasPin, lastBackup = lastBackup,
             )
         }
         SettingsStore.setActiveConnection(app, _state.value.activeId)

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -35,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -58,8 +60,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.shieldvpn.APP_FILE_NAME
 import dev.shieldvpn.APP_NAME
 import dev.shieldvpn.BuildConfig
+import dev.shieldvpn.phone.PhoneAction
+import dev.shieldvpn.phone.PhoneField
+import dev.shieldvpn.phone.PhoneForm
+import dev.shieldvpn.phone.PhoneReply
+import dev.shieldvpn.phone.PhoneSection
+import dev.shieldvpn.phone.PhoneStatus
+import dev.shieldvpn.phone.Staged
+import dev.shieldvpn.vpn.Backup
+import dev.shieldvpn.vpn.Inspected
 import dev.shieldvpn.vpn.AppSettings
 import dev.shieldvpn.vpn.LogKind
 import dev.shieldvpn.vpn.UpdateState
@@ -91,7 +103,7 @@ sealed interface Pick {
 
     /** The row that opens this choice, where focus goes back to when it closes. */
     val rowKey: String get() = when (this) {
-        Startup -> "s-sprof"
+        Startup -> "s-boot"
         is Value -> "s-$key"
     }
 }
@@ -103,7 +115,7 @@ private val PickEase = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
  * slides a choice column in from the right.
  */
 @Composable
-fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions) {
+fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (String) -> Unit) {
     val req = remember { Requesters() }
     SideEffect { nav.entry = req[if (nav.pick != null) "pk-sel" else "cat-${nav.settingsCat.name}"] }
     var focusKey by remember { mutableStateOf<String?>(null) }
@@ -131,6 +143,7 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions) {
     val closePick = { opener: String ->
         nav.pick = null
         moveFocus(opener)
+        nav.flash(opener)
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -141,7 +154,7 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions) {
         val pickShift by animateFloatAsState(if (picking) 0f else 70f, tween(380, easing = PickEase), label = "pickX")
 
         // Categories.
-        Glass(Modifier.offset(64.dp, 124.dp).width(navWidth).height(560.dp)) {
+        Glass(Modifier.placed({ 64.dp }, 124.dp, { navWidth }).height(560.dp)) {
             Column(Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 22.dp, bottom = 16.dp)) {
                 val labelAlpha by animateFloatAsState(if (picking) 0f else 1f, tween(200), label = "labels")
                 Text("Settings", style = TvType.display(30f), maxLines = 1, modifier = Modifier.padding(start = 8.dp, bottom = 8.dp).fade { labelAlpha })
@@ -177,7 +190,6 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions) {
                             val on = !state.settings.advanced
                             actions.changeSettings { it.copy(advanced = on) }
                             if (!on && nav.settingsCat.advanced) nav.settingsCat = Category.Protection
-                            nav.toast(if (on) "Advanced settings are shown" else "Advanced settings are hidden")
                         },
                         subtitle = "Show OpenVPN, DNS, automation",
                         focusRequester = req["st-advanced"],
@@ -188,7 +200,7 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions) {
         }
 
         // The category's settings. Coming in from the categories lands on the first row.
-        Glass(Modifier.offset(panelLeft, 124.dp).width(panelWidth).height(560.dp).enterAt { req["panel-first"] }) {
+        Glass(Modifier.placed({ panelLeft }, 124.dp, { panelWidth }).height(560.dp).enterAt { req["panel-first"] }) {
             Column(Modifier.fillMaxSize().padding(horizontal = 34.dp, vertical = 30.dp)) {
                 val locked = state.settings.pinMode != "Off" && state.hasPin && !nav.unlocked
                 if (locked) {
@@ -199,7 +211,7 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions) {
                         moveFocus("s-log")
                     }
                 } else if (nav.showTest && nav.settingsCat == Category.Diagnostics) {
-                    TestPanel(state, req) {
+                    TestPanel(state, nav, actions, req, connect) {
                         nav.showTest = false
                         moveFocus("s-test")
                     }
@@ -290,10 +302,6 @@ private class PanelScope(val state: VpnUiState, val nav: Nav, val actions: Tunne
         return req[k]
     }
 
-    /** A change that only takes effect on the next connect says so while a tunnel is up. */
-    fun appliesNext() {
-        if (state.status.let { it is VpnStatus.Connected || it is VpnStatus.Connecting }) nav.toast("Applies the next time you connect")
-    }
 }
 
 /** A setting picked from a short list, in the column on the right. */
@@ -304,13 +312,12 @@ private class ValueSetting(
     val options: List<String>,
     val get: (AppSettings) -> String,
     val set: (AppSettings, String) -> AppSettings,
-    val appliesNext: Boolean = true,
 )
 
 private val Values = mapOf(
-    "pin" to ValueSetting("Protection", "Lock with a PIN", "Choose what needs the PIN. Useful when children use the TV.", listOf("Off", "For settings", "For everything"), { it.pinMode }, { s, v -> s.copy(pinMode = v) }, appliesNext = false),
+    "pin" to ValueSetting("Protection", "Lock with a PIN", "Choose what needs the PIN. Useful when children use the TV.", listOf("Off", "For settings", "For everything"), { it.pinMode }, { s, v -> s.copy(pinMode = v) }),
     "appmode" to ValueSetting("Apps", "Which apps use the VPN", "This decides what the switches below mean.", listOf(AppSettings.APPS_SKIP, AppSettings.APPS_ONLY), { it.appMode }, { s, v -> s.copy(appMode = v) }),
-    "verb" to ValueSetting("Diagnostics", "Log detail", "How much the connection log shows.", listOf("3 · normal", "4 · detailed", "1 · quiet"), { it.verb }, { s, v -> s.copy(verb = v) }, appliesNext = false),
+    "verb" to ValueSetting("Diagnostics", "Log detail", "How much the connection log shows.", listOf("3 · normal", "4 · detailed", "1 · quiet"), { it.verb }, { s, v -> s.copy(verb = v) }),
     "proto" to ValueSetting("OpenVPN", "Preferred protocol", "Used when a profile lists both UDP and TCP servers.", listOf("From file", "UDP", "TCP"), { it.proto }, { s, v -> s.copy(proto = v) }),
     "timeout" to ValueSetting("OpenVPN", "Connection timeout", "How long to wait before trying the next server.", listOf("30 s", "60 s", "120 s"), { "${it.timeout} s" }, { s, v -> s.copy(timeout = v.substringBefore(' ').toInt()) }),
     "mtu" to ValueSetting("OpenVPN", "Tunnel MTU", "The largest packet sent through the tunnel.", listOf("Auto", "1400", "1300"), { it.mtu }, { s, v -> s.copy(mtu = v) }),
@@ -340,21 +347,18 @@ private val ValueSub = mapOf(
     "TLS 1.2" to "Works with almost every server", "TLS 1.3" to "Stricter. Newer servers only",
 )
 
-private const val COMMANDS = """Other apps and ADB can control ${APP_NAME} once
-"Let other apps control ${APP_NAME}" is on.
+/** A profile's name as a quoted shell word. */
+fun quoted(name: String) = "\"" + name.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-Connect the profile on the Connect screen:
-  adb shell am start -n dev.shieldvpn/.Connect
-
-Connect a profile by its name:
-  adb shell am start -n dev.shieldvpn/.Connect --es profile "Home"
-
-Disconnect:
-  adb shell am start -n dev.shieldvpn/.Disconnect
-
-Home automation apps send the same intents:
-  component dev.shieldvpn/.Connect or dev.shieldvpn/.Disconnect,
-  with an optional string extra "profile"."""
+/** The automation commands, with this device's own profile names. */
+private fun commands(state: VpnUiState): String = buildString {
+    append("Other apps and ADB can control ${APP_NAME} once\n\"Let other apps control ${APP_NAME}\" is on.\n\n")
+    append("Connect the profile on the Connect screen:\n  adb shell am start -n dev.shieldvpn/.Connect\n\n")
+    state.connections.take(8).forEach { c -> append("Connect ${c.name}:\n  adb shell am start -n dev.shieldvpn/.Connect --es profile ${quoted(c.name)}\n\n") }
+    if (state.connections.isEmpty()) append("Connect a profile by its name:\n  adb shell am start -n dev.shieldvpn/.Connect --es profile \"Home\"\n\n")
+    append("Disconnect:\n  adb shell am start -n dev.shieldvpn/.Disconnect\n\n")
+    append("Home automation apps send the same intents:\n  component dev.shieldvpn/.Connect or dev.shieldvpn/.Disconnect,\n  with an optional string extra \"profile\".")
+}
 
 private const val PRIVACY = """What ${APP_NAME} keeps on this device
   Your profiles (the .ovpn files) and settings, in the app's private storage.
@@ -388,7 +392,20 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
         Category.Automation -> "Automation" to "For home automation apps and ADB. Off until you turn it on."
         Category.About -> "About" to "${APP_NAME} ${actions.versionName} · build ${BuildConfig.VERSION_CODE} · OpenVPN 3 core."
     }
-    PanelHeading(null, title, sub)
+    PanelHeading("Settings", title, sub)
+    // A change that only takes effect on the next connect: one line here while a tunnel is up, not a toast per switch.
+    val later = cat in setOf(Category.Protection, Category.Startup, Category.Apps, Category.OpenVpn, Category.Dns)
+    if (later && state.status.let { it is VpnStatus.Connected || it is VpnStatus.Connecting }) {
+        Text("Changes here apply the next time you connect.", style = TvType.ui(15f, FontWeight.SemiBold, Tv.Amber), modifier = Modifier.padding(top = 10.dp))
+    }
+    // The category's phone page, with its code under the rows.
+    val phone = when (cat) {
+        Category.Dns -> dnsPhone(state, nav, actions)
+        Category.Backup -> backupPhone(state, nav, actions)
+        Category.Diagnostics -> diagnosticsPhone(state, nav, actions)
+        Category.Automation -> automationPhone(state, actions)
+        else -> null
+    }
     val scope = PanelScope(state, nav, actions, req)
     // Lint misreads produceState with a key: the value is set on every run.
     @Suppress("ProduceStateDoesNotAssignValue")
@@ -411,43 +428,33 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                 }
                 toggle(scope, "s-lan", "Allow the local network", "Casting and devices at home keep working while connected", s.allowLan) {
                     actions.changeSettings { it.copy(allowLan = !it.allowLan) }
-                    scope.appliesNext()
                 }
                 value(scope, "s-pin", "Lock with a PIN", "Ask for a PIN before profiles or settings change", s.pinMode, selected = nav.pick == Pick.Value("pin")) { pickValue("pin") }
+                action(scope, "s-always", Ic.Shield, "Always-on VPN", "Set in Android TV system settings") {
+                    if (!actions.openVpnSettings()) nav.toast("This device has no VPN settings screen")
+                }
                 if (s.advanced) {
                     item { SectionLabel("Advanced") }
                     toggle(scope, "s-ipv6", "Block IPv6 outside the tunnel", "Stops leaks when the server only tunnels IPv4", s.blockIpv6) {
                         actions.changeSettings { it.copy(blockIpv6 = !it.blockIpv6) }
-                        scope.appliesNext()
                     }
                     toggle(scope, "s-dnsblock", "Block DNS outside the tunnel", "With the local network allowed, lookups still use the tunnel", s.blockDns) {
                         actions.changeSettings { it.copy(blockDns = !it.blockDns) }
-                        scope.appliesNext()
                     }
-                }
-                value(scope, "s-always", "Always-on VPN", "Set in Android TV system settings", "Open") {
-                    if (!actions.openVpnSettings()) nav.toast("This device has no VPN settings screen")
                 }
             }
             Category.Startup -> {
-                val startup = state.connection(s.startupId)
-                toggle(scope, "s-boot", "Connect when the device starts", "Uses the startup profile below", s.boot && startup != null) {
-                    if (s.boot && startup != null) actions.changeSettings { it.copy(boot = false) }
-                    else if (startup != null) actions.changeSettings { it.copy(boot = true) }
-                    else openPick(Pick.Startup)
-                }
-                value(scope, "s-sprof", "Startup profile", "Must connect without typing a password", startup?.name ?: "None", selected = nav.pick == Pick.Startup) {
+                val startup = state.connection(s.startupId)?.takeIf { s.boot }
+                value(scope, "s-boot", "Connect when the device starts", "Connects before you open the app", startup?.name ?: "Off", selected = nav.pick == Pick.Startup) {
                     openPick(Pick.Startup)
                 }
                 toggle(scope, "s-roam", "Reconnect automatically", "After Wi-Fi changes and router restarts", s.roam) {
                     actions.changeSettings { it.copy(roam = !it.roam) }
-                    scope.appliesNext()
                 }
                 if (s.advanced) {
                     item { SectionLabel("Advanced") }
                     toggle(scope, "s-sleep", "Stay connected while the screen is off", "Keeps the device awake while the tunnel is up", s.stayAwake) {
                         actions.changeSettings { it.copy(stayAwake = !it.stayAwake) }
-                        scope.appliesNext()
                     }
                 }
             }
@@ -455,7 +462,7 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                 value(scope, "s-appmode", "Which apps use the VPN", "${APP_NAME} itself always does", ValueChipLabel[s.appMode] ?: s.appMode, selected = nav.pick == Pick.Value("appmode")) { pickValue("appmode") }
                 val found = apps
                 val only = s.appMode == AppSettings.APPS_ONLY
-                // With "only" and nothing chosen, Tunnel sends every app through the VPN (see applyApps).
+                // With "only" and nothing chosen, the app sends every app through the VPN (see applyApps).
                 val noneChosen = found != null && found.none { it.pkg in s.apps }
                 item("apps-head") {
                     Column {
@@ -481,7 +488,6 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                                         app.label,
                                         {
                                             actions.changeSettings { it.copy(apps = if (picked) it.apps - app.pkg else it.apps + app.pkg) }
-                                            scope.appliesNext()
                                         },
                                         // What actually happens to this app now.
                                         subtitle = when {
@@ -501,32 +507,73 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                 }
             }
             Category.Diagnostics -> {
-                action(scope, "s-log", Ic.Log, "Connection log", "${state.log.size} lines from this session") { nav.showLog = true }
+                // Its own item reads the log, so a new line redraws this row and not the panel.
+                val logKey = scope.key("s-log")
+                item("s-log") {
+                    val log by actions.log.collectAsState()
+                    ListRow(
+                        "Connection log", { nav.showLog = true }, subtitle = "${log.size} lines from this session", focusRequester = logKey,
+                        leading = { IconSquare(Ic.Log, it) },
+                        trailing = { Chevron(it) },
+                    )
+                }
                 action(scope, "s-test", Ic.Pulse, "Run a connection test", "Checks the tunnel, DNS and IPv6 leaks") { nav.showTest = true }
                 val active = state.active
-                action(
-                    scope, "s-speed", Ic.Gauge, "Speed test",
-                    active?.let { a -> state.speeds[a.id]?.let { "${a.name}: ${fmtMbps(it.downMbps)} Mbps down, ${ago(it.at)}" } } ?: "Is the VPN fast enough for 4K?",
-                ) {
-                    if (active != null) nav.overlay = Overlay.Speed(active.id) else nav.toast("Add a profile first")
+                if (active != null) {
+                    action(
+                        scope, "s-speed", Ic.Gauge, "Speed test",
+                        state.speeds[active.id]?.let { "${active.name}: ${fmtMbps(it.downMbps)} Mbps down, ${ago(it.at)}" } ?: "Is the VPN fast enough for 4K?",
+                    ) { nav.overlay = Overlay.Speed(active.id) }
                 }
-                action(scope, "s-send", Ic.Phone, "Send the log to your phone", "Scan a code to download it") { nav.overlay = Overlay.Phone(PhoneKind.Log) }
+                action(scope, "s-send", Ic.Phone, "Send the log to your phone", "Download it on the phone") { nav.overlay = logSheet() }
                 if (s.advanced) {
                     item { SectionLabel("Advanced") }
                     value(scope, "s-verb", "Log detail", "How much the log shows", s.verb, selected = nav.pick == Pick.Value("verb")) { pickValue("verb") }
                 }
             }
             Category.Backup -> {
-                action(scope, "s-bk", Ic.Archive, "Back up to your phone", "An encrypted file with every profile and setting") {
+                val last = state.lastBackup?.let { (at, n) -> "Last: ${ago(at)} · $n profile${if (n == 1) "" else "s"}" } ?: "Not backed up yet"
+                action(scope, "s-bk", Ic.Archive, "Back up to your phone", last) {
                     // Without a passphrase, it is chosen first and the backup follows straight on.
-                    nav.overlay = if (state.hasBackupPassphrase) Overlay.Phone(PhoneKind.Backup) else Overlay.Passphrase(restore = false, thenBackup = true)
+                    nav.overlay = if (state.hasBackupPassphrase) backupSheet() else Overlay.Form(passphraseSpec(state, nav, actions, thenBackup = true))
                 }
-                action(scope, "s-rs", Ic.Phone, "Restore from a backup", "Opens Import › Restore a backup") {
-                    nav.importMethod = ImportMethod.Restore
-                    nav.go(Screen.Import)
+                action(scope, "s-rs", Ic.Phone, "Restore a backup", "Send the backup file from your phone") {
+                    nav.overlay = Overlay.Phone(
+                        "backup", "Settings › Backup", "Restore a backup",
+                        "Scan the code, choose the backup file and type its passphrase there. Its profiles are added to this device; ones here already, exactly the same, are left alone.",
+                        section = "restore",
+                        extra = if (actions.hasFilePicker) "Pick it on a USB drive" to { nav.overlay = null; actions.pickFile() } else null,
+                    )
                 }
-                value(scope, "s-bkpass", "Backup passphrase", "Needed to restore on another device", if (state.hasBackupPassphrase) "Change" else "Set") {
-                    nav.overlay = Overlay.Passphrase(restore = false)
+                action(scope, "s-bkpass", Ic.Lock, if (state.hasBackupPassphrase) "Change the backup passphrase" else "Choose a backup passphrase", "Backups are encrypted with it; restoring needs it") {
+                    nav.overlay = Overlay.Form(passphraseSpec(state, nav, actions))
+                }
+                // Its own row, so the passphrase sheet keeps to three buttons.
+                if (state.hasBackupPassphrase && nav.confirmRemovePass) {
+                    item {
+                        ConfirmBar(
+                            "Remove the backup passphrase? Backups made with it still need it.", "Remove", req["s-bkrm-no"],
+                            onConfirm = {
+                                nav.confirmRemovePass = false
+                                actions.setBackupPassphrase(null)
+                                nav.toast("The backup passphrase was removed")
+                                nav.refocus(req["s-bkpass"])
+                            },
+                            onKeep = {
+                                nav.confirmRemovePass = false
+                                nav.refocus(req["s-bkrm"])
+                            },
+                        )
+                    }
+                } else if (state.hasBackupPassphrase) {
+                    item {
+                        ListRow(
+                            "Remove the backup passphrase", { nav.confirmRemovePass = true },
+                            subtitle = "Backing up then asks for a new one", danger = true,
+                            focusRequester = scope.key("s-bkrm"),
+                            leading = { IconSquare(Ic.Trash, it) },
+                        )
+                    }
                 }
             }
             Category.OpenVpn -> {
@@ -536,37 +583,44 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                 value(scope, "s-tls", "Minimum TLS version", "Refuse servers that only offer older TLS", s.tlsMin, selected = nav.pick == Pick.Value("tls")) { pickValue("tls") }
                 toggle(scope, "s-legacy", "Allow legacy ciphers", "BF-CBC and others removed in OpenVPN 2.6", s.legacyCiphers) {
                     actions.changeSettings { it.copy(legacyCiphers = !it.legacyCiphers) }
-                    scope.appliesNext()
                 }
                 toggle(scope, "s-compress", "Compress what this device sends", "Can leak data (VORACLE). Compression the server sends is always accepted", s.compress) {
                     actions.changeSettings { it.copy(compress = !it.compress) }
-                    scope.appliesNext()
                 }
             }
             Category.Dns -> {
                 toggle(scope, "s-pushed", "Use DNS from the server", "The servers your VPN pushes", s.pushedDns) {
                     actions.changeSettings { it.copy(pushedDns = !it.pushedDns) }
-                    scope.appliesNext()
                 }
                 value(scope, "s-dnscustom", "Custom DNS servers", "Used instead of the pushed ones", s.customDns.joinToString(", ").ifEmpty { "None" }) {
-                    nav.overlay = Overlay.Text(TextKind.CustomDns, s.customDns.joinToString(" "), check = ::dnsProblem) { text ->
-                        actions.changeSettings { it.copy(customDns = dnsServers(text)) }
-                        scope.appliesNext()
-                    }
+                    nav.overlay = Overlay.Form(
+                        FormSpec(
+                            "Settings › DNS", "Custom DNS servers", "Used instead of the servers your VPN pushes. Separate them with spaces.",
+                            listOf(FormField("dns", "DNS servers", s.customDns.joinToString(" "), mono = true, max = 400, optional = true)),
+                            primary = "Save", phone = "dns", phoneSection = "dns",
+                        ) { v, _ -> saveCustomDns(actions, nav, v["dns"].orEmpty(), "s-dnscustom").toForm() },
+                    )
                 }
                 value(scope, "s-dnssearch", "Search domains", "Short names like nas resolve as nas.home.lan", s.searchDomains.joinToString(", ").ifEmpty { "None" }) {
-                    nav.overlay = Overlay.Text(TextKind.SearchDomains, s.searchDomains.joinToString(" ")) { text ->
-                        actions.changeSettings { it.copy(searchDomains = text.split(' ', ',').map { d -> d.trim() }.filter { d -> d.isNotEmpty() }) }
-                        scope.appliesNext()
-                    }
+                    nav.overlay = Overlay.Form(
+                        FormSpec(
+                            "Settings › DNS", "Search domains", "Short names like nas resolve as nas.home.lan. Separate them with spaces.",
+                            listOf(FormField("search", "Domains", s.searchDomains.joinToString(" "), mono = true, max = 400, optional = true)),
+                            primary = "Save", phone = "dns", phoneSection = "dns",
+                        ) { v, _ ->
+                            actions.changeSettings { it.copy(searchDomains = dnsServers(v["search"].orEmpty())) }
+                            nav.flash("s-dnssearch")
+                            FormResult.Done
+                        },
+                    )
                 }
             }
             Category.Automation -> {
                 toggle(scope, "s-auto", "Let other apps control ${APP_NAME}", "They can connect and disconnect profiles", s.automation) {
                     actions.changeSettings { it.copy(automation = !it.automation) }
                 }
-                value(scope, "s-cmds", "Commands", "am start -n dev.shieldvpn/.Connect --es profile …", "View") {
-                    nav.overlay = Overlay.File("Automation", "Commands", COMMANDS, plain = true)
+                action(scope, "s-cmds", Ic.Log, "Commands", "With your profiles’ names; copy them on your phone below") {
+                    nav.overlay = Overlay.File("Settings › Automation", "Commands", commands(state), plain = true)
                 }
             }
             Category.About -> {
@@ -580,22 +634,22 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                     is UpdateState.Installing -> "Installing build ${update.build.number}. Confirm it when Android asks" to "Wait"
                     is UpdateState.Failed -> update.message to "Try again"
                 }
-                value(scope, "s-upd", "Updates", updateSub, updateValue) {
+                action(scope, "s-upd", Ic.Download, if (update is UpdateState.Available) "Install the update" else "Updates", updateSub) {
                     when (update) {
-                        is UpdateState.Available -> actions.installUpdate()
-                        UpdateState.Checking, is UpdateState.Downloading, is UpdateState.Installing -> Unit
+                        is UpdateState.Available, is UpdateState.Downloading, is UpdateState.Installing -> nav.overlay = Overlay.Update
+                        UpdateState.Checking -> Unit
                         else -> actions.checkUpdate()
                     }
                 }
                 toggle(scope, "s-autoupd", "Check for updates by itself", "Each time ${APP_NAME} opens", s.autoUpdate) {
                     actions.changeSettings { it.copy(autoUpdate = !it.autoUpdate) }
                 }
-                value(scope, "s-priv", "What ${APP_NAME} stores", "Profiles and passwords, encrypted on this device. No accounts, no analytics", "Details") {
-                    nav.overlay = Overlay.File("About", "What ${APP_NAME} stores", PRIVACY, plain = true)
+                action(scope, "s-priv", Ic.Info, "What ${APP_NAME} stores", "Profiles and passwords, encrypted on this device. No accounts, no analytics") {
+                    nav.overlay = Overlay.File("Settings › About", "What ${APP_NAME} stores", PRIVACY, plain = true)
                 }
-                value(scope, "s-lic", "Open-source licenses", "OpenVPN 3 core (MPL 2.0), OpenSSL, asio, fmt, lz4, xxHash, ZXing", "View") {
+                action(scope, "s-lic", Ic.File, "Open-source licenses", "OpenVPN 3 core (MPL 2.0), OpenSSL, asio, fmt, lz4, xxHash, ZXing") {
                     val text = runCatching { context.assets.open("licenses.txt").bufferedReader().use { it.readText() } }.getOrDefault("The license texts are missing from this build.")
-                    nav.overlay = Overlay.File("About", "Open-source licenses", text, plain = true)
+                    nav.overlay = Overlay.File("Settings › About", "Open-source licenses", text, plain = true)
                 }
                 if (nav.confirmReset) {
                     item {
@@ -605,6 +659,8 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                                 nav.confirmReset = false
                                 actions.resetAll()
                                 nav.toast("Everything was deleted")
+                                // Back to the start, where the first profile is added.
+                                nav.go(Screen.Connect)
                             },
                             onKeep = {
                                 nav.confirmReset = false
@@ -619,17 +675,30 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                             subtitle = "Delete everything and start over", danger = true,
                             focusRequester = scope.key("s-reset"),
                             leading = { IconSquare(Ic.Trash, it) },
-                            trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+                            trailing = { Chevron(it) },
                         )
                     }
                 }
             }
         }
+        // Diagnostics has too many rows for the code to fit under them; Send the log to your phone shows it.
+        if (phone != null && cat != Category.Diagnostics) {
+            item("phone") {
+                PhoneBlock(
+                    phone, PhoneBlockSize.Compact, Modifier.padding(top = 18.dp, start = 10.dp, bottom = 6.dp),
+                    title = when (cat) {
+                        Category.Dns -> "Or change these on your phone"
+                        Category.Backup -> "Or restore a backup on your phone"
+                        else -> "Or copy the commands on your phone"
+                    },
+                )
+            }
+        }
     }
 }
 
-/** The DNS servers typed in a text sheet, split at spaces and commas. */
-fun dnsServers(text: String): List<String> = text.split(' ', ',').map { it.trim() }.filter { it.isNotEmpty() }
+/** The DNS servers or domains typed in a sheet or on a phone, split at spaces, commas and lines. */
+fun dnsServers(text: String): List<String> = text.split(Regex("[\\s,]+")).filter { it.isNotEmpty() }
 
 /** What is wrong with typed DNS servers, or null; the same check wherever they are typed. */
 fun dnsProblem(text: String): String? = dnsServers(text).firstOrNull { !isIpAddress(it) }?.let { "$it is not an IP address" }
@@ -667,44 +736,56 @@ private fun LazyListScope.value(
     onClick: () -> Unit,
 ) {
     val fr = scope.key(key)
-    item(key) { ListRow(title, onClick, subtitle = sub, selected = selected, focusRequester = fr, trailing = { ValueChip(value, it) }) }
+    item(key) { ListRow(title, onClick, subtitle = sub, selected = selected, flash = scope.nav.flashKey == key, focusRequester = fr, trailing = { ValueChip(value, it) }) }
 }
 
 private fun LazyListScope.action(scope: PanelScope, key: String, icon: Ic, title: String, sub: String, onClick: () -> Unit) {
     val fr = scope.key(key)
     item(key) {
         ListRow(
-            title, onClick, subtitle = sub, focusRequester = fr,
+            title, onClick, subtitle = sub, focusRequester = fr, flash = scope.nav.flashKey == key,
             leading = { IconSquare(icon, it) },
-            trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+            trailing = { Chevron(it) },
         )
     }
 }
 
-/** Shown instead of a category while the PIN locks settings. */
+/** Shown instead of a category while the PIN locks settings. Going into it asks for the PIN at once. */
 @Composable
 private fun LockedPanel(nav: Nav, req: Requesters) {
     req.alias("panel-first", "s-unlock")
-    PanelHeading(null, "Settings are locked", "Type the PIN to change settings on this device.")
+    val ask = {
+        if (nav.overlay == null) {
+            // With the PIN, focus goes on into the panel, where the remote was heading.
+            nav.overlay = Overlay.Pin {
+                nav.settingsReturn = "panel-first"
+                nav.contentFocus = Screen.Settings
+            }
+            // Closed without the PIN, focus goes back to the category, not here, which would ask again.
+            nav.opener = req["cat-${nav.settingsCat.name}"]
+        }
+    }
+    PanelHeading("Settings", "Settings are locked", "Type the PIN to change settings on this device.")
     Row(Modifier.padding(top = 22.dp)) {
-        TvButton("Type the PIN", { nav.overlay = Overlay.Pin() }, icon = Ic.Lock, focusRequester = req["s-unlock"])
+        TvButton("Type the PIN", ask, icon = Ic.Lock, focusRequester = req["s-unlock"], onFocus = ask)
     }
 }
 
 @Composable
 private fun ColumnScope.LogPanel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, back: () -> Unit) {
-    PanelHeading(null, "Connection log", "OpenVPN output for this session, newest at the bottom. Up scrolls back.")
+    PanelHeading("Settings › Diagnostics", "Connection log", "OpenVPN output for this session, newest at the bottom. Up scrolls back.")
     // The row that opened this is gone, so focus starts on Back.
     req.alias("panel-first", "s-log-back")
     LaunchedEffect(Unit) { req["s-log-back"].focusWhenReady() }
     val quiet = state.settings.verb.startsWith("1")
-    // The newest line sits at the bottom. Up and Down scroll back through the session.
-    val lines = state.log.filter { !quiet || it.kind != LogKind.Plain }.takeLast(400)
-    val scroll = rememberScrollState()
+    // The newest line sits at the bottom, and the list follows each new one. Up and Down scroll back.
+    val log by actions.log.collectAsState()
+    val lines = remember(log, quiet) { log.filter { !quiet || it.kind != LogKind.Plain } }
+    val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val f = rememberFocusState()
-    LaunchedEffect(lines.size) { scroll.scrollTo(scroll.maxValue) }
-    Column(
+    LaunchedEffect(lines.lastOrNull()) { if (lines.isNotEmpty()) list.scrollToItem(lines.lastIndex) }
+    Box(
         modifier = Modifier
             .padding(top = 16.dp)
             .fillMaxWidth()
@@ -715,41 +796,45 @@ private fun ColumnScope.LogPanel(state: VpnUiState, nav: Nav, actions: TunnelAct
             .onKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when {
-                    e.key == Key.DirectionUp && scroll.value > 0 -> {
-                        scope.launch { scroll.animateScrollBy(-160f) }
+                    e.key == Key.DirectionUp && list.canScrollBackward -> {
+                        scope.launch { list.animateScrollBy(-160f) }
                         true
                     }
-                    e.key == Key.DirectionDown && scroll.value < scroll.maxValue -> {
-                        scope.launch { scroll.animateScrollBy(160f) }
+                    e.key == Key.DirectionDown && list.canScrollForward -> {
+                        scope.launch { list.animateScrollBy(160f) }
                         true
                     }
                     else -> false
                 }
             }
             .onFocusChanged { f.hasFocus = it.isFocused }
-            .focusable()
-            .verticalScroll(scroll)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .focusable(),
     ) {
-        // Log detail › quiet keeps only errors and connection changes.
-        if (lines.isEmpty()) Text("The log is empty.", style = TvType.mono(14.5f, color = Tv.soft(0.82f)))
-        lines.forEach { line ->
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(line.time, style = TvType.mono(14.5f, color = Tv.soft(0.4f)))
-                Text(
-                    line.text,
-                    style = TvType.mono(
-                        14.5f,
-                        color = when (line.kind) {
-                            LogKind.Ok -> Tv.Mint
-                            LogKind.Err -> Tv.Red
-                            LogKind.Plain -> Tv.soft(0.82f)
-                        },
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        LazyColumn(
+            state = list,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // Log detail › quiet keeps only errors and connection changes.
+            if (lines.isEmpty()) item { Text("The log is empty.", style = TvType.mono(14.5f, color = Tv.soft(0.82f))) }
+            items(lines.size) { i ->
+                val line = lines[i]
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(line.time, style = TvType.mono(14.5f, color = Tv.soft(0.4f)))
+                    Text(
+                        line.text,
+                        style = TvType.mono(
+                            14.5f,
+                            color = when (line.kind) {
+                                LogKind.Ok -> Tv.Mint
+                                LogKind.Err -> Tv.Red
+                                LogKind.Plain -> Tv.soft(0.82f)
+                            },
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
@@ -771,13 +856,13 @@ private fun ColumnScope.LogPanel(state: VpnUiState, nav: Nav, actions: TunnelAct
             )
         }
     } else Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        TvButton("Back", back, icon = Ic.Back, focusRequester = req["s-log-back"])
-        TvButton("Send to phone", { nav.overlay = Overlay.Phone(PhoneKind.Log) }, icon = Ic.Phone, glass = true)
+        TvButton("Close", back, focusRequester = req["s-log-back"])
+        TvButton("Send to phone", { nav.overlay = logSheet() }, icon = Ic.Phone, glass = true)
         TvButton("Clear", { confirmClear = true }, glass = true, focusRequester = req["s-log-clear"])
     }
 }
 
-private enum class CheckState { Running, Ok, Warn, Fail }
+private enum class CheckState { Idle, Running, Ok, Warn, Fail }
 
 private class Check(val title: String) {
     var result by mutableStateOf(CheckState.Running)
@@ -786,15 +871,39 @@ private class Check(val title: String) {
 
 /** Settings › Diagnostics › Run a connection test: four checks, one after the other. */
 @Composable
-private fun ColumnScope.TestPanel(state: VpnUiState, req: Requesters, back: () -> Unit) {
+private fun ColumnScope.TestPanel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, connect: (String) -> Unit, back: () -> Unit) {
     val connected = state.status is VpnStatus.Connected
     var run by remember { mutableIntStateOf(0) }
+    // Connect and test: the checks run again once the tunnel is up.
+    var waiting by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.status) {
+        val status = state.status
+        if (connected && waiting) {
+            waiting = false
+            run++
+        } else if (waiting && status is VpnStatus.Failed) {
+            waiting = false
+            failed = status.message
+        }
+    }
+    // The button under focus changes with the state; focus follows it.
+    LaunchedEffect(waiting, connected) { req["s-test-go"].focusWhenReady() }
     val checks = remember(run) {
-        listOf(Check("Tunnel is up"), Check("DNS goes through the tunnel"), Check("No IPv6 leak"), Check("Traffic reaches the internet"))
+        listOf(Check("Tunnel is up"), Check("DNS answers"), Check("Block IPv6"), Check("Traffic reaches the internet"))
     }
     LaunchedEffect(run) {
         val t = state.tunnel
         val blocksV6 = state.settings.blockIpv6
+        if (!connected) {
+            // Nothing to test yet: no red marks for a test that hasn't run.
+            checks.forEach { it.result = CheckState.Idle; it.detail = "Needs the tunnel" }
+            checks[2].apply {
+                result = if (blocksV6) CheckState.Ok else CheckState.Warn
+                detail = if (blocksV6) "On: IPv6 can’t leave outside the tunnel" else "Off: IPv6 may leave outside the tunnel"
+            }
+            return@LaunchedEffect
+        }
         checks[0].apply {
             if (connected) {
                 result = CheckState.Ok
@@ -819,13 +928,14 @@ private fun ColumnScope.TestPanel(state: VpnUiState, req: Requesters, back: () -
                 }
                 val dns = t?.dns?.firstOrNull()?.substringBefore(' ')
                 result = if (ms != null && dns != null) CheckState.Ok else CheckState.Fail
-                detail = if (ms != null) "${dns ?: "The DNS server"} answers in $ms ms" else "No answer from DNS"
+                // It shows the lookup works and which server the tunnel set; it doesn't trace the path.
+                detail = if (ms != null) "A lookup took $ms ms · the tunnel’s DNS is ${dns ?: "not set"}" else "No answer from DNS"
             }
         }
         delay(300)
         checks[2].apply {
             result = if (blocksV6) CheckState.Ok else CheckState.Warn
-            detail = if (blocksV6) "IPv6 is blocked outside the tunnel" else "Turn on Block IPv6 in Protection"
+            detail = if (blocksV6) "On: IPv6 can’t leave outside the tunnel" else "Off: IPv6 may leave outside the tunnel"
         }
         delay(300)
         checks[3].apply {
@@ -841,10 +951,22 @@ private fun ColumnScope.TestPanel(state: VpnUiState, req: Requesters, back: () -
                 detail = answer?.let { (ip, ms) -> "Sites see $ip · $ms ms" } ?: "No answer through the tunnel"
             }
         }
+        // For the phone's Diagnostics page.
+        nav.lastTest = checks.map { c -> c.title to "${if (c.result == CheckState.Ok) "OK" else if (c.result == CheckState.Warn) "Check" else "Failed"}: ${c.detail}" }
     }
-    PanelHeading(null, "Connection test", if (connected) "Testing the tunnel to ${state.active?.name.orEmpty()}." else "Connect first to test the tunnel.")
-    req.alias("panel-first", "s-test-back")
-    LaunchedEffect(Unit) { req["s-test-back"].focusWhenReady() }
+    val active = state.active
+    PanelHeading(
+        "Settings › Diagnostics", "Connection test",
+        when {
+            connected -> "Testing the tunnel to ${active?.name.orEmpty()}."
+            waiting -> "Connecting to ${active?.name.orEmpty()}, then testing it."
+            failed != null -> "${active?.name.orEmpty()} couldn’t connect: $failed" + if (failed!!.endsWith(".")) "" else "."
+            active != null -> "Not connected. Connect and test checks the tunnel to ${active.name}."
+            else -> "Add a profile first, then test its tunnel."
+        },
+    )
+    req.alias("panel-first", "s-test-go")
+    LaunchedEffect(Unit) { req["s-test-go"].focusWhenReady() }
     Column(Modifier.padding(top = 16.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         checks.forEach { c ->
             Row(
@@ -853,6 +975,7 @@ private fun ColumnScope.TestPanel(state: VpnUiState, req: Requesters, back: () -
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 when (c.result) {
+                    CheckState.Idle -> Box(Modifier.size(26.dp).clip(CircleShape).background(Tv.white(0.1f)))
                     CheckState.Running -> Spinner()
                     CheckState.Ok -> Box(Modifier.size(26.dp).clip(CircleShape).background(Tv.Mint), contentAlignment = Alignment.Center) { TvIcon(Ic.Check, 15f, Color(0xFF06140D), stroke = 3f) }
                     CheckState.Warn -> Box(Modifier.size(26.dp).clip(CircleShape).background(Tv.Amber), contentAlignment = Alignment.Center) { TvIcon(Ic.Bang, 15f, Color(0xFF1A1200), stroke = 3f) }
@@ -864,8 +987,27 @@ private fun ColumnScope.TestPanel(state: VpnUiState, req: Requesters, back: () -
         }
     }
     Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        TvButton("Done", back, icon = Ic.Back, focusRequester = req["s-test-back"])
-        TvButton("Run again", { run++ }, glass = true)
+        when {
+            connected -> TvButton("Run again", { run++ }, icon = Ic.Swap, focusRequester = req["s-test-go"])
+            waiting -> TvButton("Cancel", {
+                waiting = false
+                actions.disconnect()
+            }, focusRequester = req["s-test-go"])
+            active != null -> TvButton(if (failed != null) "Try again" else "Connect and test", {
+                waiting = true
+                failed = null
+                connect(active.id)
+            }, icon = Ic.Power, focusRequester = req["s-test-go"])
+            else -> Unit
+        }
+        TvButton("Close", back, glass = true, focusRequester = if (active != null || connected) null else req["s-test-go"])
+        // The one warning with a fix of its own.
+        if (!state.settings.blockIpv6) {
+            TvButton("Turn on Block IPv6", {
+                actions.changeSettings { it.copy(blockIpv6 = true) }
+                run++
+            }, glass = true)
+        }
     }
 }
 
@@ -873,7 +1015,7 @@ private fun ColumnScope.TestPanel(state: VpnUiState, req: Requesters, back: () -
 
 @Composable
 private fun PickHeading(eyebrow: String, title: String, sub: String) {
-    PanelHeading(eyebrow, title, sub)
+    PanelHeading("Settings › $eyebrow", title, sub)
     Spacer(Modifier.height(14.dp))
 }
 
@@ -893,28 +1035,39 @@ private fun ValuePick(state: VpnUiState, nav: Nav, actions: TunnelActions, req: 
                         key == "pin" && option == "Off" -> actions.setPin(null)
                         // A PIN has to exist before anything can be locked with it.
                         key == "pin" && !state.hasPin -> nav.overlay = Overlay.Pin(setting = true, mode = option)
-                        else -> {
-                            actions.changeSettings { v.set(it, option) }
-                            if (v.appliesNext && state.status.let { s -> s is VpnStatus.Connected || s is VpnStatus.Connecting }) nav.toast("Applies the next time you connect")
-                        }
+                        else -> actions.changeSettings { v.set(it, option) }
                     }
                     done()
                 },
-                subtitle = ValueSub[option],
+                subtitle = if (key == "pin" && option == "Off" && state.hasPin) "Removes the PIN" else ValueSub[option],
                 kind = RowKind.Pick,
                 selected = option == current,
                 focusRequester = if (option == current) req["pk-sel"] else null,
                 trailing = { if (option == current) CheckBadge(it) },
             )
         }
+        if (key == "pin" && state.hasPin) {
+            item {
+                ListRow(
+                    "Change the PIN", {
+                        done()
+                        nav.overlay = Overlay.Pin(setting = true)
+                    },
+                    subtitle = "Choose a new one; what it locks stays the same",
+                    kind = RowKind.Pick,
+                    leading = { IconSquare(Ic.Lock, it) },
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun StartupPick(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, done: () -> Unit) {
-    PickHeading("Startup", "Startup profile", "${APP_NAME} connects to this profile when the device turns on, before you open the app.")
+    PickHeading("Startup", "Connect when the device starts", "${APP_NAME} connects to this profile when the device turns on, before you open the app.")
     val current = if (state.settings.boot) state.settings.startupId else null
-    val list = rememberLazyListState()
+    // Opens scrolled to the chosen profile, with one row above it, so focus coming in lands on it.
+    val list = rememberLazyListState(initialFirstVisibleItemIndex = state.connections.indexOfFirst { it.id == current }.coerceAtLeast(0))
     LazyColumn(state = list, modifier = Modifier.bleed(12.dp).scrollFade(list), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
         item {
             ListRow(
@@ -930,8 +1083,7 @@ private fun StartupPick(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 trailing = { if (current == null) CheckBadge(it) },
             )
         }
-        items(state.connections.size) { i ->
-            val c = state.connections[i]
+        items(state.connections, key = { it.id }) { c ->
             val needs = state.infoOf(c)?.needsLogin != false
             val cert = c.keyAlias != null || state.infoOf(c)?.clientCert == true
             val ok = !state.asksForLogin(c)
@@ -962,4 +1114,214 @@ private fun StartupPick(state: VpnUiState, nav: Nav, actions: TunnelActions, req
             )
         }
     }
+}
+
+// ---- Phone pages ------------------------------------------------------------------------
+
+/** Settings › DNS on the phone: the switch and both lists, checked there and here. */
+@Composable
+private fun dnsPhone(state: VpnUiState, nav: Nav, actions: TunnelActions): dev.shieldvpn.phone.PhoneSession? = rememberPhoneSession(
+    "dns", state, actions,
+    form = { s ->
+        PhoneForm(
+            "Settings › DNS", "DNS on the TV", "Where name lookups go while the tunnel is up.",
+            listOf(
+                PhoneSection(
+                    "dns",
+                    fields = listOf(
+                        PhoneField.Switch("pushed", "Use DNS from the server", "The servers your VPN pushes", s.settings.pushedDns),
+                        PhoneField.Lines("dns", "Custom DNS servers", s.settings.customDns, help = "One per line. Used instead of the pushed ones.", placeholder = "1.1.1.1", mirror = true),
+                        PhoneField.Lines("search", "Search domains", s.settings.searchDomains, help = "One per line. Short names like nas resolve as nas.home.lan.", placeholder = "home.lan", mirror = true),
+                    ),
+                    actions = listOf(PhoneAction("save", "Save", primary = true)),
+                ),
+            ),
+        )
+    },
+    locked = { locked(actions.stateNow(), nav) },
+    onAction = { action, v ->
+        if (action != "save") return@rememberPhoneSession PhoneReply()
+        val outcome = saveCustomDns(actions, nav, v["dns"].orEmpty(), "s-dnscustom")
+        if (outcome is Outcome.Done) {
+            actions.changeSettings { it.copy(pushedDns = v["pushed"] != "false", searchDomains = dnsServers(v["search"].orEmpty())) }
+            saved("dns")
+        }
+        outcome.toReply()
+    },
+)
+
+/** The log as the phone downloads it. */
+private fun logFile(actions: TunnelActions) = dev.shieldvpn.phone.PhoneFile("$APP_FILE_NAME-log.txt", "text/plain; charset=utf-8", actions.logText().toByteArray())
+
+/** Diagnostics' phone code, pointing at the log. */
+fun logSheet() = Overlay.Phone(
+    "diag", "Settings › Diagnostics", "Send the log to your phone",
+    "Scan the code and press Download the log. It has no keys, usernames or passwords in it.",
+    section = "log",
+)
+
+/** Settings › Diagnostics on the phone: the log to download, and the last connection test. */
+@Composable
+private fun diagnosticsPhone(state: VpnUiState, nav: Nav, actions: TunnelActions): dev.shieldvpn.phone.PhoneSession? = rememberPhoneSession(
+    "diag", state, actions,
+    form = {
+        val test = nav.lastTest
+        PhoneForm(
+            "Settings › Diagnostics", "Diagnostics", "The connection log and the last connection test, for when something does not connect.",
+            listOf(
+                // The size is left out: the log grows while it is open, and the page would be drawn again at every line.
+                PhoneSection(
+                    "log", "Connection log", note = "From this session, newest at the bottom. It has no keys, usernames or passwords in it.",
+                    fields = listOf(PhoneField.Download("log", "$APP_FILE_NAME-log.txt", 0, label = "Download the log")),
+                ),
+                PhoneSection(
+                    "test", "Last connection test",
+                    fields = listOf(
+                        if (test != null) PhoneField.Info("checks", rows = test) else PhoneField.Info("checks", text = "No test has run since the app opened. Run one on the TV in Settings › Diagnostics."),
+                    ),
+                ),
+            ),
+        )
+    },
+    download = { id -> if (id == "log") logFile(actions) else null },
+    onDownloaded = { _, name -> tvLine = "Sent $name to your phone" },
+)
+
+/** Settings › Automation on the phone: each command with this device's profile names, to copy. */
+@Composable
+private fun automationPhone(state: VpnUiState, actions: TunnelActions): dev.shieldvpn.phone.PhoneSession? = rememberPhoneSession(
+    "automation", state, actions,
+    form = { s ->
+        val fields = buildList {
+            if (!s.settings.automation) add(PhoneField.Info("off", text = "Turn on “Let other apps control ${APP_NAME}” on the TV first.", tone = "warn"))
+            add(PhoneField.Copy("connect", "Connect the profile on the Connect screen", "adb shell am start -n dev.shieldvpn/.Connect"))
+            s.connections.take(8).forEachIndexed { i, c ->
+                add(PhoneField.Copy("connect$i", "Connect ${c.name}", "adb shell am start -n dev.shieldvpn/.Connect --es profile ${quoted(c.name)}"))
+            }
+            add(PhoneField.Copy("disconnect", "Disconnect", "adb shell am start -n dev.shieldvpn/.Disconnect"))
+            add(PhoneField.Info("intents", text = "Home automation apps send the same intents: component dev.shieldvpn/.Connect or dev.shieldvpn/.Disconnect, with an optional string extra \"profile\"."))
+        }
+        PhoneForm("Settings › Automation", "Automation commands", "Copy them for ADB or a home automation app.", listOf(PhoneSection("commands", fields = fields)))
+    },
+)
+
+/**
+ * Settings › Backup on the phone: the passphrase, the download, and a restore. The backup holds
+ * every key and password, so the phone gets it only after Back up to your phone on the TV, and a
+ * passphrase set already changes only with the current one.
+ */
+@Composable
+private fun backupPhone(state: VpnUiState, nav: Nav, actions: TunnelActions): dev.shieldvpn.phone.PhoneSession? {
+    val name = "$APP_FILE_NAME-backup-${java.time.LocalDate.now()}.${Backup.EXTENSION}"
+    return rememberPhoneSession(
+        "backup", state, actions,
+        form = { s -> backupForm(s, nav, name, focus) },
+        locked = { locked(actions.stateNow(), nav) },
+        onAction = { action, v ->
+            val now = actions.stateNow()
+            when (action) {
+                "setpass" -> {
+                    // A first passphrase only when the TV asked for one; a change only with the one set now.
+                    if (!now.hasBackupPassphrase && focus != "pass") return@rememberPhoneSession PhoneReply.error(null, "Press Back up to your phone on the TV first.")
+                    val outcome = setPassphrase(now, actions, nav, v["pass1"].orEmpty(), v["pass2"].orEmpty(), current = v["old"].orEmpty())
+                    if (outcome !is Outcome.Done) return@rememberPhoneSession outcome.toReply()
+                    saved(if (now.hasBackupPassphrase) "change" else "pass")
+                    if (now.hasBackupPassphrase) {
+                        outcome.toReply(clear = listOf("old", "pass1", "pass2"))
+                    } else {
+                        // A first passphrase goes straight on to the backup, as it does on the TV.
+                        point("download")
+                        PhoneReply(clear = listOf("pass1", "pass2"), download = "backup" to name)
+                    }
+                }
+                "restore" -> {
+                    val file = nav.staged["backup"] ?: return@rememberPhoneSession PhoneReply.error("restorefile", "Choose the backup file again.")
+                    val outcome = restoreBackup(actions, nav, file.bytes, v["rpass"].orEmpty(), v["same"] == "replace", "rpass")
+                    if (outcome is Outcome.Done) {
+                        nav.staged.remove("backup")
+                        tvLine = outcome.text.trimEnd('.')
+                    }
+                    outcome.toReply(clear = listOf("rpass"))
+                }
+                else -> PhoneReply()
+            }
+        },
+        onUpload = { field, file, bytes ->
+            if (actions.inspect(file, bytes) != Inspected.Backup) {
+                PhoneReply.error(field, "That isn’t a ${APP_NAME} backup.")
+            } else {
+                nav.staged["backup"] = StagedFile(file, bytes)
+                tvLine = "Received a backup: $file"
+                PhoneReply()
+            }
+        },
+        download = { id ->
+            when {
+                id != "backup" -> null
+                focus != "download" -> dev.shieldvpn.phone.PhoneFile.refused(pressOnTv("Back up to your phone"))
+                else -> actions.backupFile()?.let { dev.shieldvpn.phone.PhoneFile(name, "application/octet-stream", it) }
+            }
+        },
+        onDownloaded = { _, file ->
+            actions.backupDownloaded()
+            tvLine = "Downloaded to your phone: $file"
+        },
+    )
+}
+
+private fun backupForm(state: VpnUiState, nav: Nav, name: String, focus: String?): PhoneForm {
+    val staged = nav.staged["backup"]
+    val sections = buildList {
+        if (!state.hasBackupPassphrase) {
+            add(
+                if (focus == "pass") {
+                    PhoneSection(
+                        "pass", "Choose a passphrase", note = "Backups are encrypted with it, and restoring one needs it. Keep it somewhere safe.",
+                        fields = listOf(
+                            PhoneField.Text("pass1", "Passphrase", secret = true, required = true, help = "At least 6 characters."),
+                            PhoneField.Text("pass2", "Type it again", secret = true, required = true),
+                        ),
+                        actions = listOf(PhoneAction("setpass", "Save and download", primary = true, needs = listOf("pass1", "pass2"))),
+                    )
+                } else {
+                    PhoneSection("pass", "Back up the TV", note = "There is no backup passphrase yet. Press Back up to your phone on the TV, then choose one here.")
+                },
+            )
+        } else {
+            add(
+                if (focus == "download") {
+                    PhoneSection(
+                        "download", "Back up the TV",
+                        note = state.lastBackup?.let { (at, n) -> "The last backup was ${ago(at)}, with $n profile${if (n == 1) "" else "s"}." } ?: "There is no backup yet.",
+                        fields = listOf(PhoneField.Download("backup", name, 0, note = "Encrypted with your passphrase: every profile, saved password and setting.", label = "Download the backup")),
+                    )
+                } else {
+                    PhoneSection("download", "Back up the TV", note = "The backup holds every key and password, so it is only sent after you press Back up to your phone on the TV.")
+                },
+            )
+            add(
+                PhoneSection(
+                    "change", "Change the passphrase", folded = true,
+                    fields = listOf(
+                        PhoneField.Text("old", "Current passphrase", secret = true, required = true),
+                        PhoneField.Text("pass1", "New passphrase", secret = true, required = true, help = "At least 6 characters."),
+                        PhoneField.Text("pass2", "Type it again", secret = true, required = true),
+                    ),
+                    actions = listOf(PhoneAction("setpass", "Change it", primary = true, needs = listOf("old", "pass1", "pass2"))),
+                ),
+            )
+        }
+        add(
+            PhoneSection(
+                "restore", "Restore a backup", note = "From this TV or another one. Its profiles are added; ones here already, exactly the same, are left alone.",
+                fields = listOfNotNull(
+                    PhoneField.Upload("restorefile", "Choose the backup file", "The .${Backup.EXTENSION} file", ".${Backup.EXTENSION},application/octet-stream,application/json", staged?.let { Staged(it.name, it.bytes.size, "Backup") }),
+                    if (staged != null) PhoneField.Text("rpass", "Its passphrase", secret = true, required = true) else null,
+                    if (staged != null) PhoneField.Choice("same", "When a profile with the same name is on the TV", listOf("both" to "Keep both", "replace" to "Replace it"), "both") else null,
+                ),
+                actions = if (staged != null) listOf(PhoneAction("restore", "Restore on the TV", primary = true, needs = listOf("rpass"))) else emptyList(),
+            ),
+        )
+    }
+    return PhoneForm("Settings › Backup", "Back up the TV", "Download an encrypted backup of every profile and setting, or restore one.", sections)
 }

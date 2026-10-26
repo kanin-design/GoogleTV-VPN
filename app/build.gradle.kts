@@ -13,6 +13,10 @@ fun git(vararg args: String): String? = runCatching {
 val buildNumber = providers.gradleProperty("buildNumber").orNull?.toInt() ?: git("rev-list", "--count", "HEAD")?.toInt() ?: 1
 val buildCommit = git("rev-parse", "--short=7", "HEAD") ?: "unknown"
 
+// WireGuard, work in progress: only with -Pwireguard=true, never in a published build (tools/release.sh
+// refuses). With it off, the code that reads WireGuard files is compiled out (Features.kt).
+val wireguard = providers.gradleProperty("wireguard").orNull == "true"
+
 android {
     namespace = "dev.shieldvpn"
     compileSdk = 34
@@ -30,6 +34,7 @@ android {
         val appName = providers.gradleProperty("appName").get()
         resValue("string", "app_name", appName)
         buildConfigField("String", "APP_NAME", "\"$appName\"")
+        buildConfigField("boolean", "WIREGUARD", "$wireguard")
 
     }
 
@@ -94,4 +99,6 @@ dependencies {
 
     // QR codes for sending files between the TV and a phone.
     implementation("com.google.zxing:core:3.5.3")
+
+    testImplementation("junit:junit:4.13.2")
 }

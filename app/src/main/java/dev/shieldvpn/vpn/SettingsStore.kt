@@ -90,6 +90,16 @@ object SettingsStore {
         return saved.substringBeforeLast(' ').takeIf { System.currentTimeMillis() - at < 10 * 60 * 1000L }
     }
 
+    /** When a phone last downloaded a backup, and how many profiles were in it. */
+    fun lastBackup(context: Context): Pair<Long, Int>? {
+        val at = prefs(context).getLong("lastBackupAt", 0L).takeIf { it > 0 } ?: return null
+        return at to prefs(context).getInt("lastBackupProfiles", 0)
+    }
+
+    fun setLastBackup(context: Context, at: Long, profiles: Int) {
+        prefs(context).edit().putLong("lastBackupAt", at).putInt("lastBackupProfiles", profiles).apply()
+    }
+
     /** The profile Connect shows. */
     fun activeConnection(context: Context): String? = prefs(context).getString("activeConnection", null)
 

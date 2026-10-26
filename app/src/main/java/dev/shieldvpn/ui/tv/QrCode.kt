@@ -46,7 +46,7 @@ private class QrMatrix(text: String) {
 }
 
 /**
- * A QR code on a light card: rounded dots, rounded corner eyes and the Tunnel mark in the
+ * A QR code on a light card: rounded dots, rounded corner eyes and the app's mark in the
  * middle. [size] is in design pixels and includes the quiet zone.
  */
 @Composable
@@ -78,7 +78,7 @@ fun QrCode(text: String, size: Float, modifier: Modifier = Modifier) {
         eye(origin + (matrix.size - 7) * cell, origin, cell)
         eye(origin, origin + (matrix.size - 7) * cell, cell)
 
-        // The Tunnel mark on a small rounded tile.
+        // The app's mark on a small rounded tile.
         val tile = cell * clear
         val tl = Offset(origin + c0 * cell, origin + c0 * cell)
         drawRoundRect(QrInk, topLeft = tl, size = Size(tile, tile), cornerRadius = CornerRadius(tile * 0.28f))

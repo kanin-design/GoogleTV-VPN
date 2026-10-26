@@ -28,6 +28,8 @@ import dev.shieldvpn.ui.tv.TunnelApp
 import dev.shieldvpn.vpn.AppSettings
 import dev.shieldvpn.vpn.Backup
 import dev.shieldvpn.vpn.CredentialStore
+import dev.shieldvpn.vpn.ImportReview
+import dev.shieldvpn.vpn.Inspected
 import dev.shieldvpn.vpn.ShieldVpnService
 import dev.shieldvpn.vpn.VpnController
 import dev.shieldvpn.vpn.VpnStatus
@@ -54,6 +56,9 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     // A system screen answers this activity later: the VPN consent, a file picker, the certificate chooser.
     private var waitingForAnswer = false
+
+    // The screens hold a file a phone sent, waiting for its passphrase or password.
+    private var holdingFile = false
 
     // Android asks the user once to allow this app to create a VPN.
     private val consentLauncher = registerForActivityResult(
@@ -91,6 +96,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
     override fun onStart() {
         super.onStart()
         away.removeCallbacks(closeAway)
+        viewModel.screensShown()
     }
 
     override fun onStop() {
@@ -101,7 +107,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
     private fun closeWhileAway() {
         val s = viewModel.state.value
         // Stay while something unsaved waits on the screens: a file to review, a backup or certificate to unlock.
-        if (waitingForAnswer || s.review != null || s.pendingRestore != null || s.pendingP12 != null) return
+        if (waitingForAnswer || holdingFile || s.review != null || s.pendingRestore != null || s.pendingP12 != null) return
         closedAway = true
         finishAndRemoveTask()
     }
@@ -250,7 +256,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override fun rename(id: String, name: String) = viewModel.rename(id, name)
 
-    override fun saveLogin(id: String, username: String, password: String) = viewModel.saveLogin(id, username, password)
+    override fun saveLogin(id: String, username: String, password: String?) = viewModel.saveLogin(id, username, password)
 
     override fun forgetPassword(id: String) = viewModel.forgetPassword(id)
 
@@ -275,12 +281,22 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override fun delete(id: String) = viewModel.delete(id)
 
-    override fun pickFile() {
-        // Many TVs have no file picker. Android's own answer is a vague toast, so look first.
+    // Many TVs have no file picker. Android's own answer is a vague toast, so look first. Android TV
+    // answers with a stub that only says no app can do this; that is no picker.
+    override val hasFilePicker: Boolean by lazy {
         val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
-        // Android TV answers with a stub that only says no app can do this; that is no picker.
         val handler = picker.resolveActivity(packageManager)
-        if (handler == null || handler.packageName == "com.android.tv.frameworkpackagestubs") {
+        handler != null && handler.packageName != "com.android.tv.frameworkpackagestubs"
+    }
+
+    override fun stateNow() = viewModel.state.value
+
+    override fun keepOpen(on: Boolean) {
+        holdingFile = on
+    }
+
+    override fun pickFile() {
+        if (!hasFilePicker) {
             viewModel.noFilePicker()
             return
         }
@@ -314,9 +330,19 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override fun cancelRestore() = viewModel.cancelRestore()
 
-    override suspend fun restore(passphrase: String): Backup.Restored = viewModel.restore(passphrase)
+    override suspend fun restore(passphrase: String, replace: Boolean): Backup.Restored = viewModel.restore(passphrase, replace)
+
+    override suspend fun restore(bytes: ByteArray, passphrase: String, replace: Boolean): Backup.Restored = viewModel.restore(bytes, passphrase, replace)
+
+    override fun backupDownloaded() = viewModel.backupDownloaded()
+
+    override fun inspect(name: String, bytes: ByteArray): Inspected = viewModel.inspect(name, bytes)
+
+    override fun openReview(review: ImportReview) = viewModel.openReview(review)
 
     override fun setBackupPassphrase(passphrase: String?) = viewModel.setBackupPassphrase(passphrase)
+
+    override fun checkBackupPassphrase(passphrase: String): Boolean = viewModel.checkBackupPassphrase(passphrase)
 
     override suspend fun backupFile(): ByteArray? = viewModel.backupFile()
 
@@ -324,17 +350,25 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override fun logText(): String = viewModel.logText()
 
+    override val log get() = viewModel.log
+
     override fun setPin(pin: String?) = viewModel.setPin(pin)
 
     override fun checkPin(pin: String): Boolean = viewModel.checkPin(pin)
 
-    override fun checkP12(password: String): String? = viewModel.checkP12(password)
+    override suspend fun checkP12(password: String): String? = viewModel.checkP12(password)
 
-    override fun attachP12(password: String, id: String): String? = viewModel.attachP12(password, id)
+    override suspend fun attachP12(password: String, id: String): String? = viewModel.attachP12(password, id)
 
     override fun cancelP12() = viewModel.cancelP12()
 
-    override fun keepP12(password: String): String? = viewModel.keepP12(password)
+    override suspend fun keepP12(password: String): String? = viewModel.keepP12(password)
+
+    override suspend fun checkP12(bytes: ByteArray, password: String): String? = viewModel.checkP12(bytes, password)
+
+    override suspend fun attachP12(bytes: ByteArray, password: String, id: String): String? = viewModel.attachP12(bytes, password, id)
+
+    override suspend fun keepP12(bytes: ByteArray, password: String): String? = viewModel.keepP12(bytes, password)
 
     override fun setKeyAlias(id: String, alias: String?) = viewModel.setKeyAlias(id, alias)
 
@@ -382,7 +416,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
     override fun exit() = finish()
 
     override val versionName: String
-        get() = packageManager.getPackageInfo(packageName, 0).versionName ?: ""
+        get() = BuildConfig.VERSION_NAME
 
     override fun checkUpdate() = viewModel.checkUpdate()
 

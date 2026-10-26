@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -57,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -78,7 +80,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import dev.shieldvpn.APP_NAME
+import dev.shieldvpn.phone.PhoneAction
+import dev.shieldvpn.phone.PhoneField
+import dev.shieldvpn.phone.PhoneForm
+import dev.shieldvpn.phone.PhoneReply
+import dev.shieldvpn.phone.PhoneSection
+import dev.shieldvpn.phone.PhoneSession
+import dev.shieldvpn.phone.Staged
 import dev.shieldvpn.vpn.Certificates
+import dev.shieldvpn.vpn.Inspected
 import dev.shieldvpn.vpn.Connection
 import dev.shieldvpn.vpn.VpnUiState
 import dev.shieldvpn.vpn.isActive
@@ -136,6 +146,9 @@ fun ProfilesScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
         }
     }
 
+    // The open profile's phone page, with one code for all of its columns and sheets.
+    nav.stack.firstOrNull()?.let { state.connection(it.id) }?.let { ProfilePhone(state, nav, actions, it) }
+
     Box(Modifier.fillMaxSize()) {
         val heroAlpha by animateFloatAsState(if (depth == 0) 1f else 0f, tween(250), label = "heroA")
         val heroShift by animateFloatAsState(if (depth == 0) 0f else 40f, tween(300, easing = SlideEase), label = "heroX")
@@ -181,7 +194,7 @@ fun ProfilesScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
                         if (c != null) {
                             when (shown) {
                                 is Col.Profile -> ProfileColumn(state, nav, actions, req, c, i, mini, connect)
-                                is Col.Advanced -> AdvancedColumn(state, nav, req, c, i, mini)
+                                is Col.Advanced -> AdvancedColumn(state, nav, actions, req, c, i, mini)
                                 is Col.Leaf -> LeafColumn(state, nav, actions, req, c, shown.kind, i)
                             }
                         }
@@ -192,19 +205,19 @@ fun ProfilesScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
     }
 }
 
-/** Where focus starts in a column. */
 /**
  * Where focus lands in a column. A profile opens on its Connect button, unless a tunnel is up:
  * then on Name, so one OK doesn't switch away from it.
  */
 private fun entryKey(col: Col, state: VpnUiState): String = when (col) {
     is Col.Profile -> if (state.status.isActive) "pe-name" else "pe-connect"
-    is Col.Advanced -> "pa-Server"
+    // A file that picks its own servers starts on Protocol, as Server and port can't change it.
+    is Col.Advanced -> if (state.connection(col.id)?.let { state.infoOf(it) }?.connectionBlocks == true) "pa-Protocol" else "pa-Server"
     is Col.Leaf -> when (col.kind) {
-        LeafKind.Name, LeafKind.Password, LeafKind.Server -> "ed-key"
         LeafKind.Look -> "lk-sel"
+        LeafKind.SignIn -> "sl-login"
         LeafKind.Protocol, LeafKind.Order, LeafKind.Kill, LeafKind.Dns -> "op-sel"
-        LeafKind.File, LeafKind.Cert -> "ed-done"
+        LeafKind.File -> "ed-done"
     }
 }
 
@@ -234,8 +247,7 @@ private fun SlidingColumn(role: Role, list: Boolean, focus: Modifier, shown: () 
     if (alpha <= 0.01f && role == Role.Gone) return
     Glass(
         modifier = Modifier
-            .offset(x = left, y = 124.dp)
-            .width(width)
+            .placed({ left }, 124.dp, { width })
             .fillMaxHeight()
             .padding(bottom = 160.dp)
             // No offscreen buffer: one would be made again at every width while the column
@@ -291,8 +303,7 @@ private fun ListColumn(state: VpnUiState, nav: Nav, req: Requesters, mini: Boole
             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(state.connections.size) { index ->
-                val c = state.connections[index]
+            items(state.connections, key = { it.id }) { c ->
                 val open = nav.stack.firstOrNull()?.id == c.id
                 ListRow(
                     title = c.name,
@@ -300,6 +311,7 @@ private fun ListColumn(state: VpnUiState, nav: Nav, req: Requesters, mini: Boole
                     kind = RowKind.Profile,
                     open = open,
                     mini = mini,
+                    modifier = Modifier.onFocusChanged { if (!it.isFocused && nav.focusedPid == c.id) nav.focusedPid = null },
                     focusRequester = req["pl-${c.id}"],
                     onFocus = {
                         nav.focusedPid = c.id
@@ -355,8 +367,7 @@ private fun ProfileHero(state: VpnUiState, c: Connection) {
         MetaLine(facts)
         Row(Modifier.padding(top = 22.dp), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
             Hint("OK", "Open")
-            Hint("▶", "Connect")
-            Hint("☰", "Quick menu")
+            Hint("OK", "Hold for the quick menu")
         }
     }
 }
@@ -405,6 +416,13 @@ private fun stepBackTo(nav: Nav, index: Int, key: String): Boolean {
     return true
 }
 
+/** The name the .ovpn file gets on a phone: the profile's, with its letters, less what file names can't hold. */
+fun ovpnName(c: Connection): String = c.name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "").trim().ifEmpty { "profile" } + ".ovpn"
+
+/** The profile's phone code, big, pointed at one part of its page. */
+private fun profilePhone(c: Connection, title: String, lede: String, section: String? = null) =
+    Overlay.Phone("profile-${c.id}", "Profiles › ${c.name}", title, lede, section)
+
 @Composable
 private fun ProfileColumn(
     state: VpnUiState,
@@ -428,18 +446,23 @@ private fun ProfileColumn(
     val startup = state.settings.boot && state.settings.startupId == c.id
 
     Column(Modifier.fillMaxSize()) {
-        ColumnHead("Profiles", c.name, server?.let { "${it.host}:${it.port} · ${it.protocol.label}" }, mini, extra = {
-            TvButton(
-                if (live) "Disconnect" else "Connect",
-                {
-                    if (live) actions.disconnect() else connect(c.id)
-                    // A profile without its password opens the sign-in sheet instead.
-                    if (!live && !state.asksForLogin(c)) nav.toast("Connecting to ${c.name}")
-                },
-                icon = Ic.Power,
-                small = true,
-                focusRequester = req["pe-connect"],
-            )
+        ColumnHead(nav.copyOf[c.id]?.let { "Copy of $it" } ?: "Profiles", c.name, server?.let { "${it.host}:${it.port} · ${it.protocol.label}" }, mini, extra = {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TvButton(
+                    if (live) "Disconnect" else "Connect",
+                    {
+                        if (live) actions.disconnect() else connect(c.id)
+                        // A profile without its password opens the sign-in sheet instead.
+                        if (!live && !state.asksForLogin(c)) nav.toast("Connecting to ${c.name}")
+                    },
+                    icon = Ic.Power,
+                    small = true,
+                    focusRequester = req["pe-connect"],
+                )
+                TvButton("Edit on your phone", {
+                    nav.overlay = profilePhone(c, "Edit ${c.name} on your phone", "Scan the code: the page has every setting of this profile, and its .ovpn file. Save there keeps only what you changed.")
+                }, icon = Ic.Phone, small = true, glass = true)
+            }
         })
         val list = nav.listState("profile-${c.id}")
         LazyColumn(
@@ -450,9 +473,10 @@ private fun ProfileColumn(
         ) {
             item {
                 ListRow(
-                    "Name", { open(nav, index, Col.Leaf(c.id, LeafKind.Name), "ed-key") },
-                    subtitle = "Shown on cards and on Connect", open = openKey == "pe-name", mini = mini,
+                    "Name", { if (!stepBackTo(nav, index, "pe-name")) nav.overlay = Overlay.Form(nameSpec(nav, actions, c)) },
+                    subtitle = "Shown on cards and on Connect", mini = mini,
                     focusRequester = req["pe-name"],
+                    flash = nav.flashKey == "pe-name",
                     trailing = { ValueChip(c.name, it) },
                 )
             }
@@ -466,22 +490,26 @@ private fun ProfileColumn(
                 )
             }
             item {
-                if (!needsLogin) {
-                    ListRow(
-                        "Sign-in", { open(nav, index, Col.Leaf(c.id, LeafKind.Cert), "ed-done") },
-                        subtitle = "The certificate inside the file signs you in", open = openKey == "pe-signin", mini = mini,
-                        focusRequester = req["pe-signin"],
-                        trailing = { ValueChip("Certificate", it) },
-                    )
-                } else {
-                    ListRow(
-                        "Saved password", { open(nav, index, Col.Leaf(c.id, LeafKind.Password), "ed-key") },
-                        subtitle = if (saved) "Saved for ${login!!.username}" else "Nothing saved. ${APP_NAME} asks each time",
-                        open = openKey == "pe-signin", mini = mini,
-                        focusRequester = req["pe-signin"],
-                        trailing = { ValueChip(if (saved) "Change" else "Add", it) },
-                    )
-                }
+                ListRow(
+                    "Sign-in", { open(nav, index, Col.Leaf(c.id, LeafKind.SignIn), "sl-login") },
+                    // The chip says how it signs in, so the line names who.
+                    subtitle = state.logins[c.id]?.takeIf { needsLogin && it.hasPassword && it.username.isNotEmpty() }?.let { "As ${it.username}" } ?: authText(state, c),
+                    open = openKey == "pe-signin", mini = mini,
+                    focusRequester = req["pe-signin"],
+                    flash = nav.flashKey == "pe-signin",
+                    trailing = {
+                        ValueChip(
+                            when {
+                                c.keyAlias != null && needsLogin && saved -> "Keystore + password"
+                                c.keyAlias != null -> "Keystore"
+                                !needsLogin -> "Certificate"
+                                saved -> "Password saved"
+                                else -> "Asks each time"
+                            },
+                            it,
+                        )
+                    },
+                )
             }
             item {
                 ListRow(
@@ -489,20 +517,16 @@ private fun ProfileColumn(
                     {
                         if (stepBackTo(nav, index, "pe-startup")) return@ListRow
                         when {
-                            needsLogin && !saved -> nav.toast("Save the password first, so it can connect by itself")
-                            startup -> {
-                                actions.setStartup(null)
-                                nav.toast("Nothing connects when the device starts")
-                            }
-                            else -> {
-                                actions.setStartup(c.id)
-                                nav.toast("${c.name} connects when the device starts")
-                            }
+                            startup -> actions.setStartup(null)
+                            // It can only connect by itself with its password saved; that is asked for first.
+                            needsLogin && !saved -> nav.overlay = Overlay.SignIn(c.id, save = true, forStartup = true)
+                            else -> startAtBoot(state, actions, nav, c)
                         }
                     },
-                    subtitle = if (needsLogin && !saved) "Save the password first" else "Only one profile can do this",
+                    subtitle = "Connects before you open the app",
                     mini = mini,
                     focusRequester = req["pe-startup"],
+                    flash = nav.flashKey == "pe-startup",
                     trailing = { TvSwitch(startup, it) },
                 )
             }
@@ -512,7 +536,6 @@ private fun ProfileColumn(
                     {
                         if (stepBackTo(nav, index, "pe-pin")) return@ListRow
                         actions.setPinned(c.id, !c.pinned)
-                        nav.toast(if (!c.pinned) "${c.name} is pinned to Quick connect" else "${c.name} is unpinned")
                     },
                     subtitle = "Show it first on the Connect screen", mini = mini,
                     focusRequester = req["pe-pin"],
@@ -521,10 +544,11 @@ private fun ProfileColumn(
             }
             item {
                 ListRow(
-                    "Advanced options", { open(nav, index, Col.Advanced(c.id), "pa-Server") },
+                    "Advanced options", { open(nav, index, Col.Advanced(c.id), entryKey(Col.Advanced(c.id), state)) },
                     subtitle = "Server, protocol, kill switch, DNS, the file", open = openKey == "pe-adv", mini = mini,
                     focusRequester = req["pe-adv"],
-                    trailing = { ValueChip("7 settings", it) },
+                    leading = { IconSquare(Ic.Gear, it) },
+                    trailing = { Chevron(it) },
                 )
             }
             if (!mini) item { SectionLabel("More") }
@@ -539,31 +563,55 @@ private fun ProfileColumn(
                     mini = mini,
                     focusRequester = req["pe-speed"],
                     leading = { IconSquare(Ic.Gauge, it) },
-                    trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+                    trailing = { Chevron(it) },
                 )
+            }
+            if (live) {
+                item {
+                    ListRow(
+                        "Connection details", {
+                            if (!stepBackTo(nav, index, "pe-details")) nav.overlay = Overlay.Details
+                        },
+                        subtitle = "Addresses, DNS, routes and what has gone through", mini = mini,
+                        focusRequester = req["pe-details"],
+                        leading = { IconSquare(Ic.Info, it) },
+                        trailing = { Chevron(it) },
+                    )
+                }
             }
             item {
                 ListRow(
                     "Send to phone", {
-                        if (!stepBackTo(nav, index, "pe-send")) nav.overlay = Overlay.Phone(PhoneKind.Profile(c.id))
+                        if (!stepBackTo(nav, index, "pe-send")) {
+                            nav.overlay = profilePhone(
+                                c, "Send ${c.name} to your phone",
+                                "Scan the code and press Download. ${keyNote(state, c)}",
+                                section = "download",
+                            )
+                        }
                     },
                     subtitle = "Get the .ovpn file on your phone", mini = mini,
                     focusRequester = req["pe-send"],
                     leading = { IconSquare(Ic.Phone, it) },
-                    trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+                    trailing = { Chevron(it) },
                 )
             }
             item {
                 ListRow(
                     "Duplicate", {
                         if (stepBackTo(nav, index, "pe-dup")) return@ListRow
-                        actions.duplicate(c.id)
-                        nav.toast("Made ${c.name} (copy). It is in the list")
+                        // The copy opens, ready to be changed.
+                        val copy = actions.duplicate(c.id) ?: return@ListRow
+                        nav.copyOf[copy] = c.name
+                        nav.stack.clear()
+                        nav.profFocus = copy
+                        nav.resetList("profile-$copy")
+                        nav.push(Col.Profile(copy), "pe-name")
                     },
                     subtitle = "Make a copy to try other settings", mini = mini,
                     focusRequester = req["pe-dup"],
                     leading = { IconSquare(Ic.Copy, it) },
-                    trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+                    trailing = { Chevron(it) },
                 )
             }
             item {
@@ -574,10 +622,13 @@ private fun ProfileColumn(
                         keep = req["pe-del-no"],
                         onConfirm = {
                             confirm = false
+                            // Focus goes on to the next profile in the list.
+                            val next = nextAfter(state, c.id)
                             nav.stack.clear()
                             actions.delete(c.id)
                             nav.toast("Deleted ${c.name}")
-                            nav.moveStackFocus("pl-add")
+                            nav.profFocus = next
+                            nav.moveStackFocus("pl-${next ?: "add"}")
                         },
                         onKeep = {
                             confirm = false
@@ -593,7 +644,7 @@ private fun ProfileColumn(
                         subtitle = "Removes it from this device", danger = true, mini = mini,
                         focusRequester = req["pe-del"],
                         leading = { IconSquare(Ic.Trash, it) },
-                        trailing = { TvIcon(Ic.Chev, 18f, if (it) Tv.OnFocus else Tv.Ink, stroke = 2.4f) },
+                        trailing = { Chevron(it) },
                     )
                 }
             }
@@ -601,10 +652,243 @@ private fun ProfileColumn(
     }
 }
 
+// ---- Sheets for a profile's text --------------------------------------------------------
+
+private fun nameSpec(nav: Nav, actions: TunnelActions, c: Connection) = FormSpec(
+    "Profiles › ${c.name}", "Name", "Shown on cards and on Connect.",
+    listOf(FormField("name", "Name", c.name)), primary = "Save", phone = "profile-${c.id}", phoneSection = "name",
+) { v, _ -> renameProfile(actions, nav, c, v["name"].orEmpty()).toForm() }
+
+private fun loginSpec(state: VpnUiState, nav: Nav, actions: TunnelActions, c: Connection): FormSpec {
+    val login = state.logins[c.id]
+    val saved = login != null && login.hasPassword
+    return FormSpec(
+        "Profiles › ${c.name} › Sign-in", "Username and password",
+        "Kept in the device’s keystore, never in the .ovpn file." + if (saved) " Leave the password empty to keep the saved one." else "",
+        listOf(FormField("user", "Username", login?.username.orEmpty()), FormField("pw", "Password", secret = true, optional = saved)),
+        primary = "Save", phone = "profile-${c.id}", phoneSection = "signin",
+        extra = if (saved) {
+            FormExtra("Forget", danger = true, confirm = "Forget the saved password for ${c.name}? It is asked for at the next connect.") {
+                actions.forgetPassword(c.id)
+                nav.flash("sl-login")
+                FormResult.Done
+            }
+        } else {
+            null
+        },
+    ) { v, _ -> saveLogin(actions, nav, c, v["user"].orEmpty(), v["pw"].orEmpty(), keepsSaved = saved).toForm() }
+}
+
+private fun serverSpec(state: VpnUiState, nav: Nav, actions: TunnelActions, c: Connection): FormSpec {
+    val server = state.serverOf(c)
+    val info = state.infoOf(c)
+    val changed = server != null && info != null && (server.host != info.fileHost || server.port != info.filePort)
+    return FormSpec(
+        "Profiles › ${c.name} › Advanced", "Server and port", "Use another address than the one in the file.",
+        listOf(FormField("host", "Server", server?.host.orEmpty(), mono = true), FormField("port", "Port", server?.port?.toString().orEmpty(), mono = true, max = 5)),
+        primary = "Save", phone = "profile-${c.id}", phoneSection = "server",
+        extra = if (changed) {
+            FormExtra("Use the file’s server") {
+                actions.resetServer(c.id)
+                nav.flash("pa-Server")
+                FormResult.Done
+            }
+        } else {
+            null
+        },
+    ) { v, _ -> setServer(actions, nav, c, v["host"].orEmpty(), v["port"].orEmpty()).toForm() }
+}
+
+/** Settings › DNS's custom servers, typed from a profile that is set to Custom DNS. */
+private fun customDnsSpec(state: VpnUiState, nav: Nav, actions: TunnelActions, c: Connection) = FormSpec(
+    // The list is the app's, not this profile's: the eyebrow says where it lives.
+    "Settings › DNS", "Custom DNS servers", "Shared by every profile set to Custom DNS, not only ${c.name}. Separate them with spaces.",
+    listOf(FormField("dns", "DNS servers", state.settings.customDns.joinToString(" "), mono = true, max = 400)),
+    primary = "Save", phone = "profile-${c.id}", phoneSection = "dns",
+) { v, _ ->
+    val text = v["dns"].orEmpty()
+    if (dnsServers(text).isEmpty()) {
+        FormResult.Problems("dns", "Type at least one DNS server")
+    } else {
+        val outcome = saveCustomDns(actions, nav, text, "pa-Dns")
+        if (outcome is Outcome.Done) actions.setDnsMode(c.id, "Custom")
+        outcome.toForm()
+    }
+}
+
+// ---- The profile's phone page ---------------------------------------------------------------
+
+/** A profile's page on the phone: every field it has, its certificate, and its .ovpn file. */
+private fun profileForm(state: VpnUiState, nav: Nav, c: Connection, fileSize: Int?, focus: String?): PhoneForm {
+    val server = state.serverOf(c)
+    val info = state.infoOf(c)
+    val login = state.logins[c.id]
+    val needsLogin = info?.needsLogin != false
+    val saved = login != null && login.hasPassword && login.username.isNotEmpty()
+    val changed = server != null && info != null && (server.host != info.fileHost || server.port != info.filePort)
+    val staged = nav.staged["profile-${c.id}"]
+    val hasCert = info?.cert != null || c.keyAlias != null
+    val certNote = when {
+        c.keyAlias != null -> "It signs in with a key in the TV’s keystore: ${Certificates.label(c.keyAlias)}."
+        info?.cert != null -> "The file has its own certificate, valid ${info.cert.validUntil}."
+        else -> "There is no certificate in the file. Add one if the server asks for it."
+    }
+    val sections = listOfNotNull(
+        PhoneSection("name", "Name", fields = listOf(PhoneField.Text("name", "Name", c.name, required = true, mirror = true, help = "Shown on the TV’s cards and on Connect."))),
+        if (needsLogin) {
+            PhoneSection(
+                "signin", "Sign-in",
+                note = if (saved) "A password is saved for ${login!!.username}." else "Nothing is saved, so the TV asks each time.",
+                fields = listOf(
+                    PhoneField.Text("user", "Username", login?.username.orEmpty(), mirror = true),
+                    PhoneField.Text("pw", "Password", secret = true, mirror = true, help = if (saved) "Leave it empty to keep the saved one." else "Saved on the TV, encrypted."),
+                ),
+                actions = if (saved) listOf(PhoneAction("forget", "Forget the saved password", danger = true, confirm = "Forget the saved password for ${c.name}? It is asked for at the next connect.", confirmLabel = "Forget")) else emptyList(),
+            )
+        } else {
+            null
+        },
+        PhoneSection(
+            "server", "Server",
+            note = if (changed) "Changed from the file’s ${info!!.fileHost} ${info.filePort}." else null,
+            fields = listOf(
+                PhoneField.Text("host", "Address", server?.host.orEmpty(), mirror = true),
+                PhoneField.Text("port", "Port", server?.port?.toString().orEmpty(), input = "numeric", max = 5, mirror = true),
+            ),
+            actions = if (changed) listOf(PhoneAction("fileserver", "Use the file’s server")) else emptyList(),
+        ),
+        if (c.dnsMode == "Custom") {
+            PhoneSection("dns", "DNS servers", fields = listOf(PhoneField.Lines("dns", "Custom DNS servers", state.settings.customDns, help = "One per line. Every profile set to Custom DNS uses them.", placeholder = "1.1.1.1", mirror = true)))
+        } else {
+            null
+        },
+        PhoneSection("save", actions = listOf(PhoneAction("save", "Save", primary = true))),
+        PhoneSection(
+            "cert", "Certificate", note = certNote,
+            fields = listOf(
+                PhoneField.Upload("p12", "Add a .p12 or .pfx file", "Its certificate and key replace the profile’s", ".p12,.pfx,application/x-pkcs12,application/octet-stream", staged?.let { Staged(it.name, it.bytes.size, "Certificate") }),
+            ) + if (staged != null) p12Fields(state, c) else emptyList(),
+            actions = if (staged != null) {
+                listOf(PhoneAction("attach", "Add to ${c.name}", primary = true, needs = listOf("p12pass"), confirm = if (hasCert) "${c.name} has a certificate already. Replace it?" else null, confirmLabel = "Replace"))
+            } else {
+                emptyList()
+            },
+        ),
+        // The file holds the profile's private key, so it is offered only after Send to phone on the TV.
+        if (fileSize != null && focus == "download") {
+            PhoneSection("download", "The .ovpn file", fields = listOf(PhoneField.Download("ovpn", ovpnName(c), fileSize, note = keyNote(state, c))))
+        } else {
+            PhoneSection("download", "The .ovpn file", note = "It is only sent after you press Send to phone in the profile on the TV.")
+        },
+    )
+    return PhoneForm("the ${c.name} profile", "Edit ${c.name}", "Changes here go to ${c.name} on the TV. Save keeps only what you changed.", sections)
+}
+
+/** The open profile's phone session, for as long as one of its columns is open. */
+@Composable
+private fun ProfilePhone(state: VpnUiState, nav: Nav, actions: TunnelActions, c: Connection) {
+    val fileSize = remember(c.serverId, state.servers[c.serverId], state.infos[c.serverId]) { actions.profileFile(c.id)?.size }
+    rememberPhoneSession(
+        "profile-${c.id}", state, actions,
+        form = { s -> s.connection(c.id)?.let { now -> profileForm(s, nav, now, fileSize, focus) } },
+        locked = { locked(actions.stateNow(), nav) },
+        onAction = { action, v -> profileAction(this, nav, actions, c.id, action, v) },
+        onUpload = { field, name, bytes ->
+            if (actions.inspect(name, bytes) != Inspected.Pkcs12) {
+                PhoneReply.error(field, "That isn’t a .p12 or .pfx certificate.")
+            } else {
+                nav.staged["profile-${c.id}"] = StagedFile(name, bytes)
+                tvLine = "Received a certificate: $name"
+                PhoneReply()
+            }
+        },
+        download = { id ->
+            val now = actions.stateNow().connection(c.id)
+            when {
+                id != "ovpn" || now == null -> null
+                focus != "download" -> dev.shieldvpn.phone.PhoneFile.refused(pressOnTv("Send to phone"))
+                else -> actions.profileFile(now.id)?.let { dev.shieldvpn.phone.PhoneFile(ovpnName(now), "application/x-openvpn-profile", it) }
+            }
+        },
+        onDownloaded = { _, name -> tvLine = "Sent $name to your phone" },
+    )
+}
+
+private suspend fun profileAction(session: PhoneSession, nav: Nav, actions: TunnelActions, id: String, action: String, v: Map<String, String>): PhoneReply {
+    val state = actions.stateNow()
+    val c = state.connection(id) ?: return PhoneReply.error(null, "This profile isn’t on the TV any more.")
+    val server = state.serverOf(c)
+    val login = state.logins[c.id]
+    val needsLogin = state.infoOf(c)?.needsLogin != false
+    return when (action) {
+        "save" -> {
+            // Every part is checked first, so nothing is saved while another part is wrong.
+            val name = v["name"].orEmpty().trim()
+            val user = v["user"]?.trim()
+            val pw = v["pw"].orEmpty()
+            val loginChange = needsLogin && user != null && (pw.isNotEmpty() || user != login?.username.orEmpty())
+            val host = v["host"]?.trim()
+            val port = v["port"]?.trim()
+            val serverChange = host != null && port != null && (host != server?.host || port != server?.port?.toString())
+            val dnsText = v["dns"]
+            val errors = buildMap {
+                if (name.isEmpty()) put("name", "A profile needs a name")
+                if (loginChange && pw.isEmpty() && login?.hasPassword != true) put("pw", "Type the password too, to change the username")
+                if (loginChange && user.isNullOrBlank()) put("user", "Type the username")
+                if (serverChange) serverProblems(host!!, port!!)?.let { putAll(it.errors) }
+                if (dnsText != null) dnsProblem(dnsText)?.let { put("dns", it) }
+            }
+            if (errors.isNotEmpty()) return PhoneReply(errors = errors)
+            val done = mutableListOf<String>()
+            if (name != c.name) {
+                renameProfile(actions, nav, c, name)
+                done += "name"
+            }
+            if (loginChange) {
+                saveLogin(actions, nav, c, user!!, pw, keepsSaved = login?.hasPassword == true)
+                done += "signin"
+            }
+            if (serverChange) {
+                setServer(actions, nav, c, host!!, port!!)
+                done += "server"
+            }
+            if (dnsText != null && dnsServers(dnsText) != state.settings.customDns) {
+                saveCustomDns(actions, nav, dnsText, "pa-Dns")
+                done += "dns"
+            }
+            done.forEach { session.saved(it) }
+            if (done.isNotEmpty()) session.tvLine = "Saved from your phone"
+            PhoneReply.done(if (done.isEmpty()) "Nothing changed." else "Saved on the TV.", clear = listOf("pw"))
+        }
+        "forget" -> {
+            actions.forgetPassword(c.id)
+            session.saved("signin")
+            nav.flash("sl-login")
+            PhoneReply.done("The saved password is forgotten.")
+        }
+        "fileserver" -> {
+            actions.resetServer(c.id)
+            session.saved("server")
+            nav.flash("pa-Server")
+            PhoneReply.done("It uses the file’s server again.")
+        }
+        "attach" -> {
+            val staged = nav.staged["profile-${c.id}"] ?: return PhoneReply.error("p12", "Send the certificate again.")
+            val outcome = attachCertificate(state, actions, nav, staged.bytes, v, c.id)
+            if (outcome is Outcome.Done) {
+                nav.staged.remove("profile-${c.id}")
+                session.tvLine = "Added the certificate"
+            }
+            outcome.toReply(clear = listOf("p12pass"))
+        }
+        else -> PhoneReply()
+    }
+}
+
 // ---- Advanced -------------------------------------------------------------------------
 
 @Composable
-private fun AdvancedColumn(state: VpnUiState, nav: Nav, req: Requesters, c: Connection, index: Int, mini: Boolean) {
+private fun AdvancedColumn(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, c: Connection, index: Int, mini: Boolean) {
     val server = state.serverOf(c)
     val info = state.infoOf(c)
     val opened = nav.stack.getOrNull(index)
@@ -612,12 +896,14 @@ private fun AdvancedColumn(state: VpnUiState, nav: Nav, req: Requesters, c: Conn
     val changed = server != null && info != null && (server.host != info.fileHost || server.port != info.filePort)
 
     @Composable
-    fun adv(kind: LeafKind, title: String, sub: String, value: String) {
+    fun adv(kind: LeafKind, title: String, sub: String, value: String?) {
         val key = "pa-${kind.name}"
         ListRow(
             title, { open(nav, index, Col.Leaf(c.id, kind), entryKey(Col.Leaf(c.id, kind), state)) },
             subtitle = sub, open = openKey == key, mini = mini, focusRequester = req[key],
-            trailing = { ValueChip(value, it) },
+            flash = nav.flashKey == key,
+            leading = if (value == null) ({ IconSquare(Ic.File, it) }) else null,
+            trailing = { if (value != null) ValueChip(value, it) else Chevron(it) },
         )
     }
 
@@ -631,18 +917,27 @@ private fun AdvancedColumn(state: VpnUiState, nav: Nav, req: Requesters, c: Conn
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             item {
-                adv(
-                    LeafKind.Server, "Server and port",
-                    if (changed) "Changed to ${server!!.host} ${server.port}" else "From the file: ${server?.host.orEmpty()} ${server?.port ?: ""}",
-                    if (changed) "Changed" else "From file",
+                // A file with <connection> blocks lists its own servers, and those are used as they are.
+                val blocks = info?.connectionBlocks == true
+                ListRow(
+                    "Server and port", {
+                        if (!stepBackTo(nav, index, "pa-Server")) nav.overlay = Overlay.Form(serverSpec(state, nav, actions, c))
+                    },
+                    subtitle = when {
+                        blocks -> "The file chooses its servers in <connection> blocks"
+                        changed -> "Changed to ${server!!.host}:${server.port}"
+                        else -> "From the file: ${server?.host.orEmpty()}:${server?.port ?: ""}"
+                    },
+                    enabled = !blocks,
+                    mini = mini, focusRequester = req["pa-Server"], flash = nav.flashKey == "pa-Server",
+                    trailing = { ValueChip(if (changed && !blocks) "Changed" else "From file", it) },
                 )
             }
             item { adv(LeafKind.Protocol, "Protocol", "Override the protocol in the file", protocolMode(state, c)) }
             item { adv(LeafKind.Order, "Server order", if ((info?.remotes ?: 1) > 1) "The file lists ${info!!.remotes} servers" else "When the file lists several servers", c.order) }
             item { adv(LeafKind.Kill, "Kill switch", "For this profile only", c.killMode) }
             item { adv(LeafKind.Dns, "DNS", "For this profile only", c.dnsMode) }
-            item { adv(LeafKind.File, "The .ovpn file", listOfNotNull(info?.tls, info?.cipher).joinToString(" · ").ifEmpty { "Read-only" }, "View") }
-            item { adv(LeafKind.Cert, "Client certificate", c.keyAlias?.let { "In the device’s keystore · ${Certificates.label(it)}" } ?: info?.cert?.validUntil ?: "Not in the file", "Details") }
+            item { adv(LeafKind.File, "The .ovpn file", listOfNotNull(info?.tls, info?.cipher).joinToString(" · ").ifEmpty { "Read-only" }, null) }
         }
     }
 }
@@ -655,31 +950,13 @@ private fun protocolMode(state: VpnUiState, c: Connection): String {
 
 // ---- One setting ------------------------------------------------------------------------
 
-private class Editor(val keys: List<String>, initial: Map<String, String>, first: String) {
-    val values = mutableStateMapOf<String, String>().apply { putAll(initial) }
-    var field by mutableStateOf(first)
-    var shift by mutableStateOf(false)
-    var show by mutableStateOf(false)
-
-    fun type(key: TvKey) {
-        val next = typeKey(values[field].orEmpty(), key, shift) ?: return
-        values[field] = next
-        if (key == TvKey.Shift) shift = !shift else if (key is TvKey.Ch && shift) shift = false
-    }
-}
-
-private val Labels = mapOf("name" to "Name", "host" to "Server", "port" to "Port", "user" to "Username", "pw" to "Password")
-
 private val LeafText = mapOf(
-    LeafKind.Name to ("Name" to "Shown on cards and on the Connect screen."),
     LeafKind.Look to ("Icon" to "Shown on its card on Connect and in your profile list."),
-    LeafKind.Password to ("Saved password" to "Kept in the device’s keystore, never in the .ovpn file."),
-    LeafKind.Cert to ("Client certificate" to "The certificate inside the .ovpn file that signs you in."),
-    LeafKind.Server to ("Server and port" to "Use another address than the one in the file."),
+    LeafKind.SignIn to ("Sign-in" to "How this profile proves who you are: a password, a certificate, or both."),
     LeafKind.Protocol to ("Protocol" to "Override the protocol in the file."),
     LeafKind.Order to ("Server order" to "When the file lists several servers, which one to try first."),
     LeafKind.Kill to ("Kill switch" to "For this profile only. App setting follows Settings › Protection."),
-    LeafKind.Dns to ("DNS" to "For this profile only."),
+    LeafKind.Dns to ("DNS" to "For this profile only. Custom uses the servers in Settings › DNS, which every profile set to Custom shares."),
     LeafKind.File to ("The .ovpn file" to "Read-only. Import the file again to change it."),
 )
 
@@ -697,12 +974,15 @@ private fun LeafColumn(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
     val path = if (parentIsAdvanced) "Profiles › ${c.name} › Advanced" else "Profiles › ${c.name}"
     var savedPulse by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
-    // After a save the chip says so, then the column steps back to where it came from.
+    // A choice applies at once, then the column steps back to the row, which says Saved.
     val saved: () -> Unit = {
         savedPulse++
         scope.launch {
             delay(520)
-            if (nav.stack.lastOrNull() == Col.Leaf(c.id, kind)) nav.pop()
+            if (nav.stack.lastOrNull() == Col.Leaf(c.id, kind)) {
+                nav.pop()
+                nav.flash(rowKeyOpening(Col.Leaf(c.id, kind), nav.stack.lastOrNull()))
+            }
         }
     }
 
@@ -713,10 +993,9 @@ private fun LeafColumn(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
         }
         Box(Modifier.padding(start = 26.dp, end = 26.dp, top = 6.dp, bottom = 20.dp)) {
             when (kind) {
-                LeafKind.Name, LeafKind.Password, LeafKind.Server -> EditorBody(state, nav, actions, req, c, kind, saved)
                 LeafKind.Protocol, LeafKind.Order, LeafKind.Kill, LeafKind.Dns -> OptionsBody(state, nav, actions, req, c, kind, saved)
                 LeafKind.File -> FileBody(state, nav, actions, req, c)
-                LeafKind.Cert -> CertBody(state, nav, actions, req, c)
+                LeafKind.SignIn -> SignInBody(state, nav, actions, req, c)
                 LeafKind.Look -> LookBody(state, nav, actions, req, c) { savedPulse++ }
             }
         }
@@ -733,159 +1012,7 @@ private fun SavedChip(pulse: Int, modifier: Modifier) {
             visible = false
         }
     }
-    AnimatedVisibility(visible, modifier = modifier, enter = fadeIn(tween(200)) + scaleIn(tween(320), initialScale = 0.7f), exit = fadeOut(tween(200)) + scaleOut(tween(200), targetScale = 0.7f)) {
-        Row(
-            modifier = Modifier
-                .clip(CircleShape)
-                .background(Tv.Mint.copy(alpha = 0.16f))
-                .padding(horizontal = 14.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            TvIcon(Ic.Check, 16f, Tv.Mint, stroke = 3f)
-            Text("Saved", style = TvType.ui(14f, FontWeight.ExtraBold, Tv.Mint))
-        }
-    }
-}
-
-@Composable
-private fun EditorBody(
-    state: VpnUiState,
-    nav: Nav,
-    actions: TunnelActions,
-    req: Requesters,
-    c: Connection,
-    kind: LeafKind,
-    saved: () -> Unit,
-) {
-    val server = state.serverOf(c)
-    val info = state.infoOf(c)
-    val login = state.logins[c.id]
-    val editor = remember(c.id, kind) {
-        when (kind) {
-            LeafKind.Name -> Editor(listOf("name"), mapOf("name" to c.name), "name")
-            LeafKind.Server -> Editor(listOf("host", "port"), mapOf("host" to server?.host.orEmpty(), "port" to (server?.port?.toString() ?: "")), "host")
-            else -> Editor(listOf("user", "pw"), mapOf("user" to login?.username.orEmpty(), "pw" to ""), if (login?.username.isNullOrEmpty()) "user" else "pw")
-        }
-    }
-    val changed = server != null && info != null && (server.host != info.fileHost || server.port != info.filePort)
-    val save: () -> Unit = {
-        when (kind) {
-            LeafKind.Name -> {
-                val name = editor.values["name"].orEmpty().trim()
-                if (name.isEmpty()) nav.toast("A profile needs a name") else {
-                    actions.rename(c.id, name)
-                    saved()
-                }
-            }
-            LeafKind.Server -> {
-                val host = editor.values["host"].orEmpty().trim()
-                val port = editor.values["port"].orEmpty().trim().toIntOrNull()
-                when {
-                    host.isEmpty() || host.any { it.isWhitespace() } -> nav.toast("Type the server's address")
-                    port == null || port !in 1..65535 -> nav.toast("The port must be a number from 1 to 65535")
-                    else -> {
-                        actions.setServer(c.id, host, port)
-                        saved()
-                    }
-                }
-            }
-            else -> {
-                val pw = editor.values["pw"].orEmpty()
-                if (pw.isEmpty()) {
-                    editor.field = "pw"
-                    nav.toast("Type the password first")
-                } else {
-                    actions.saveLogin(c.id, editor.values["user"].orEmpty(), pw)
-                    saved()
-                }
-            }
-        }
-    }
-    TypeInto(nav, { editor.type(TvKey.Del) }, onEnter = { req["ed-save"].takeFocus() }) { ch -> editor.values[editor.field] = (editor.values[editor.field].orEmpty() + ch).take(256) }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            editor.keys.forEach { key ->
-                InputBox(
-                    label = Labels.getValue(key),
-                    value = editor.values[key].orEmpty(),
-                    editing = editor.field == key,
-                    onClick = { editor.field = key },
-                    secret = key == "pw",
-                    showSecret = editor.show,
-                    mono = key == "port",
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-        Keyboard(
-            shift = editor.shift,
-            onKey = { k -> if (k == TvKey.Done) req["ed-save"].tryFocus() else editor.type(k) },
-            compact = true,
-            entry = req["ed-key"],
-        )
-        var confirmForget by remember { mutableStateOf(false) }
-        if (confirmForget) {
-            ConfirmBar(
-                "Forget the saved password for ${c.name}? It is asked for at the next connect.", "Forget", req["ed-forget-no"],
-                onConfirm = {
-                    confirmForget = false
-                    actions.forgetPassword(c.id)
-                    nav.toast("Saved password forgotten")
-                    saved()
-                },
-                onKeep = {
-                    confirmForget = false
-                    nav.refocus(req["ed-save"])
-                },
-            )
-        } else Row(
-            // Coming down from the keyboard lands on Save, wherever the key above it was.
-            modifier = Modifier.padding(top = 2.dp).enterAt { req["ed-save"] },
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TvButton("Save", save, icon = Ic.Check, focusRequester = req["ed-save"])
-            TvButton("Cancel", { nav.pop() }, glass = true)
-            if (kind == LeafKind.Password) {
-                TvButton(if (editor.show) "Hide" else "Show", { editor.show = !editor.show }, icon = Ic.Eye, small = true, glass = true)
-                if (login?.hasPassword == true) {
-                    TvButton("Forget", { confirmForget = true }, small = true, glass = true, danger = true)
-                }
-            }
-            if (kind == LeafKind.Server && changed) {
-                TvButton("Use the file’s server", {
-                    actions.resetServer(c.id)
-                    saved()
-                }, small = true, glass = true)
-            }
-            // .ed-phone: the same field, typed on a phone.
-            val page = remember(editor.field) {
-                dev.shieldvpn.phone.PhoneBridge.Page.Type(
-                    LeafText[kind]?.first ?: APP_NAME, "Type it here, then press Send. It goes into the field selected on the TV.",
-                    Labels.getValue(editor.field), secret = editor.field == "pw",
-                )
-            }
-            val bridge = rememberPhoneBridge(kind, page) { got ->
-                editor.values[editor.field] = String(got.bytes).trim().take(256)
-                null
-            }
-            Spacer(Modifier.weight(1f))
-            if (bridge != null) {
-                // Two short lines, so the address and code fit beside four buttons.
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TvIcon(Ic.Phone, 18f, Tv.soft(0.6f))
-                    Column {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Or on your phone, code", style = TvType.ui(13f, color = Tv.soft(0.6f)), maxLines = 1)
-                            Text(bridge.code.chunked(3).joinToString("\u00A0"), style = TvType.mono(13f, color = Color.White), maxLines = 1)
-                        }
-                        Text("http://${bridge.address}", style = TvType.mono(13f, color = Color.White), maxLines = 1)
-                    }
-                }
-            }
-        }
-    }
+    SavedPill(visible, modifier)
 }
 
 @Composable
@@ -904,14 +1031,7 @@ private fun OptionsBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 {
                     // Custom uses the servers in Settings › DNS; without any, they are asked for first.
                     if (kind == LeafKind.Dns && value == "Custom" && state.settings.customDns.isEmpty()) {
-                        nav.overlay = Overlay.Text(TextKind.CustomDns, "", check = ::dnsProblem) { text ->
-                            val servers = dnsServers(text)
-                            if (servers.isNotEmpty()) {
-                                actions.changeSettings { it.copy(customDns = servers) }
-                                actions.setDnsMode(c.id, value)
-                                saved()
-                            }
-                        }
+                        nav.overlay = Overlay.Form(customDnsSpec(state, nav, actions, c))
                         return@ListRow
                     }
                     when (kind) {
@@ -930,8 +1050,6 @@ private fun OptionsBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 },
             )
         }
-        Spacer(Modifier.size(8.dp))
-        TvButton("Back", { nav.pop() }, icon = Ic.Back, glass = true)
     }
 }
 
@@ -941,58 +1059,129 @@ private fun FileBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: R
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         RawConfig(text, maxHeight = 270f)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TvButton("Back", { nav.pop() }, icon = Ic.Back, glass = true, focusRequester = req["ed-done"])
-            TvButton("Send to phone", { nav.overlay = Overlay.Phone(PhoneKind.Profile(c.id)) }, icon = Ic.Phone, glass = true)
+            TvButton("Close", { nav.pop() }, focusRequester = req["ed-done"])
+            TvButton("Send to phone", {
+                nav.overlay = profilePhone(
+                    c, "Send ${c.name} to your phone",
+                    "Scan the code and press Download. ${keyNote(state, c)}",
+                    section = "download",
+                )
+            }, icon = Ic.Phone, glass = true)
         }
     }
 }
 
+/** Sign-in: the saved username and password, and the certificate, in one place. */
 @Composable
-private fun CertBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, c: Connection) {
-    val cert = state.infoOf(c)?.cert
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        if (c.keyAlias != null) {
-            DetailGrid(
-                listOf(
-                    "Certificate" to Certificates.label(c.keyAlias),
-                    "Stored" to "In this device’s keystore. The key can’t be copied off it",
-                ),
-                columns = 1,
-            )
-        } else if (cert == null) {
-            Text(
-                "There is no client certificate in this file. The username and password sign you in.",
-                style = TvType.ui(17f, color = Tv.soft(0.7f)),
-            )
-        } else {
-            DetailGrid(
-                listOf(
-                    "Subject" to cert.subject,
-                    "Issued by" to cert.issuer,
-                    "Valid" to cert.validUntil,
-                    "Key" to cert.key,
-                    "Fingerprint (SHA-256)" to cert.fingerprint,
-                    "Stored" to "Inside the .ovpn file",
-                ),
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TvButton("Back", { nav.pop() }, icon = Ic.Back, glass = true, focusRequester = req["ed-done"])
-            TvButton(if (c.keyAlias == null) "Use one installed on this device" else "Choose another", {
-                actions.chooseKeyAlias { alias ->
-                    if (alias != null) {
-                        actions.setKeyAlias(c.id, alias)
-                        nav.toast("${c.name} now uses ${Certificates.label(alias)}")
+private fun SignInBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, c: Connection) {
+    val info = state.infoOf(c)
+    val cert = info?.cert
+    val login = state.logins[c.id]
+    val needsLogin = info?.needsLogin != false
+    val saved = login != null && login.hasPassword && login.username.isNotEmpty()
+    var confirmForget by remember(c.id) { mutableStateOf(false) }
+    val list = rememberLazyListState()
+    LazyColumn(state = list, modifier = Modifier.heightIn(max = 420.dp).bleed(12.dp).scrollFade(list), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (needsLogin) {
+            item { SectionLabel("Password") }
+            item {
+                ListRow(
+                    "Username and password", { nav.overlay = Overlay.Form(loginSpec(state, nav, actions, c)) },
+                    subtitle = if (saved) "Saved for ${login!!.username}" else "Nothing saved. ${APP_NAME} asks each time",
+                    focusRequester = req["sl-login"], flash = nav.flashKey == "sl-login",
+                    trailing = { ValueChip(if (saved) "Saved" else "Not saved", it) },
+                )
+            }
+            if (saved) {
+                item {
+                    if (confirmForget) {
+                        ConfirmBar(
+                            "Forget the saved password for ${c.name}? It is asked for at the next connect.", "Forget", req["sl-forget-no"],
+                            onConfirm = {
+                                confirmForget = false
+                                actions.forgetPassword(c.id)
+                                nav.refocus(req["sl-login"])
+                                nav.flash("sl-login")
+                            },
+                            onKeep = {
+                                confirmForget = false
+                                nav.refocus(req["sl-forget"])
+                            },
+                        )
                     } else {
-                        nav.toast(NO_CERT_PICKED)
+                        ListRow(
+                            "Forget the saved password", { confirmForget = true },
+                            subtitle = "It is asked for at the next connect", danger = true,
+                            focusRequester = req["sl-forget"],
+                            leading = { IconSquare(Ic.Trash, it) },
+                            trailing = { Chevron(it) },
+                        )
                     }
                 }
-            }, icon = Ic.Lock, glass = true)
-            if (c.keyAlias != null) {
-                TvButton(if (cert != null) "Use the file’s certificate" else "Stop using it", {
-                    actions.setKeyAlias(c.id, null)
-                    nav.toast(if (cert != null) "${c.name} uses the certificate in its file" else "${c.name} no longer uses ${Certificates.label(c.keyAlias)}")
-                }, glass = true)
+            }
+        }
+        item { SectionLabel("Certificate") }
+        item {
+            Box(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+                when {
+                    c.keyAlias != null -> DetailGrid(listOf("Certificate" to Certificates.label(c.keyAlias), "Stored" to "In this device’s keystore. The key can’t be copied off it"), columns = 1)
+                    cert == null -> Text(
+                        if (needsLogin) "There is no client certificate in this file. The username and password sign you in." else "There is no client certificate in this file, and no password either.",
+                        style = TvType.ui(16f, color = Tv.soft(0.7f)),
+                    )
+                    else -> DetailGrid(
+                        listOf(
+                            "Subject" to cert.subject,
+                            "Issued by" to cert.issuer,
+                            "Valid" to cert.validUntil,
+                            "Key" to cert.key,
+                            "Fingerprint (SHA-256)" to cert.fingerprint,
+                            "Stored" to "Inside the .ovpn file",
+                        ),
+                    )
+                }
+            }
+        }
+        item {
+            ListRow(
+                "Add a .p12 from your phone", {
+                    nav.overlay = profilePhone(c, "Add a certificate from your phone", "Scan the code, pick the .p12 or .pfx file and type its password there. Its certificate and key replace the profile’s.", section = "cert")
+                },
+                subtitle = if (state.infoOf(c)?.clientCert == true) "Its certificate and key replace the ones in the file" else "Its certificate and key go into the file",
+                focusRequester = if (needsLogin) req["sl-p12"] else req["sl-login"],
+                leading = { IconSquare(Ic.Phone, it) },
+                trailing = { Chevron(it) },
+            )
+        }
+        item {
+            ListRow(
+                if (c.keyAlias == null) "Use one installed on this device" else "Choose another on this device", {
+                    actions.chooseKeyAlias { alias ->
+                        if (alias != null) {
+                            actions.setKeyAlias(c.id, alias)
+                            nav.flash("sl-keystore")
+                        } else {
+                            nav.toast(NO_CERT_PICKED)
+                        }
+                    }
+                },
+                subtitle = "A certificate in Android’s keystore, instead of the file’s",
+                flash = nav.flashKey == "sl-keystore",
+                leading = { IconSquare(Ic.Lock, it) },
+                trailing = { Chevron(it) },
+            )
+        }
+        if (c.keyAlias != null) {
+            item {
+                ListRow(
+                    if (cert != null) "Use the file’s certificate" else "Stop using ${Certificates.label(c.keyAlias)}", {
+                        actions.setKeyAlias(c.id, null)
+                        nav.refocus(req["sl-p12"])
+                    },
+                    subtitle = if (cert != null) "The one inside the .ovpn file signs in again" else "Then nothing but the file signs in",
+                    leading = { IconSquare(Ic.Cert, it) },
+                    trailing = { Chevron(it) },
+                )
             }
         }
     }
@@ -1118,14 +1307,18 @@ fun DetailGrid(rows: List<Pair<String, String>>, columns: Int = 2) {
 
 /** .raw: the config text with options in blue, block tags in amber and key material dimmed. Up and down scroll it. */
 @Composable
-fun RawConfig(text: String, maxHeight: Float, plain: Boolean = false) {
+fun RawConfig(text: String, maxHeight: Float, plain: Boolean = false, focusWhenLong: FocusRequester? = null) {
     val scroll = rememberScrollState()
     val scope = rememberCoroutineScope()
     val f = rememberFocusState()
     val styled = remember(text, plain) { if (plain) AnnotatedString(text) else highlight(text) }
+    // Text longer than the box takes focus first, so Down scrolls it and, at the end, goes on to the buttons.
+    val long = scroll.maxValue > 0
+    LaunchedEffect(long) { if (long) focusWhenLong?.focusWhenReady() }
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (focusWhenLong != null) Modifier.focusRequester(focusWhenLong) else Modifier)
             .heightIn(max = maxHeight.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(Color.Black.copy(alpha = 0.35f))
@@ -1178,3 +1371,8 @@ private fun highlight(text: String): AnnotatedString = buildAnnotatedString {
         }
     }
 }
+
+/** What a downloaded .ovpn carries, said where it is offered. */
+private fun keyNote(state: VpnUiState, c: Connection): String =
+    if (state.infoOf(c)?.clientCert == true) "The file holds the profile’s private key, so keep it safe; the saved password is not in it."
+    else "The saved password is not in the file."
