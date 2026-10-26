@@ -9,12 +9,13 @@ import dev.shieldvpn.APP_NAME
  */
 object PhonePage {
 
-    fun html(page: PhoneBridge.Page, code: String): String {
+    /** The page; [codeOk] when the link's code is the TV's, so the file's name and size may show. */
+    fun html(page: PhoneBridge.Page, code: String, codeOk: Boolean = false): String {
         val given = code.filter { it.isDigit() }.take(6)
         val body = when (page) {
             is PhoneBridge.Page.Upload -> upload(page.accept, page.paste, page.login)
             is PhoneBridge.Page.Type -> typed(page.label, page.secret)
-            is PhoneBridge.Page.Download -> download(page.fileName, page.body.size)
+            is PhoneBridge.Page.Download -> download(page.fileName, page.body.size, codeOk)
         }
         return """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -73,9 +74,9 @@ $SCRIPT
     <div id="step2" hidden>
       <div class="file chosen"><span class="icon">${doc("#4BE3A1")}</span><span class="txt"><b id="step2Name"></b><small id="step2Sub"></small></span><button id="back" class="link" type="button">Change</button></div>
       <label class="lbl" for="user">Username</label>
-      <div class="fieldrow"><input id="user" class="field" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="username"></div>
+      <div class="fieldrow"><input id="user" class="field" type="text" maxlength="256" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off"></div>
       <label class="lbl" for="pass">Password</label>
-      <div class="fieldrow"><input id="pass" class="field" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="current-password"><button id="eye2" class="eye" type="button" aria-label="Show">$EYE</button></div>
+      <div class="fieldrow"><input id="pass" class="field" type="password" maxlength="256" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off"><button id="eye2" class="eye" type="button" aria-label="Show">$EYE</button></div>
       <p class="hint">Saved with the profile on the TV, encrypted. Leave them empty to type them on the TV when you connect.</p>
     </div>"""
         } else {
@@ -95,9 +96,11 @@ $SCRIPT
     <button id="go" class="btn" type="button" disabled>Send to the TV$ARROW</button>"""
     }
 
-    private fun download(name: String, size: Int): String =
-        """<div class="file"><span class="icon">${doc("#4BE3A1")}</span><span><b>${esc(name)}</b><small>${size(size)}</small></span></div>
-    <a id="dl" class="btn" href="#">Download$DOWN</a>"""
+    private fun download(name: String, size: Int, codeOk: Boolean): String {
+        val (title, sub) = if (codeOk) name to size(size) else "The file" to "Its name shows once the code is right"
+        return """<div class="file"><span class="icon">${doc("#4BE3A1")}</span><span><b>${esc(title)}</b><small>${esc(sub)}</small></span></div>
+    <a id="dl" class="btn" href="#" data-name="${esc(name)}">Download$DOWN</a>"""
+    }
 
     /** "the .ovpn, .conf or backup file", from an input's accept list. */
     private fun kinds(accept: String): String {
@@ -281,9 +284,14 @@ if (go) go.onclick = async () => {
   if (needsLogin && step2 && !onStep2()) return showStep(true);
   const f = mode === 'file' && file.files[0];
   const headers = { 'X-Code': code(), 'X-Name': encodeURIComponent(f ? f.name : 'pasted.ovpn') };
-  if (onStep2() && ${'$'}('user').value.trim()) {
-    headers['X-User'] = encodeURIComponent(${'$'}('user').value.trim());
-    headers['X-Pass'] = encodeURIComponent(${'$'}('pass').value);
+  if (onStep2()) {
+    const u = ${'$'}('user').value.trim(), pw = ${'$'}('pass').value;
+    // Both or neither: a username alone would be saved as a login that can't connect.
+    if ((u === '') !== (pw === '')) return status('bad', 'Type both the username and the password, or leave both empty.');
+    if (u) {
+      headers['X-User'] = encodeURIComponent(u);
+      headers['X-Pass'] = encodeURIComponent(pw);
+    }
   }
   go.disabled = true;
   status('busy', 'Sending…');
@@ -292,16 +300,31 @@ if (go) go.onclick = async () => {
     status(r.ok ? 'ok' : 'bad', await r.text());
     if (r.ok && step2) ${'$'}('pass').value = '';
   } catch (e) {
-    status('bad', 'The TV did not answer. Is its screen still open?');
+    status('bad', 'Can’t reach the TV. Your phone must be on the same Wi-Fi as the TV, with mobile data and any VPN off.');
   }
   update();
 };
+// The file is fetched in the background and saved from here, so the page stays and can say what happened.
 const dl = ${'$'}('dl');
-if (dl) dl.onclick = (e) => {
+if (dl) dl.onclick = async (e) => {
   e.preventDefault();
   if (code().length !== 6) return status('bad', 'Type the code on the TV first.');
-  location.href = '/file?c=' + code();
-  status('ok', 'Downloading. Look in your Downloads.');
+  status('busy', 'Downloading…');
+  try {
+    const r = await fetch('/file?c=' + code(), { cache: 'no-store' });
+    if (!r.ok) return status('bad', await r.text());
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = dl.dataset.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    status('ok', 'Downloaded. Look in Files › Downloads on your phone.');
+  } catch (err) {
+    status('bad', 'Can’t reach the TV. Your phone must be on the same Wi-Fi as the TV, with mobile data and any VPN off.');
+  }
 };
 update();
 """

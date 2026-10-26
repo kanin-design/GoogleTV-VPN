@@ -13,15 +13,16 @@ import java.net.Socket
 import java.net.SocketException
 import java.net.URLDecoder
 import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * A small web server on the TV for moving things between the TV and a phone: the phone
  * scans a QR code, opens a page, and sends a file or text, or downloads one.
  *
  * It runs only while a screen that needs it is open, answers only on the home network, and
- * every request needs the six-digit code shown on the TV. Five wrong codes end the session.
+ * every request needs the six-digit code shown on the TV. A phone that types five wrong codes
+ * waits a minute before it can try again; other phones are not affected.
  */
 class PhoneBridge private constructor(
     private val server: ServerSocket,
@@ -29,6 +30,7 @@ class PhoneBridge private constructor(
     val address: String,
     page: Page,
     private val onReceive: (Received) -> String?,
+    private val onDownloaded: () -> Unit,
 ) {
     /** What the page shows. It can change during a session, for example to the next field. */
     @Volatile var page: Page = page
@@ -57,9 +59,14 @@ class PhoneBridge private constructor(
     /** The address to open on the phone, with the code in it. */
     val url: String get() = "http://$address/?c=$code"
 
-    private val pool = Executors.newFixedThreadPool(3)
-    private val wrong = AtomicInteger(0)
+    // Browsers open spare connections and send nothing on them; enough threads, and a short wait
+    // for the first line, keep those from holding up the request that matters.
+    private val pool = Executors.newFixedThreadPool(8)
+    private val wrong = ConcurrentHashMap<String, Tries>()
     @Volatile private var open = true
+
+    /** Wrong codes from one phone, and until when it must wait. */
+    private class Tries(var count: Int = 0, var until: Long = 0L)
 
     private fun serve() {
         Thread({
@@ -81,7 +88,8 @@ class PhoneBridge private constructor(
     }
 
     private fun handle(socket: Socket) = socket.use { s ->
-        s.soTimeout = 15_000
+        s.soTimeout = 3_000
+        val from = s.inetAddress?.hostAddress.orEmpty()
         val input = BufferedInputStream(s.getInputStream())
         val out = s.getOutputStream()
         val requestLine = readLine(input) ?: return
@@ -92,6 +100,7 @@ class PhoneBridge private constructor(
             val i = line.indexOf(':')
             if (i > 0) headers[line.substring(0, i).trim().lowercase()] = line.substring(i + 1).trim()
         }
+        s.soTimeout = 15_000
         val parts = requestLine.split(' ')
         if (parts.size < 2) return
         val method = parts[0]
@@ -100,18 +109,31 @@ class PhoneBridge private constructor(
         val query = parseQuery(target.substringAfter('?', ""))
 
         val page = page
+        val head = method == "HEAD"
         when {
-            method == "GET" && path == "/" -> send(out, 200, "text/html; charset=utf-8", PhonePage.html(page, query["c"].orEmpty()).toByteArray())
-            method == "GET" && path == "/file" -> {
-                val p = page as? Page.Download ?: return send(out, 404, "text/plain", "Nothing to download".toByteArray())
-                if (!checkCode(query["c"])) return send(out, 403, "text/plain", "Wrong code. Look at the TV and try again.".toByteArray())
-                send(out, 200, p.mime, p.body, "Content-Disposition" to "attachment; filename=\"${p.fileName}\"")
+            (method == "GET" || head) && path == "/" -> {
+                // The file's name and size only for someone with the code.
+                val given = query["c"].orEmpty()
+                send(out, 200, "text/html; charset=utf-8", PhonePage.html(page, given, given.filter { it.isDigit() } == code).toByteArray(), head = head)
+            }
+            (method == "GET" || head) && path == "/file" -> {
+                val p = page as? Page.Download ?: return send(out, 404, "text/plain", "Nothing to download here.".toByteArray(), head = head)
+                tooMany(from)?.let { return send(out, 429, "text/plain", it.toByteArray(), head = head) }
+                if (!checkCode(query["c"], from)) return send(out, 403, "text/plain", "Wrong code. Look at the TV and try again.".toByteArray(), head = head)
+                send(out, 200, p.mime, p.body, "Content-Disposition" to disposition(p.fileName), head = head)
+                if (!head) onDownloaded()
             }
             method == "POST" && path == "/send" -> {
-                if (page is Page.Download) return send(out, 404, "text/plain", "This page only downloads".toByteArray())
-                if (!checkCode(headers["x-code"])) return send(out, 403, "text/plain", "Wrong code. Look at the TV and try again.".toByteArray())
                 val length = headers["content-length"]?.toIntOrNull() ?: return send(out, 411, "text/plain", "Length required".toByteArray())
-                if (length > MAX_BODY) return send(out, 413, "text/plain", "That file is too large for a profile.".toByteArray())
+                // A phone still sending sees a reset instead of the answer if the body is left unread.
+                val refuse = { status: Int, why: String ->
+                    if (length <= MAX_DRAIN) drain(input, length)
+                    send(out, status, "text/plain", why.toByteArray())
+                }
+                if (page is Page.Download) return refuse(404, "This page only downloads.")
+                tooMany(from)?.let { return refuse(429, it) }
+                if (!checkCode(headers["x-code"], from)) return refuse(403, "Wrong code. Look at the TV and try again.")
+                if (length > MAX_BODY) return refuse(413, "That file is too large. A profile or backup is much smaller.")
                 val body = readExactly(input, length) ?: return
                 val name = URLDecoder.decode(headers["x-name"].orEmpty(), "UTF-8").take(120)
                 val username = URLDecoder.decode(headers["x-user"].orEmpty(), "UTF-8").take(256)
@@ -124,22 +146,43 @@ class PhoneBridge private constructor(
         }
     }
 
-    private fun checkCode(given: String?): Boolean {
-        if (given?.filter { it.isDigit() } == code) return true
-        if (wrong.incrementAndGet() >= 5) stop()
+    private fun checkCode(given: String?, from: String): Boolean {
+        val tries = wrong.getOrPut(from) { Tries() }
+        if (given?.filter { it.isDigit() } == code) {
+            tries.count = 0
+            return true
+        }
+        if (++tries.count >= 5) {
+            tries.count = 0
+            tries.until = System.currentTimeMillis() + 60_000
+        }
         return false
     }
 
-    private fun send(out: OutputStream, status: Int, type: String, body: ByteArray, vararg extra: Pair<String, String>) {
+    /** Why this phone has to wait, after too many wrong codes, or null. */
+    private fun tooMany(from: String): String? {
+        val until = wrong[from]?.until ?: return null
+        return if (System.currentTimeMillis() < until) "Too many wrong codes. Wait a minute, then try again with the code on the TV." else null
+    }
+
+    /** The download's name, kept with its letters for phones that read it, and plain for those that don't. */
+    private fun disposition(name: String): String {
+        val plain = name.map { if (it.code in 32..126 && it != '"' && it != '\\') it else '_' }.joinToString("")
+        val encoded = java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+        return "attachment; filename=\"$plain\"; filename*=UTF-8''$encoded"
+    }
+
+    private fun send(out: OutputStream, status: Int, type: String, body: ByteArray, vararg extra: Pair<String, String>, head: Boolean = false) {
         val reason = when (status) {
             200 -> "OK"
             403 -> "Forbidden"
             404 -> "Not Found"
             411 -> "Length Required"
             413 -> "Payload Too Large"
+            429 -> "Too Many Requests"
             else -> "Unprocessable"
         }
-        val head = buildString {
+        val header = buildString {
             append("HTTP/1.1 $status $reason\r\n")
             append("Content-Type: $type\r\n")
             append("Content-Length: ${body.size}\r\n")
@@ -148,8 +191,8 @@ class PhoneBridge private constructor(
             extra.forEach { (k, v) -> append("$k: $v\r\n") }
             append("\r\n")
         }
-        out.write(head.toByteArray())
-        out.write(body)
+        out.write(header.toByteArray())
+        if (!head) out.write(body)
         out.flush()
     }
 
@@ -157,18 +200,22 @@ class PhoneBridge private constructor(
         private const val TAG = "PhoneBridge"
         private const val MAX_BODY = 512 * 1024
 
+        /** Up to this much of a refused upload is read and dropped, so the phone gets the answer. */
+        private const val MAX_DRAIN = 8 * 1024 * 1024
+
         /**
          * Starts a session showing [page]. [onReceive] gets what the phone sends and returns
-         * null when it was accepted, or what is wrong. Returns null without a home network.
+         * null when it was accepted, or what is wrong; [onDownloaded] runs when a phone has
+         * downloaded the page's file. Returns null without a home network.
          */
-        fun start(page: Page, onReceive: (Received) -> String? = { null }): PhoneBridge? {
+        fun start(page: Page, onDownloaded: () -> Unit = {}, onReceive: (Received) -> String? = { null }): PhoneBridge? {
             val ip = lanAddress() ?: return null
             // Only on the home network's address: not on the VPN tunnel, where the VPN's side could reach it.
             val server = listOf(8080, 8081, 8090, 0).firstNotNullOfOrNull { port ->
                 runCatching { ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(ip, port)) } }.getOrNull()
             } ?: return null
             val code = (SecureRandom().nextInt(900_000) + 100_000).toString()
-            return PhoneBridge(server, code, "$ip:${server.localPort}", page, onReceive).also { it.serve() }
+            return PhoneBridge(server, code, "$ip:${server.localPort}", page, onReceive, onDownloaded).also { it.serve() }
         }
 
         /** The TV's address on the home network: Wi-Fi or Ethernet, never the tunnel. */
@@ -194,6 +241,16 @@ class PhoneBridge private constructor(
                 if (b == '\n'.code) return buf.toString("UTF-8").trimEnd('\r')
                 if (buf.size() > 8192) return null
                 buf.write(b)
+            }
+        }
+
+        private fun drain(input: InputStream, length: Int) {
+            val buf = ByteArray(16 * 1024)
+            var left = length
+            while (left > 0) {
+                val n = runCatching { input.read(buf, 0, minOf(buf.size, left)) }.getOrDefault(-1)
+                if (n < 0) return
+                left -= n
             }
         }
 

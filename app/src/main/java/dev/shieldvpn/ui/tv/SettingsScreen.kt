@@ -6,6 +6,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,8 +29,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -36,12 +41,19 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +67,7 @@ import dev.shieldvpn.vpn.VpnStatus
 import dev.shieldvpn.vpn.VpnUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class Category(val label: String, val icon: Ic, val advanced: Boolean = false) {
@@ -75,6 +88,12 @@ sealed interface Pick {
 
     /** One of [Values], by key. */
     data class Value(val key: String) : Pick
+
+    /** The row that opens this choice, where focus goes back to when it closes. */
+    val rowKey: String get() = when (this) {
+        Startup -> "s-sprof"
+        is Value -> "s-$key"
+    }
 }
 
 private val PickEase = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
@@ -95,7 +114,7 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions) {
     }
     LaunchedEffect(nav.contentFocus) {
         if (nav.contentFocus == Screen.Settings) {
-            val key = when {
+            val key = nav.settingsReturn?.also { nav.settingsReturn = null } ?: when {
                 nav.pick != null -> "pk-sel"
                 nav.showLog -> "s-log-back"
                 nav.showTest -> "s-test-back"
@@ -207,8 +226,8 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions) {
             ) {
                 Column(Modifier.fillMaxSize().padding(start = 28.dp, end = 28.dp, top = 28.dp, bottom = 18.dp)) {
                     when (val pick = nav.pick) {
-                        Pick.Startup -> StartupPick(state, nav, actions, req) { closePick("s-sprof") }
-                        is Pick.Value -> ValuePick(state, nav, actions, req, pick.key) { closePick("s-${pick.key}") }
+                        Pick.Startup -> StartupPick(state, nav, actions, req) { closePick(pick.rowKey) }
+                        is Pick.Value -> ValuePick(state, nav, actions, req, pick.key) { closePick(pick.rowKey) }
                         null -> Unit
                     }
                 }
@@ -367,7 +386,7 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
         Category.OpenVpn -> "OpenVPN" to "Applied on top of every profile. A setting inside the .ovpn file wins unless noted."
         Category.Dns -> "DNS" to "Where name lookups go while the tunnel is up."
         Category.Automation -> "Automation" to "For home automation apps and ADB. Off until you turn it on."
-        Category.About -> "About" to "The version, updates, and what ${APP_NAME} keeps and sends."
+        Category.About -> "About" to "${APP_NAME} ${actions.versionName} · build ${BuildConfig.VERSION_CODE} · OpenVPN 3 core."
     }
     PanelHeading(null, title, sub)
     val scope = PanelScope(state, nav, actions, req)
@@ -480,13 +499,6 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                         }
                     }
                 }
-                if (s.advanced) {
-                    item { SectionLabel("Advanced") }
-                    toggle(scope, "s-subnets", "Let local subnets bypass the tunnel", "192.168.0.0/16, 172.16.0.0/12 and 10.0.0.0/8 stay on your network", s.allowLan) {
-                        actions.changeSettings { it.copy(allowLan = !it.allowLan) }
-                        scope.appliesNext()
-                    }
-                }
             }
             Category.Diagnostics -> {
                 action(scope, "s-log", Ic.Log, "Connection log", "${state.log.size} lines from this session") { nav.showLog = true }
@@ -506,12 +518,8 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
             }
             Category.Backup -> {
                 action(scope, "s-bk", Ic.Archive, "Back up to your phone", "An encrypted file with every profile and setting") {
-                    if (state.hasBackupPassphrase) {
-                        nav.overlay = Overlay.Phone(PhoneKind.Backup)
-                    } else {
-                        nav.toast("Choose a backup passphrase first")
-                        nav.overlay = Overlay.Passphrase(restore = false)
-                    }
+                    // Without a passphrase, it is chosen first and the backup follows straight on.
+                    nav.overlay = if (state.hasBackupPassphrase) Overlay.Phone(PhoneKind.Backup) else Overlay.Passphrase(restore = false, thenBackup = true)
                 }
                 action(scope, "s-rs", Ic.Phone, "Restore from a backup", "Opens Import › Restore a backup") {
                     nav.importMethod = ImportMethod.Restore
@@ -541,15 +549,9 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                     scope.appliesNext()
                 }
                 value(scope, "s-dnscustom", "Custom DNS servers", "Used instead of the pushed ones", s.customDns.joinToString(", ").ifEmpty { "None" }) {
-                    nav.overlay = Overlay.Text(TextKind.CustomDns, s.customDns.joinToString(" ")) { text ->
-                        val servers = text.split(' ', ',').map { it.trim() }.filter { it.isNotEmpty() }
-                        val bad = servers.filterNot(::isIpAddress)
-                        if (bad.isNotEmpty()) {
-                            nav.toast("${bad.first()} is not an IP address")
-                        } else {
-                            actions.changeSettings { it.copy(customDns = servers) }
-                            scope.appliesNext()
-                        }
+                    nav.overlay = Overlay.Text(TextKind.CustomDns, s.customDns.joinToString(" "), check = ::dnsProblem) { text ->
+                        actions.changeSettings { it.copy(customDns = dnsServers(text)) }
+                        scope.appliesNext()
                     }
                 }
                 value(scope, "s-dnssearch", "Search domains", "Short names like nas resolve as nas.home.lan", s.searchDomains.joinToString(", ").ifEmpty { "None" }) {
@@ -568,7 +570,6 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                 }
             }
             Category.About -> {
-                value(scope, "s-ver", "Version", "${APP_NAME} and its OpenVPN core", "${actions.versionName} · build ${BuildConfig.VERSION_CODE} · OpenVPN 3") {}
                 val update = state.update
                 val (updateSub, updateValue) = when (update) {
                     UpdateState.Idle -> "Look on GitHub for a newer build" to "Check"
@@ -598,24 +599,18 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
                 }
                 if (nav.confirmReset) {
                     item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Tv.Red.copy(alpha = 0.12f))
-                                .padding(start = 18.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Text("Delete every profile, password and setting?", style = TvType.ui(16f, FontWeight.SemiBold), modifier = Modifier.weight(1f))
-                            TvButton("Reset", {
+                        ConfirmBar(
+                            "Delete every profile, password and setting? Back up first in Settings › Backup.", "Reset", req["s-reset-no"],
+                            onConfirm = {
                                 nav.confirmReset = false
                                 actions.resetAll()
                                 nav.toast("Everything was deleted")
-                            }, small = true, danger = true)
-                            TvButton("Keep", { nav.confirmReset = false }, small = true, focusRequester = req["s-reset-no"])
-                        }
-                        LaunchedEffect(Unit) { req["s-reset-no"].focusWhenReady() }
+                            },
+                            onKeep = {
+                                nav.confirmReset = false
+                                nav.refocus(req["s-reset"])
+                            },
+                        )
                     }
                 } else {
                     item {
@@ -632,6 +627,12 @@ private fun Panel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requ
         }
     }
 }
+
+/** The DNS servers typed in a text sheet, split at spaces and commas. */
+fun dnsServers(text: String): List<String> = text.split(' ', ',').map { it.trim() }.filter { it.isNotEmpty() }
+
+/** What is wrong with typed DNS servers, or null; the same check wherever they are typed. */
+fun dnsProblem(text: String): String? = dnsServers(text).firstOrNull { !isIpAddress(it) }?.let { "$it is not an IP address" }
 
 private fun isIpAddress(s: String): Boolean {
     val v4 = s.split('.')
@@ -684,36 +685,54 @@ private fun LazyListScope.action(scope: PanelScope, key: String, icon: Ic, title
 @Composable
 private fun LockedPanel(nav: Nav, req: Requesters) {
     req.alias("panel-first", "s-unlock")
-    PanelHeading(null, "Settings are locked", "Enter the PIN to change settings on this device.")
+    PanelHeading(null, "Settings are locked", "Type the PIN to change settings on this device.")
     Row(Modifier.padding(top = 22.dp)) {
-        TvButton("Enter PIN", { nav.overlay = Overlay.Pin() }, icon = Ic.Lock, focusRequester = req["s-unlock"])
+        TvButton("Type the PIN", { nav.overlay = Overlay.Pin() }, icon = Ic.Lock, focusRequester = req["s-unlock"])
     }
 }
 
 @Composable
 private fun ColumnScope.LogPanel(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, back: () -> Unit) {
-    PanelHeading(null, "Connection log", "OpenVPN output for this session, newest at the bottom.")
+    PanelHeading(null, "Connection log", "OpenVPN output for this session, newest at the bottom. Up scrolls back.")
     // The row that opened this is gone, so focus starts on Back.
     req.alias("panel-first", "s-log-back")
     LaunchedEffect(Unit) { req["s-log-back"].focusWhenReady() }
     val quiet = state.settings.verb.startsWith("1")
-    // The newest line sits at the bottom; when there are more than fit, older ones leave at the top.
-    Box(
+    // The newest line sits at the bottom. Up and Down scroll back through the session.
+    val lines = state.log.filter { !quiet || it.kind != LogKind.Plain }.takeLast(400)
+    val scroll = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    val f = rememberFocusState()
+    LaunchedEffect(lines.size) { scroll.scrollTo(scroll.maxValue) }
+    Column(
         modifier = Modifier
             .padding(top = 16.dp)
             .fillMaxWidth()
             .weight(1f)
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black.copy(alpha = 0.4f))
+            .border(2.dp, if (f.focused) Tv.Focus else Color.Transparent, RoundedCornerShape(16.dp))
+            .onKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
+                when {
+                    e.key == Key.DirectionUp && scroll.value > 0 -> {
+                        scope.launch { scroll.animateScrollBy(-160f) }
+                        true
+                    }
+                    e.key == Key.DirectionDown && scroll.value < scroll.maxValue -> {
+                        scope.launch { scroll.animateScrollBy(160f) }
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .onFocusChanged { f.hasFocus = it.isFocused }
+            .focusable()
+            .verticalScroll(scroll)
             .padding(horizontal = 18.dp, vertical = 16.dp),
-        contentAlignment = Alignment.BottomStart,
-    ) {
-    Column(
-        modifier = Modifier.fillMaxWidth().wrapContentHeight(Alignment.Bottom, unbounded = true),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // Log detail › quiet keeps only errors and connection changes.
-        val lines = state.log.filter { !quiet || it.kind != LogKind.Plain }.takeLast(15)
         if (lines.isEmpty()) Text("The log is empty.", style = TvType.mono(14.5f, color = Tv.soft(0.82f)))
         lines.forEach { line ->
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -734,14 +753,27 @@ private fun ColumnScope.LogPanel(state: VpnUiState, nav: Nav, actions: TunnelAct
             }
         }
     }
-    }
-    Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    var confirmClear by remember { mutableStateOf(false) }
+    if (confirmClear) {
+        Box(Modifier.padding(top = 16.dp)) {
+            ConfirmBar(
+                "Clear this session’s connection log?", "Clear", req["s-log-clear-no"],
+                onConfirm = {
+                    confirmClear = false
+                    actions.clearLog()
+                    nav.toast("Log cleared")
+                    nav.refocus(req["s-log-back"])
+                },
+                onKeep = {
+                    confirmClear = false
+                    nav.refocus(req["s-log-clear"])
+                },
+            )
+        }
+    } else Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         TvButton("Back", back, icon = Ic.Back, focusRequester = req["s-log-back"])
         TvButton("Send to phone", { nav.overlay = Overlay.Phone(PhoneKind.Log) }, icon = Ic.Phone, glass = true)
-        TvButton("Clear", {
-            actions.clearLog()
-            nav.toast("Log cleared")
-        }, glass = true)
+        TvButton("Clear", { confirmClear = true }, glass = true, focusRequester = req["s-log-clear"])
     }
 }
 

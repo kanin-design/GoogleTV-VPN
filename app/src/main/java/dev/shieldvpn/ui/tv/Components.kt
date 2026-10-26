@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -629,7 +630,7 @@ private fun KeyCap(key: TvKey, shift: Boolean, height: Float, onClick: () -> Uni
 }
 
 /** Applies a key to a text value. Returns the new value, or null for Done. */
-fun typeKey(value: String, key: TvKey, shift: Boolean, max: Int = 64): String? = when (key) {
+fun typeKey(value: String, key: TvKey, shift: Boolean, max: Int = 256): String? = when (key) {
     is TvKey.Ch -> (value + if (shift) key.c.uppercaseChar() else key.c).take(max)
     TvKey.Space -> (value + " ").take(max)
     TvKey.Del -> value.dropLast(1)
@@ -764,6 +765,28 @@ fun TypeInto(nav: Nav, onDelete: () -> Unit, onEnter: () -> Boolean = { false },
         nav.typists.add(handler)
         onDispose { nav.typists.remove(handler) }
     }
+}
+
+/**
+ * The one confirm for things that can't be undone: the row turns red, says what goes, and offers
+ * [confirm] and Keep, with Keep focused.
+ */
+@Composable
+fun ConfirmBar(text: String, confirm: String, keep: FocusRequester, onConfirm: () -> Unit, onKeep: () -> Unit, icon: Ic = Ic.Trash) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Tv.Red.copy(alpha = 0.12f))
+            .padding(start = 18.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(text, style = TvType.ui(16f, FontWeight.SemiBold), modifier = Modifier.weight(1f))
+        TvButton(confirm, onConfirm, icon = icon, small = true, danger = true)
+        TvButton("Keep", onKeep, small = true, focusRequester = keep)
+    }
+    LaunchedEffect(Unit) { keep.focusWhenReady() }
 }
 
 /** The key came from a keyboard with letters, not from a remote. */

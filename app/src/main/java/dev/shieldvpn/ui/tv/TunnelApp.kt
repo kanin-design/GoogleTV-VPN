@@ -166,8 +166,8 @@ sealed interface Overlay {
     data class Menu(val id: String) : Overlay
     data class Phone(val kind: PhoneKind) : Overlay
 
-    /** Sets the backup passphrase, or with [restore], unlocks a backup that arrived. */
-    data class Passphrase(val restore: Boolean) : Overlay
+    /** Sets the backup passphrase, or with [restore], unlocks a backup that arrived; with [thenBackup], the backup follows. */
+    data class Passphrase(val restore: Boolean, val thenBackup: Boolean = false) : Overlay
 
     /** Asks for the PIN, then runs [then]; with [setting], chooses a new PIN and turns on [mode]. */
     class Pin(val setting: Boolean = false, val mode: String? = null, val locksApp: Boolean = false, val then: (() -> Unit)? = null) : Overlay
@@ -182,7 +182,7 @@ sealed interface Overlay {
     data class Speed(val id: String) : Overlay
 
     /** Edits one line of text, typed here or on a phone, and hands it to [save]. */
-    class Text(val kind: TextKind, val initial: String, val save: (String) -> Unit) : Overlay
+    class Text(val kind: TextKind, val initial: String, val check: (String) -> String? = { null }, val save: (String) -> Unit) : Overlay
 }
 
 /** Where the user is in the app. Lives in the composition, beside the tunnel state from the view model. */
@@ -200,12 +200,16 @@ class Nav {
     var stackFocus by mutableStateOf<String?>(null)
     var stackMoves by mutableIntStateOf(0)
 
-    var importMethod by mutableStateOf(ImportMethod.Files)
+    // From your phone works on every TV; many have no file picker for USB or Downloads.
+    var importMethod by mutableStateOf(ImportMethod.Phone)
     var importMore by mutableStateOf(false)
 
     var settingsCat by mutableStateOf(Category.Protection)
     var pick by mutableStateOf<Pick?>(null)
     var showLog by mutableStateOf(false)
+
+    /** The Settings row focus goes back to when Back closes what it opened. */
+    var settingsReturn: String? = null
     var confirmReset by mutableStateOf(false)
 
     /** The sheet on top, if any. Opening one remembers what had focus, so closing it can go back there. */
@@ -241,6 +245,11 @@ class Nav {
     /** Lets go of the scroll positions of profiles that are gone. */
     fun keepLists(ids: Set<String>) {
         lists.keys.removeAll { it.substringAfter('-') !in ids }
+    }
+
+    /** Starts [key]'s list at the top again, so a column opened afresh shows its first rows. */
+    fun resetList(key: String) {
+        lists.remove(key)
     }
 
     /** Where the remote's focus starts on the current screen, when it comes back from nowhere. */
@@ -518,14 +527,16 @@ private fun back(nav: Nav, state: VpnUiState, actions: TunnelActions): Boolean {
             nav.contentFocus = Screen.Import
             return true
         }
+        // Back closes the choice column, the log or the test and lands on the row that opened it.
         Screen.Settings -> {
-            if (nav.pick != null) {
-                nav.pick = null
-                nav.contentFocus = Screen.Settings
-                return true
+            val opener = when {
+                nav.pick != null -> nav.pick!!.rowKey.also { nav.pick = null }
+                nav.showLog -> "s-log".also { nav.showLog = false }
+                nav.showTest -> "s-test".also { nav.showTest = false }
+                else -> null
             }
-            if (nav.showLog) {
-                nav.showLog = false
+            if (opener != null) {
+                nav.settingsReturn = opener
                 nav.contentFocus = Screen.Settings
                 return true
             }

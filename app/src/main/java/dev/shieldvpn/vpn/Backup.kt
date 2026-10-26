@@ -28,6 +28,7 @@ object Backup {
 
     /** The encrypted backup, or null without a passphrase. */
     fun create(context: Context, passphrase: String): ByteArray {
+        val s = SettingsStore.load(context)
         val profiles = JSONArray()
         ConnectionStore.list(context).forEach { c ->
             val config = ServerStore.effectiveConfig(context, c.serverId) ?: return@forEach
@@ -43,10 +44,12 @@ object Backup {
                     .put("lookIcon", c.lookIcon ?: JSONObject.NULL)
                     .put("lookColour", c.lookColour ?: JSONObject.NULL)
                     .put("username", login.username)
-                    .put("password", login.password),
+                    .put("password", login.password)
+                    // Ids are new on the other device, so the startup profile is marked on itself.
+                    .put("startup", c.id == s.startupId),
             )
         }
-        val s = SettingsStore.load(context)
+        // Every setting but the PIN: the PIN is not in a backup, so neither is what it locks.
         val settings = JSONObject()
             .put("killSwitch", s.killSwitch)
             .put("allowLan", s.allowLan)
@@ -62,6 +65,14 @@ object Backup {
             .put("pushedDns", s.pushedDns)
             .put("customDns", JSONArray(s.customDns))
             .put("searchDomains", JSONArray(s.searchDomains))
+            .put("boot", s.boot)
+            .put("stayAwake", s.stayAwake)
+            .put("legacyCiphers", s.legacyCiphers)
+            .put("compress", s.compress)
+            .put("verb", s.verb)
+            .put("advanced", s.advanced)
+            .put("automation", s.automation)
+            .put("autoUpdate", s.autoUpdate)
         val plain = JSONObject().put("format", FORMAT).put("version", 1).put("created", System.currentTimeMillis())
             .put("profiles", profiles).put("settings", settings).toString().toByteArray()
 
@@ -78,11 +89,16 @@ object Backup {
     fun isBackup(bytes: ByteArray): Boolean = runCatching { JSONObject(String(bytes)).getString("format") == FORMAT }.getOrDefault(false)
 
     sealed interface Restored {
-        data class Done(val profiles: Int) : Restored
+        /** [profiles] were added; [already] were on this device already, exactly the same, so they were left alone. */
+        data class Done(val profiles: Int, val already: Int = 0) : Restored
         data class Problem(val message: String) : Restored
     }
 
-    /** Adds every profile in the backup to this TV, and takes its settings. */
+    /**
+     * Adds every profile in the backup to this device, and takes its settings. A profile that is
+     * here already, with the same name, file and login, is left alone; one that only shares a
+     * name is added as "Name (restored)", so nothing is replaced.
+     */
     fun restore(context: Context, bytes: ByteArray, passphrase: String): Restored {
         val outer = runCatching { JSONObject(String(bytes)) }.getOrNull()?.takeIf { it.optString("format") == FORMAT }
             ?: return Restored.Problem("This isn’t a ${APP_NAME} backup.")
@@ -97,11 +113,34 @@ object Backup {
         }.getOrNull() ?: return Restored.Problem("Wrong passphrase, or the file is damaged.")
 
         val profiles = plain.optJSONArray("profiles") ?: JSONArray()
+        val here = ConnectionStore.list(context)
+        val names = here.map { it.name }.toMutableSet()
         var added = 0
+        var already = 0
+        var startupId: String? = null
         for (i in 0 until profiles.length()) {
             val p = profiles.getJSONObject(i)
-            val server = ServerStore.add(context, p.getString("ovpn"))
-            val c = ConnectionStore.add(context, p.getString("name"), server.id)
+            val name = p.getString("name")
+            val ovpn = p.getString("ovpn")
+            val same = here.firstOrNull {
+                it.name == name && ServerStore.effectiveConfig(context, it.serverId) == ovpn &&
+                    CredentialStore.load(context, it.id).let { l -> l.username == p.optString("username") && l.password == p.optString("password") }
+            }
+            if (same != null) {
+                already++
+                if (p.optBoolean("startup")) startupId = same.id
+                continue
+            }
+            var unique = name
+            if (unique in names) {
+                unique = "$name (restored)"
+                var n = 2
+                while (unique in names) unique = "$name (restored ${n++})"
+            }
+            names += unique
+            val server = ServerStore.add(context, ovpn)
+            val c = ConnectionStore.add(context, unique, server.id)
+            if (p.optBoolean("startup")) startupId = c.id
             ConnectionStore.update(context, c.id) {
                 it.copy(
                     pinned = p.optBoolean("pinned"),
@@ -135,10 +174,20 @@ object Backup {
                     pushedDns = s.optBoolean("pushedDns", now.pushedDns),
                     customDns = s.optJSONArray("customDns")?.let { a -> (0 until a.length()).map(a::getString) } ?: now.customDns,
                     searchDomains = s.optJSONArray("searchDomains")?.let { a -> (0 until a.length()).map(a::getString) } ?: now.searchDomains,
+                    // An older backup has no startup profile; then this device keeps its own.
+                    boot = if (s.has("boot")) s.optBoolean("boot") && (startupId ?: now.startupId) != null else now.boot,
+                    startupId = startupId ?: now.startupId,
+                    stayAwake = s.optBoolean("stayAwake", now.stayAwake),
+                    legacyCiphers = s.optBoolean("legacyCiphers", now.legacyCiphers),
+                    compress = s.optBoolean("compress", now.compress),
+                    verb = s.optString("verb", now.verb),
+                    advanced = s.optBoolean("advanced", now.advanced),
+                    automation = s.optBoolean("automation", now.automation),
+                    autoUpdate = s.optBoolean("autoUpdate", now.autoUpdate),
                 ),
             )
         }
-        return Restored.Done(added)
+        return Restored.Done(added, already)
     }
 
     private fun key(passphrase: String, salt: ByteArray, iterations: Int = ITERATIONS): SecretKeySpec {

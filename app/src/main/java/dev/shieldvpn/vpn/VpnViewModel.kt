@@ -371,7 +371,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         var review = ServerStore.review(name.ifBlank { "pasted.ovpn" }, bytes)
         if (review.problem != null) return review.problem
         // A login typed on the phone goes with a profile that asks for one and does not hold it.
-        if (review.needsLogin && review.username.isEmpty() && username.isNotBlank()) {
+        if (review.needsLogin && review.username.isEmpty() && username.isNotBlank() && password.isNotEmpty()) {
             review = review.copy(username = username.trim(), password = password, loginFromPhone = true)
         }
         _state.update { it.copy(review = review) }
@@ -400,8 +400,19 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
                 val name = clean.substringAfterLast('/').substringBefore('?').ifBlank { "download.ovpn" }
                 withContext(Dispatchers.Main) { receive(name, bytes) }
             },
-            onFailure = { "${APP_NAME} could not download it: ${it.message ?: "no answer"}." },
+            onFailure = { linkProblem(clean, it) },
         )
+    }
+
+    /** Why a link didn't download, in plain words instead of the exception's. */
+    private fun linkProblem(url: String, e: Throwable): String {
+        val host = runCatching { java.net.URI(url).host }.getOrNull() ?: "The server"
+        return when (e) {
+            is java.net.UnknownHostException -> "There is no server called $host. Check the link."
+            is java.net.SocketTimeoutException, is java.net.ConnectException -> "$host didn’t answer. Check the link, or try again later."
+            is javax.net.ssl.SSLException -> "$host’s certificate isn’t trusted, so ${APP_NAME} didn’t download it."
+            else -> "The download from $host failed. Check the link and try again."
+        }
     }
 
     /** Opens the waiting .p12 with [password]; null when it opens, or what is wrong. */

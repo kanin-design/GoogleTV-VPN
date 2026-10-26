@@ -81,6 +81,7 @@ import dev.shieldvpn.APP_NAME
 import dev.shieldvpn.vpn.Certificates
 import dev.shieldvpn.vpn.Connection
 import dev.shieldvpn.vpn.VpnUiState
+import dev.shieldvpn.vpn.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -105,7 +106,7 @@ private fun roleOf(i: Int, depth: Int): Role = when {
 fun ProfilesScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (String) -> Unit) {
     val req = remember { Requesters() }
     val depth = nav.stack.size
-    SideEffect { nav.entry = req[nav.stack.lastOrNull()?.let { entryKey(it) } ?: "pl-${nav.profFocus ?: "add"}"] }
+    SideEffect { nav.entry = req[nav.stack.lastOrNull()?.let { entryKey(it, state) } ?: "pl-${nav.profFocus ?: "add"}"] }
 
     LaunchedEffect(state.connections) {
         nav.keepLists(state.connections.map { it.id }.toSet())
@@ -118,7 +119,7 @@ fun ProfilesScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
     }
     LaunchedEffect(nav.contentFocus) {
         if (nav.contentFocus == Screen.Profiles) {
-            val key = nav.stack.lastOrNull()?.let { entryKey(it) } ?: "pl-${nav.profFocus ?: "add"}"
+            val key = nav.stack.lastOrNull()?.let { entryKey(it, state) } ?: "pl-${nav.profFocus ?: "add"}"
             awaitLayout()
             if (!req[key].tryFocus()) req["pl-add"].tryFocus()
             nav.contentFocus = null
@@ -192,8 +193,12 @@ fun ProfilesScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
 }
 
 /** Where focus starts in a column. */
-private fun entryKey(col: Col): String = when (col) {
-    is Col.Profile -> "pe-name"
+/**
+ * Where focus lands in a column. A profile opens on its Connect button, unless a tunnel is up:
+ * then on Name, so one OK doesn't switch away from it.
+ */
+private fun entryKey(col: Col, state: VpnUiState): String = when (col) {
+    is Col.Profile -> if (state.status.isActive) "pe-name" else "pe-connect"
     is Col.Advanced -> "pa-Server"
     is Col.Leaf -> when (col.kind) {
         LeafKind.Name, LeafKind.Password, LeafKind.Server -> "ed-key"
@@ -302,17 +307,18 @@ private fun ListColumn(state: VpnUiState, nav: Nav, req: Requesters, mini: Boole
                     },
                     onClick = { nav.guard(state) {
                         nav.profFocus = c.id
-                        if (nav.stack.isEmpty()) nav.push(Col.Profile(c.id), "pe-name")
-                        else if (open) {
-                            if (nav.stack.size > 1) {
-                                while (nav.stack.size > 1) nav.stack.removeAt(nav.stack.lastIndex)
-                                nav.moveStackFocus("pe-name")
-                            } else {
-                                nav.moveStackFocus("pe-name")
-                            }
+                        val entry = entryKey(Col.Profile(c.id), state)
+                        if (nav.stack.isEmpty()) {
+                            // Opened afresh, the column starts at its top, where its entry row is.
+                            nav.resetList("profile-${c.id}")
+                            nav.push(Col.Profile(c.id), entry)
+                        } else if (open) {
+                            while (nav.stack.size > 1) nav.stack.removeAt(nav.stack.lastIndex)
+                            nav.moveStackFocus(entry)
                         } else {
                             nav.stack.clear()
-                            nav.push(Col.Profile(c.id), "pe-name")
+                            nav.resetList("profile-${c.id}")
+                            nav.push(Col.Profile(c.id), entry)
                         }
                     } },
                     leading = { Avatar(lookOf(c), 40f) },
@@ -427,7 +433,8 @@ private fun ProfileColumn(
                 if (live) "Disconnect" else "Connect",
                 {
                     if (live) actions.disconnect() else connect(c.id)
-                    if (!live) nav.toast("Connecting to ${c.name}")
+                    // A profile without its password opens the sign-in sheet instead.
+                    if (!live && !state.asksForLogin(c)) nav.toast("Connecting to ${c.name}")
                 },
                 icon = Ic.Power,
                 small = true,
@@ -561,10 +568,11 @@ private fun ProfileColumn(
             }
             item {
                 if (confirm && !mini) {
-                    DeleteConfirm(
+                    ConfirmBar(
                         text = "Delete ${c.name} and its saved password?",
+                        confirm = "Delete",
                         keep = req["pe-del-no"],
-                        onDelete = {
+                        onConfirm = {
                             confirm = false
                             nav.stack.clear()
                             actions.delete(c.id)
@@ -576,7 +584,6 @@ private fun ProfileColumn(
                             nav.moveStackFocus("pe-del")
                         },
                     )
-                    LaunchedEffect(Unit) { req["pe-del-no"].focusWhenReady() }
                 } else {
                     ListRow(
                         "Delete profile", {
@@ -594,23 +601,6 @@ private fun ProfileColumn(
     }
 }
 
-@Composable
-private fun DeleteConfirm(text: String, keep: androidx.compose.ui.focus.FocusRequester, onDelete: () -> Unit, onKeep: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Tv.Red.copy(alpha = 0.12f))
-            .padding(start = 18.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(text, style = TvType.ui(16f, FontWeight.SemiBold), modifier = Modifier.weight(1f))
-        TvButton("Delete", onDelete, icon = Ic.Trash, small = true, danger = true)
-        TvButton("Keep", onKeep, small = true, focusRequester = keep)
-    }
-}
-
 // ---- Advanced -------------------------------------------------------------------------
 
 @Composable
@@ -625,7 +615,7 @@ private fun AdvancedColumn(state: VpnUiState, nav: Nav, req: Requesters, c: Conn
     fun adv(kind: LeafKind, title: String, sub: String, value: String) {
         val key = "pa-${kind.name}"
         ListRow(
-            title, { open(nav, index, Col.Leaf(c.id, kind), entryKey(Col.Leaf(c.id, kind))) },
+            title, { open(nav, index, Col.Leaf(c.id, kind), entryKey(Col.Leaf(c.id, kind), state)) },
             subtitle = sub, open = openKey == key, mini = mini, focusRequester = req[key],
             trailing = { ValueChip(value, it) },
         )
@@ -812,7 +802,7 @@ private fun EditorBody(
             }
         }
     }
-    TypeInto(nav, { editor.type(TvKey.Del) }, onEnter = { req["ed-save"].takeFocus() }) { ch -> editor.values[editor.field] = (editor.values[editor.field].orEmpty() + ch).take(64) }
+    TypeInto(nav, { editor.type(TvKey.Del) }, onEnter = { req["ed-save"].takeFocus() }) { ch -> editor.values[editor.field] = (editor.values[editor.field].orEmpty() + ch).take(256) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             editor.keys.forEach { key ->
@@ -834,7 +824,22 @@ private fun EditorBody(
             compact = true,
             entry = req["ed-key"],
         )
-        Row(
+        var confirmForget by remember { mutableStateOf(false) }
+        if (confirmForget) {
+            ConfirmBar(
+                "Forget the saved password for ${c.name}? It is asked for at the next connect.", "Forget", req["ed-forget-no"],
+                onConfirm = {
+                    confirmForget = false
+                    actions.forgetPassword(c.id)
+                    nav.toast("Saved password forgotten")
+                    saved()
+                },
+                onKeep = {
+                    confirmForget = false
+                    nav.refocus(req["ed-save"])
+                },
+            )
+        } else Row(
             // Coming down from the keyboard lands on Save, wherever the key above it was.
             modifier = Modifier.padding(top = 2.dp).enterAt { req["ed-save"] },
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -845,11 +850,7 @@ private fun EditorBody(
             if (kind == LeafKind.Password) {
                 TvButton(if (editor.show) "Hide" else "Show", { editor.show = !editor.show }, icon = Ic.Eye, small = true, glass = true)
                 if (login?.hasPassword == true) {
-                    TvButton("Forget", {
-                        actions.forgetPassword(c.id)
-                        nav.toast("Saved password forgotten")
-                        saved()
-                    }, small = true, glass = true, danger = true)
+                    TvButton("Forget", { confirmForget = true }, small = true, glass = true, danger = true)
                 }
             }
             if (kind == LeafKind.Server && changed) {
@@ -866,15 +867,21 @@ private fun EditorBody(
                 )
             }
             val bridge = rememberPhoneBridge(kind, page) { got ->
-                editor.values[editor.field] = String(got.bytes).trim().take(64)
+                editor.values[editor.field] = String(got.bytes).trim().take(256)
                 null
             }
             Spacer(Modifier.weight(1f))
             if (bridge != null) {
+                // Two short lines, so the address and code fit beside four buttons.
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TvIcon(Ic.Phone, 18f, Tv.soft(0.6f))
-                    Text("Or use your phone:", style = TvType.ui(14f, color = Tv.soft(0.6f)))
-                    Text("${bridge.address} · ${bridge.code.chunked(3).joinToString("\u00A0")}", style = TvType.mono(14f, color = Color.White))
+                    Column {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Or on your phone, code", style = TvType.ui(13f, color = Tv.soft(0.6f)), maxLines = 1)
+                            Text(bridge.code.chunked(3).joinToString("\u00A0"), style = TvType.mono(13f, color = Color.White), maxLines = 1)
+                        }
+                        Text("http://${bridge.address}", style = TvType.mono(13f, color = Color.White), maxLines = 1)
+                    }
                 }
             }
         }
@@ -897,8 +904,8 @@ private fun OptionsBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 {
                     // Custom uses the servers in Settings › DNS; without any, they are asked for first.
                     if (kind == LeafKind.Dns && value == "Custom" && state.settings.customDns.isEmpty()) {
-                        nav.overlay = Overlay.Text(TextKind.CustomDns, "") { text ->
-                            val servers = text.split(' ', ',').map { it.trim() }.filter { it.isNotEmpty() }
+                        nav.overlay = Overlay.Text(TextKind.CustomDns, "", check = ::dnsProblem) { text ->
+                            val servers = dnsServers(text)
                             if (servers.isNotEmpty()) {
                                 actions.changeSettings { it.copy(customDns = servers) }
                                 actions.setDnsMode(c.id, value)

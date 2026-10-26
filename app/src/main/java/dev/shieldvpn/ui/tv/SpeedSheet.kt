@@ -141,7 +141,8 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
             stage = Stage.Failed
         }
     }
-    LaunchedEffect(stage) { req["ov-first"].focusWhenReady() }
+    // Testing here would switch away from the live tunnel, so focus starts on Close, not on the switch.
+    LaunchedEffect(stage) { req[if (stage == Stage.Ask && other) "ov-close" else "ov-first"].focusWhenReady() }
 
     val last = state.speeds[if (direct) SpeedTest.DIRECT else c.id]
     val sub = when {
@@ -184,7 +185,7 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
         Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             val (label, icon, primary) = when (stage) {
                 // One button whose text changes, so focus stays on it as the test moves on.
-                Stage.Ask -> Triple<String, Ic?, () -> Unit>(if (other) "Switch and test" else "Connect and test", Ic.Power) {
+                Stage.Ask -> Triple<String, Ic?, () -> Unit>(if (other) "Switch to ${c.name} and test" else "Connect and test", Ic.Power) {
                     stage = Stage.Connecting
                     connect(c.id)
                 }
@@ -203,7 +204,7 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
             when (stage) {
                 Stage.Ask -> {
                     if (!state.status.isActive) TvButton("Test without the VPN", { test(true) }, icon = Ic.Globe, glass = true)
-                    TvButton("Close", close, glass = true)
+                    TvButton("Close", close, glass = true, focusRequester = req["ov-close"])
                 }
                 Stage.Done -> TvButton("Test again", { test(direct) }, icon = Ic.Swap, glass = true)
                 Stage.Failed -> TvButton("Close", close, glass = true)

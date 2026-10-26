@@ -156,11 +156,11 @@ private fun SignInSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req
         when {
             user.isBlank() -> {
                 field = "user"
-                nav.toast("Enter the username first")
+                nav.toast("Type the username first")
             }
             pw.isEmpty() -> {
                 field = "pw"
-                nav.toast("Enter the password first")
+                nav.toast("Type the password first")
             }
             o.save -> {
                 actions.saveLogin(c.id, user, pw)
@@ -188,12 +188,12 @@ private fun SignInSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req
         )
     }
     val bridge = rememberPhoneBridge(o, page) { got ->
-        val text = String(got.bytes).trim().take(64)
+        val text = String(got.bytes).trim().take(256)
         edit { text }
         null
     }
     Sheet(1100f) {
-        TypeInto(nav, { edit { it.dropLast(1) } }, onEnter = { req["ov-go"].takeFocus() }) { ch -> edit { (it + ch).take(64) } }
+        TypeInto(nav, { edit { it.dropLast(1) } }, onEnter = { req["ov-go"].takeFocus() }) { ch -> edit { (it + ch).take(256) } }
         Row(horizontalArrangement = Arrangement.spacedBy(34.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column {
@@ -229,8 +229,9 @@ private fun SignInSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 if (!o.save) {
                     Spacer(Modifier.weight(1f))
                     ListRow(
-                        "Remember on this device", { remember = !remember },
-                        modifier = Modifier.width(300.dp),
+                        "Remember", { remember = !remember },
+                        subtitle = "On this device",
+                        modifier = Modifier.width(260.dp),
                         trailing = { TvSwitch(remember, it) },
                     )
                 }
@@ -242,7 +243,7 @@ private fun SignInSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 QrCode(bridge.url, 180f)
                 Text("Or open http://${bridge.address} and enter ${bridge.code.chunked(3).joinToString("\u00A0")}.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
             } else {
-                Text("Connect this device to your home network to type on a phone.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
+                Text("This device isn’t on a home network, so your phone can’t reach it.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
             }
         }
         }
@@ -374,23 +375,30 @@ private fun MenuSheet(
                 leading = { IconSquare(Ic.Pin, it) },
             )
             var confirm by remember { mutableStateOf(false) }
-            ListRow(
-                if (confirm) "Press again to delete" else "Delete profile",
-                {
-                    if (!confirm) {
-                        confirm = true
-                    } else {
+            if (confirm) {
+                ConfirmBar(
+                    "Delete ${c.name} and its saved password?", "Delete", req["qm-del-no"],
+                    onConfirm = {
                         close()
                         nav.guard(state) {
                             actions.delete(c.id)
-                            nav.toast("${c.name} was deleted")
+                            nav.toast("Deleted ${c.name}")
                         }
-                    }
-                },
-                subtitle = if (confirm) "Its saved password goes too" else "Removes it from this device",
-                danger = true,
-                leading = { IconSquare(Ic.Trash, it) },
-            )
+                    },
+                    onKeep = {
+                        confirm = false
+                        nav.refocus(req["qm-del"])
+                    },
+                )
+            } else {
+                ListRow(
+                    "Delete profile", { confirm = true },
+                    subtitle = "Removes it from this device",
+                    danger = true,
+                    focusRequester = req["qm-del"],
+                    leading = { IconSquare(Ic.Trash, it) },
+                )
+            }
         }
     }
 }

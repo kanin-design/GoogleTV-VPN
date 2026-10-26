@@ -96,9 +96,9 @@ private fun Hero(
     Column(horizontalAlignment = Alignment.Start) {
         if (c == null) {
             Title("Add a profile")
-            Lede(null, "Import an .ovpn file saved on this device.")
+            Lede(null, "Send your .ovpn file from your phone, or bring it in from a USB drive or a link.")
             Actions {
-                TvButton("Import a profile", { nav.go(Screen.Import) }, icon = Ic.Plus, focusRequester = primaryFocus)
+                TvButton("Add a profile", { nav.go(Screen.Import) }, icon = Ic.Plus, focusRequester = primaryFocus)
             }
             return@Column
         }
@@ -146,7 +146,7 @@ private fun Hero(
         Actions {
             when {
                 !current -> {
-                    TvButton("Connect here", {
+                    TvButton("Connect", {
                         nav.preview = null
                         connect(c.id)
                     }, icon = Ic.Power, focusRequester = primaryFocus)
@@ -154,7 +154,7 @@ private fun Hero(
                 }
                 mode == Mode.On -> {
                     TvButton("Disconnect", actions::disconnect, icon = Ic.Power, focusRequester = primaryFocus)
-                    TvButton("Pause 15 min", {
+                    TvButton("Pause 15 minutes", {
                         actions.pause()
                         nav.toast("Paused for 15 minutes")
                     }, icon = Ic.Pause, glass = true)

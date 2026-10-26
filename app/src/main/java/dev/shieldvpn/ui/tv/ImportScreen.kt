@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import dev.shieldvpn.vpn.ImportReview
 import dev.shieldvpn.vpn.ServerStore
 import dev.shieldvpn.vpn.VpnUiState
+import dev.shieldvpn.vpn.isActive
 
 enum class ImportMethod(val icon: Ic, val title: String, val sub: String, val more: Boolean = false) {
     Phone(Ic.Phone, "From your phone", "Scan a code, pick the file there"),
@@ -64,36 +65,53 @@ enum class ImportMethod(val icon: Ic, val title: String, val sub: String, val mo
     Paste(Ic.Paste, "Paste config text", "Type or paste it on your phone", more = true),
 }
 
+/**
+ * Where focus starts on the review: Back on a file that can't be used; Save while a tunnel is up,
+ * so one OK doesn't switch away from it; otherwise Save and connect.
+ */
+private fun reviewFocus(state: VpnUiState, review: ImportReview): String = when {
+    review.problem != null -> "rv-back"
+    state.status.isActive -> "rv-save"
+    else -> "rv-connect"
+}
+
 /** Import: how the file gets here on the left, and what happens next on the right. Every file is reviewed first. */
 @Composable
 fun ImportScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (String) -> Unit) {
     val req = remember { Requesters() }
     SideEffect {
         val review = state.review
-        nav.entry = req[if (review == null) "m-${nav.importMethod.name}" else if (review.problem != null) "rv-back" else "rv-connect"]
+        nav.entry = req[if (review == null) "m-${nav.importMethod.name}" else reviewFocus(state, review)]
     }
     LaunchedEffect(nav.contentFocus) {
         if (nav.contentFocus == Screen.Import) {
             val review = state.review
-            val key = when {
-                review == null -> "m-${nav.importMethod.name}"
-                review.problem != null -> "rv-back"
-                else -> "rv-connect"
-            }
+            val key = if (review == null) "m-${nav.importMethod.name}" else reviewFocus(state, review)
             req[key].focusWhenReady()
             nav.contentFocus = null
         }
     }
     LaunchedEffect(state.review) {
         val review = state.review ?: return@LaunchedEffect
-        req[if (review.problem != null) "rv-back" else "rv-connect"].focusWhenReady()
+        req[reviewFocus(state, review)].focusWhenReady()
+    }
+    // The phone session belongs to Import, not to its panel: it keeps its code while a file is
+    // reviewed, so the phone's page still works after Save or Cancel and can send another.
+    val phonePage = remember {
+        dev.shieldvpn.phone.PhoneBridge.Page.Upload(
+            "Send a profile to the TV", "Pick the .ovpn file, or paste its text. The TV shows it to you before it is saved.",
+            ".ovpn,.conf,.p12,.pfx,.${dev.shieldvpn.vpn.Backup.EXTENSION},text/plain,application/x-pkcs12,application/octet-stream", paste = true, login = true,
+        )
+    }
+    val phoneBridge = rememberPhoneBridge(ImportMethod.Phone, if (nav.importMethod == ImportMethod.Phone) phonePage else null) { got ->
+        actions.receive(got.name, got.bytes, got.username, got.password)
     }
 
     Box(Modifier.fillMaxSize()) {
         Glass(Modifier.padding(start = 64.dp, top = 124.dp, bottom = 36.dp).width(400.dp)) {
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 22.dp)) {
                 Text("Add a profile", style = TvType.display(30f), modifier = Modifier.padding(horizontal = 8.dp))
-                Text("Bring in an .ovpn or .conf file.", style = TvType.ui(15f, color = Tv.soft(0.65f)), modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 14.dp))
+                Text("A profile, a backup or a certificate.", style = TvType.ui(15f, color = Tv.soft(0.65f)), modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 14.dp))
                 // A list, so the extra ways scroll into view when More ways opens them.
                 val list = rememberLazyListState()
                 LazyColumn(
@@ -136,13 +154,13 @@ fun ImportScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (
             Modifier
                 .padding(start = 488.dp, end = 64.dp, top = 124.dp, bottom = 36.dp)
                 .fillMaxSize()
-                .enterAt { req[if (review == null) "im-entry" else if (review.problem != null) "rv-back" else "rv-connect"] },
+                .enterAt { req[if (review == null) "im-entry" else reviewFocus(state, review)] },
         ) {
             Column(Modifier.fillMaxSize().padding(horizontal = 34.dp, vertical = 30.dp)) {
                 when {
                     review != null && review.problem != null -> ProblemPanel(review, nav, actions, req)
                     review != null -> ReviewPanel(state, review, nav, actions, req, connect)
-                    else -> MethodPanel(nav.importMethod, state, nav, actions, req)
+                    else -> MethodPanel(nav.importMethod, state, nav, actions, req, phoneBridge)
                 }
             }
         }
@@ -171,7 +189,7 @@ private fun MethodRow(m: ImportMethod, state: VpnUiState, nav: Nav, actions: Tun
 }
 
 @Composable
-private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters) {
+private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, phone: dev.shieldvpn.phone.PhoneBridge?) {
     when (m) {
         ImportMethod.Files -> {
             PanelHeading("On this device", "Pick a file", "Android’s file picker opens. Choose the .ovpn or .conf file from Downloads or a USB drive.")
@@ -187,7 +205,7 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
                 Modifier.padding(top = 28.dp),
             )
         }
-        ImportMethod.Phone -> PhonePanel(actions, req)
+        ImportMethod.Phone -> PhonePanel(req, phone)
         ImportMethod.Link -> LinkPanel(nav, actions, req)
         ImportMethod.Restore -> {
             PanelHeading("Moving to a new device", "Restore a backup", "A backup holds every profile, saved password and setting, encrypted with the passphrase you chose when you made it.")
@@ -259,14 +277,7 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
 
 /** From your phone: the code is on screen and the TV listens while this panel is open. */
 @Composable
-private fun ColumnScope.PhonePanel(actions: TunnelActions, req: Requesters) {
-    val page = remember {
-        dev.shieldvpn.phone.PhoneBridge.Page.Upload(
-            "Send a profile to the TV", "Pick the .ovpn file, or paste its text. The TV shows it to you before it is saved.",
-            ".ovpn,.conf,.${dev.shieldvpn.vpn.Backup.EXTENSION},text/plain,application/octet-stream", paste = true, login = true,
-        )
-    }
-    val bridge = rememberPhoneBridge(ImportMethod.Phone, page) { got -> actions.receive(got.name, got.bytes, got.username, got.password) }
+private fun ColumnScope.PhonePanel(req: Requesters, bridge: dev.shieldvpn.phone.PhoneBridge?) {
     PanelHeading("From your phone", "Send it from your phone")
     Box(Modifier.padding(top = 22.dp)) {
         PhoneCode(
@@ -485,7 +496,10 @@ private fun ColumnScope.ReviewPanel(
                     nav.toast("Saved ${review.name}")
                 }
             }
+        }, glass = true, focusRequester = req["rv-save"])
+        TvButton("Cancel", {
+            actions.cancelReview()
+            nav.contentFocus = Screen.Import
         }, glass = true)
-        TvButton("Cancel", actions::cancelReview, glass = true)
     }
 }
