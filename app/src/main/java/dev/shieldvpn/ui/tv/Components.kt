@@ -15,10 +15,13 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.focusGroup
@@ -42,6 +45,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
@@ -74,6 +78,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -81,6 +86,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.sign
 import kotlinx.coroutines.delay
 
 /** The design's motion curve for focus and small moves: cubic-bezier(.2,.7,.2,1). */
@@ -230,6 +238,32 @@ fun Glass(
 fun Modifier.fade(alpha: () -> Float): Modifier = graphicsLayer {
     this.alpha = alpha()
     compositingStrategy = CompositingStrategy.ModulateAlpha
+}
+
+/**
+ * Lists inside scroll by whole rows, and only as far as it takes to show the focused row whole, so
+ * the row at the top is never cut off; only the one at the bottom shows in part, under the fade.
+ * Android TV's own way moves the focused row to a point a third of the way down, which can leave a
+ * row cut anywhere. The rows are all one height, [gap] apart.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun WholeRows(gap: Dp, content: @Composable () -> Unit) {
+    val gapPx = with(LocalDensity.current) { gap.toPx() }
+    val spec = remember(gapPx) {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val need = when {
+                    offset < 0f -> offset
+                    offset + size > containerSize -> offset + size - containerSize
+                    else -> return 0f
+                }
+                val row = size + gapPx
+                return sign(need) * ceil(abs(need) / row) * row
+            }
+        }
+    }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
 }
 
 /** .scroll: a list fades out at an edge it can scroll past, instead of being cut off. */

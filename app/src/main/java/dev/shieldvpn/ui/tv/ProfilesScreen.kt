@@ -301,7 +301,7 @@ private fun ListColumn(state: VpnUiState, nav: Nav, req: Requesters, mini: Boole
     Column(Modifier.fillMaxSize()) {
         ColumnHead("On this device", "Profiles", null, mini, count = state.connections.size)
         val list = rememberLazyListState()
-        LazyColumn(
+        WholeRows(6.dp) { LazyColumn(
             state = list,
             modifier = Modifier.scrollFade(list),
             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 16.dp),
@@ -353,7 +353,7 @@ private fun ListColumn(state: VpnUiState, nav: Nav, req: Requesters, mini: Boole
                     leading = { focused -> AddSquare(focused) },
                 )
             }
-        }
+        } }
     }
 }
 
