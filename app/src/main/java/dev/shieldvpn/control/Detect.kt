@@ -98,7 +98,8 @@ object Detect {
                     val entry = e.name.substringAfterLast('/')
                     if (e.isDirectory || entry.startsWith(".") || entry.startsWith("__MACOSX")) continue
                     if (!entry.endsWith(".conf", true) && !entry.endsWith(".ovpn", true)) continue
-                    val data = zip.readNBytes(MAX_ENTRY + 1)
+                    // Not readNBytes: Android has it only from 13, and before that every .zip failed here.
+                    val data = ServerStore.readLimited(zip)
                     if (data.size <= MAX_ENTRY) found += entry to data
                 }
             }
