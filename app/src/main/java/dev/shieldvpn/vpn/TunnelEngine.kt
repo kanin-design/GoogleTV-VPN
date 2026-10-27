@@ -24,9 +24,17 @@ interface TunnelEngine {
     fun close()
 }
 
-/** OpenVPN 3, as before: the core calls back through [callbacks] for the interface and its events. */
+/**
+ * OpenVPN 3, as before: the core calls back through [callbacks] for the interface and its events.
+ *
+ * The worker frees the core itself when [run] returns. The core's OpenSSL keeps state for each
+ * thread that used the tunnel; freed from another thread, the worker's state outlived the tunnel,
+ * and the worker crashed on its way out (OpenSSL's thread clean-up). [lock] keeps the other threads'
+ * calls off the handle while it goes.
+ */
 class OpenVpnTunnel(private val callbacks: NativeCallbacks) : TunnelEngine {
     @Volatile private var handle = 0L
+    private val lock = Any()
 
     override fun prepare(plan: Tunnels.Plan.Ready): String? {
         val h = OpenVpnEngine.create(callbacks)
@@ -39,21 +47,28 @@ class OpenVpnTunnel(private val callbacks: NativeCallbacks) : TunnelEngine {
         return null
     }
 
-    override fun run(): String = OpenVpnEngine.connect(handle)
+    override fun run(): String {
+        val result = OpenVpnEngine.connect(handle)
+        close()
+        return result
+    }
 
     override fun stop() {
-        handle.takeIf { it != 0L }?.let(OpenVpnEngine::stop)
+        synchronized(lock) { handle.takeIf { it != 0L }?.let(OpenVpnEngine::stop) }
     }
 
-    override fun stats(): LongArray? = handle.takeIf { it != 0L }?.let(OpenVpnEngine::stats)
+    override fun stats(): LongArray? = synchronized(lock) { handle.takeIf { it != 0L }?.let(OpenVpnEngine::stats) }
 
     override fun networkChanged() {
-        handle.takeIf { it != 0L }?.let { OpenVpnEngine.reconnect(it, 1) }
+        synchronized(lock) { handle.takeIf { it != 0L }?.let { OpenVpnEngine.reconnect(it, 1) } }
     }
 
+    /** Also when the tunnel never started (the profile had an error): then on the thread that made it. */
     override fun close() {
-        val h = handle
-        handle = 0L
-        if (h != 0L) OpenVpnEngine.destroy(h)
+        synchronized(lock) {
+            val h = handle
+            handle = 0L
+            if (h != 0L) OpenVpnEngine.destroy(h)
+        }
     }
 }
