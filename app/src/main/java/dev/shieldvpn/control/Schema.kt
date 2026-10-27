@@ -187,7 +187,7 @@ object Schema {
         Group(
             "general", "General", "",
             listOf(
-                Item("settings.advanced", Item.Type.Switch, "Advanced", "OpenVPN, DNS and automation"),
+                Item("settings.advanced", Item.Type.Switch, "Advanced", "OpenVPN, DNS, automation"),
                 Item("settings.autoUpdate", Item.Type.Switch, "Check for updates by itself", "Each time $APP_NAME opens"),
             ),
         ),
@@ -217,7 +217,7 @@ object Schema {
             options = { choices("App setting" to "Follow Settings › Protection", "Always on" to "Block traffic whenever this tunnel is down", "Off" to "Never block for this profile") },
             askTv = { if (it == "Off") "never block traffic for this profile" else null }),
         Item("dnsMode", Item.Type.Choice, "DNS", "For this profile only", tunnel = true,
-            options = { choices("App setting" to "The server's DNS, or 1.1.1.1 if it sends none", "Server only" to "Only the DNS servers this server pushes", "Custom" to "Your own DNS servers") }),
+            options = { choices("App setting" to "The server’s DNS, or 1.1.1.1 if it sends none", "Server only" to "Only the DNS servers this server pushes", "Custom" to "Your own DNS servers") }),
         Item("username", Item.Type.Text, "Username", "For signing in to the server", tunnel = true, kind = VpnKind.OpenVpn,
             shows = { s, c -> openVpnOnly(s, c) && s.infos[c.serverId]?.needsLogin == true }, checkName = "username", check = { Validate.usernameProblem(it as String) }),
         Item("password", Item.Type.Secret, "Password", "Saved encrypted on the TV. It never comes back to the phone", tunnel = true, kind = VpnKind.OpenVpn,

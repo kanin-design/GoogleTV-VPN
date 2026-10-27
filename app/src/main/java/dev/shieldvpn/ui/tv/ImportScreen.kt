@@ -184,11 +184,11 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
         ImportMethod.Phone -> PhonePanel(nav, actions, req, session)
         ImportMethod.Link -> LinkPanel(nav, actions, req, session)
         ImportMethod.Restore -> {
-            PanelHeading("Import › Moving to a new device", "Restore a backup", "A backup holds every profile, saved password and setting, encrypted with the passphrase chosen when it was made.")
+            PanelHeading("Import › Restore a backup", "Restore a backup", "A backup holds every profile, saved password and setting, encrypted with the passphrase chosen when it was made.")
             Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ListRow(
                     "Send it from your phone", fromPhone,
-                    subtitle = "From your phone takes backups too, with the passphrase typed there",
+                    subtitle = "Choose the backup file there and type its passphrase",
                     focusRequester = req["im-entry"],
                     leading = { IconSquare(Ic.Phone, it) },
                     trailing = { Chevron(it) },
@@ -296,7 +296,10 @@ fun linkSpec(nav: Nav, actions: TunnelActions): FormSpec = FormSpec(
     busyLabel = "Downloading…",
     phone = "import",
     phoneSection = "link",
-) { v, _ -> downloadLink(actions, nav, v["url"].orEmpty(), v["luser"].orEmpty(), v["lpass"].orEmpty()).toForm() }
+) { v, _ -> downloadLink(actions, nav, cleanLink(v["url"].orEmpty()), v["luser"].orEmpty(), v["lpass"].orEmpty()).toForm() }
+
+/** The typed link, without the "https://" the field starts with when a whole address was typed after it. */
+private fun cleanLink(url: String): String = url.trim().replace(Regex("^https://(?=[A-Za-z][A-Za-z0-9+.-]*://)"), "")
 
 /** From a link, typed on the TV; the phone's page has a Link tab for typing it there. */
 @Composable
@@ -397,7 +400,7 @@ fun reviewHasCert(r: ImportReview): Boolean =
 fun reviewSignIn(r: ImportReview): String {
     val cert = reviewHasCert(r)
     return when {
-        r.kind == VpnKind.WireGuard -> "Key in the file"
+        r.kind == VpnKind.WireGuard -> "Key in the profile"
         r.loginFromPhone && cert -> "Certificate + password · ${r.username}, from your phone"
         r.loginFromPhone -> "Username + password · ${r.username}, from your phone"
         r.needsLogin && cert -> "Certificate + password"
@@ -532,7 +535,7 @@ private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav
             "The file itself", {
                 nav.overlay = Overlay.File("Import › ${review.fileName}", review.name, ServerStore.hideSecrets(review.text))
             },
-            subtitle = "Raw config, ciphers, certificates",
+            subtitle = if (review.kind == VpnKind.WireGuard) "Addresses, peers, endpoint; the key stays hidden" else "Raw config, ciphers, certificates",
             leading = { IconSquare(Ic.File, it) },
             trailing = { Chevron(it) },
         )
@@ -622,11 +625,11 @@ fun importForm(state: VpnUiState, nav: Nav): PhoneForm {
         PhoneSection("how", fields = listOf(PhoneField.Choice("mode", null, listOf("file" to "File", "paste" to "Paste", "link" to "Link"), if (pasted) "paste" else "file"))),
         PhoneSection(
             "file", showWhen = "mode" to "file",
-            fields = listOf(PhoneField.Upload("file", "Choose a file", "The .ovpn, .conf, .p12, .pfx or backup file", ACCEPT, item?.takeIf { !pasted }?.let { Staged(it.name, it.size, kindOf(it)) })),
+            fields = listOf(PhoneField.Upload("file", "Choose a file", "A .ovpn or .conf, a .zip, a QR code picture, a .p12 or .pfx, or a backup", ACCEPT, item?.takeIf { !pasted }?.let { Staged(it.name, it.size, kindOf(it)) })),
         ),
         PhoneSection(
             "paste", showWhen = "mode" to "paste",
-            fields = listOf(PhoneField.Paste("paste", "The profile’s text", "client\ndev tun\nremote vpn.example.net 1194", item?.takeIf { pasted }?.let { Staged(it.name, it.size, "OpenVPN profile") })),
+            fields = listOf(PhoneField.Paste("paste", "The profile’s text", "client\ndev tun\nremote vpn.example.net 1194", item?.takeIf { pasted }?.let { Staged(it.name, it.size, kindOf(it)) })),
         ),
         PhoneSection(
             "link", showWhen = "mode" to "link", note = "The TV downloads it and shows it to you before saving.",

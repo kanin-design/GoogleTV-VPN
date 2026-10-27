@@ -84,7 +84,8 @@ object Changes {
         val ok: Boolean get() = problems.isEmpty() && conflicts.isEmpty()
 
         fun toJson(): JSONObject = JSONObject()
-            .put("change", if (ok) id else JSONObject.NULL)
+            // Nothing to apply when nothing would change: the phone then offers only Back.
+            .put("change", if (ok && lines.isNotEmpty()) id else JSONObject.NULL)
             .put("ok", ok)
             .put("problems", JSONObject(problems))
             .put("conflicts", JSONArray(conflicts.map { JSONObject().put("path", it.path).put("label", it.label).put("phone", it.phone).put("tv", it.tv) }))
@@ -203,8 +204,13 @@ object Changes {
                         continue
                     }
                     val u = uploads[o.optString("file")]
-                    if ((u?.what as? Inspected.Profile)?.review == null) {
+                    val review = (u?.what as? Inspected.Profile)?.review
+                    if (review == null) {
                         problem("Send the file again.")
+                        continue
+                    }
+                    if (Control.hasFile(c.id, review)) {
+                        notes += "${c.name} has this file already. Nothing to update."
                         continue
                     }
                     lines += Line(op.path, "${c.name} › ${Words.fileTitle(s.servers[c.serverId]?.kind).removePrefix("The ")}", "This one", "From ${u!!.name}")
@@ -235,7 +241,8 @@ object Changes {
                     }
                     peek.added.forEach { lines += Line("restore", it, "", "Added") }
                     peek.replaced.forEach { lines += Line("restore", it, "This device’s", "Replaced by the backup’s") }
-                    if (peek.same.isNotEmpty()) notes += "Here already, left alone: ${peek.same.joinToString(", ")}."
+                    val nothingNew = peek.added.isEmpty() && peek.replaced.isEmpty()
+                    if (peek.same.isNotEmpty() && !nothingNew) notes += "Here already, left alone: ${peek.same.joinToString(", ")}."
                     if (peek.replaced.isNotEmpty()) ask += "replace ${peek.replaced.joinToString(", ")} with the backup’s"
                     if (withSettings && peek.settings != null) {
                         val after = s.copy(settings = peek.settings)
@@ -249,7 +256,7 @@ object Changes {
                             }
                         }
                     }
-                    if (peek.added.isEmpty() && peek.replaced.isEmpty() && lines.none { it.path != "restore" }) notes += "Everything in this backup is here already."
+                    if (nothingNew && lines.none { it.path != "restore" }) notes += "Everything in this backup is here already. Nothing to restore."
                 }
                 "certificate" -> {
                     val u = uploads[o.optString("file")]
@@ -282,7 +289,8 @@ object Changes {
             ask += merged
         }
         crossChecks(s, ops, problems)
-        if (lines.isEmpty() && problems.isEmpty() && conflicts.isEmpty()) notes += "Nothing would change: this is how the TV has it already."
+        // Said once: an update or a restore that changes nothing has said so already.
+        if (lines.isEmpty() && problems.isEmpty() && conflicts.isEmpty() && notes.isEmpty()) notes += "Nothing would change: this is how the TV has it already."
         // When it takes effect: now, or with a reconnect of the tunnel that is up.
         val status = VpnController.status.value
         val liveId = status.connectionId?.takeIf { status.isActive || VpnController.pausedUntil.value != null }
@@ -305,6 +313,7 @@ object Changes {
             Effect.NextConnect -> notes += "Tunnel settings take effect the next time a profile connects."
             Effect.Now -> Unit
         }
+        if (lines.any { it.path == "settings.killSwitch" }) notes += "The kill switch changes at once, also on a tunnel that is up."
         if (ops.any { it.op == "delete" && profileOf(s, it.path)?.id == liveId }) notes += "Deleting ${live?.name} disconnects it."
         val pin = s.settings.pinMode != "Off" && s.hasPin
         if (pin) notes += "The TV is locked with a PIN. Type it to apply."

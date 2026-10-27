@@ -405,8 +405,8 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
         Category.Phones -> Schema.groups.first { it.id == "phones" }.let { it.label to it.help }
         Category.OpenVpn -> "OpenVPN" to "Applied on top of every profile. A setting inside the .ovpn file wins unless noted."
         Category.Dns -> "DNS" to "Where name lookups go while the tunnel is up."
-        Category.Automation -> "Automation" to "For home automation apps and ADB. Off until you turn it on."
-        Category.About -> "About" to "${APP_NAME} ${actions.versionName} · build ${BuildConfig.VERSION_CODE} · OpenVPN 3 core."
+        Category.Automation -> "Automation" to if (s.automation) "For home automation apps and ADB. On: they can connect and disconnect." else "For home automation apps and ADB. Off until you turn it on."
+        Category.About -> "About" to "${APP_NAME} ${actions.versionName} · build ${BuildConfig.VERSION_CODE} · OpenVPN 3 and WireGuard."
     }
     PanelHeading("Settings", title, sub)
     // A change that only takes effect on the next connect: one line here while a tunnel is up, not a toast per switch.
@@ -488,7 +488,8 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                 val noneChosen = found != null && found.none { it.pkg in s.apps }
                 item("apps-head") {
                     Column {
-                        SectionLabel(if (only) "Only these apps use the VPN" else "These apps skip the VPN")
+                        // Every app is listed with its switch, so the heading says what the switch does.
+                        SectionLabel(if (only) "Pick the apps that use the VPN" else "Pick the apps that skip the VPN")
                         if (only && noneChosen) {
                             Text(
                                 "Nothing is chosen yet, so every app still uses the VPN.",
@@ -507,7 +508,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                                 line.forEach { app ->
                                     val picked = app.pkg in s.apps
                                     ListRow(
-                                        app.label,
+                                        app.label.ifBlank { app.pkg },
                                         {
                                             actions.changeSettings { it.copy(apps = if (picked) it.apps - app.pkg else it.apps + app.pkg) }
                                         },

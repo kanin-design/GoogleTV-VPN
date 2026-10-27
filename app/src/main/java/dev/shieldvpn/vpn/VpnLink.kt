@@ -125,6 +125,8 @@ object VpnLink {
                 service = binder
                 call(REGISTER) { it.writeStrongBinder(callback) }
                 VpnController.stats = ::stats
+                waiting.forEach { text -> call(LOG) { it.writeString(text) } }
+                waiting.clear()
             }
 
             // The VPN's process ended. Android takes its tunnel down with it.
@@ -162,8 +164,19 @@ object VpnLink {
             if (!call(CLEAR_LOG) {}) VpnController.clearLog()
         }
 
-        /** Adds a line to the service's log, which comes back over the link. False when it isn't bound. */
-        fun log(text: String): Boolean = call(LOG) { it.writeString(text) }
+        /**
+         * Adds a line to the service's log, which comes back over the link. While the binding is
+         * still being made it waits for it. False when it isn't bound.
+         */
+        fun log(text: String): Boolean {
+            if (bound && service == null) {
+                if (waiting.size < 20) waiting += text
+                return true
+            }
+            return call(LOG) { it.writeString(text) }
+        }
+
+        private val waiting = mutableListOf<String>()
 
         fun setKillSwitch(on: Boolean): Boolean = call(KILL_SWITCH) { it.writeInt(if (on) 1 else 0) }
 
@@ -256,6 +269,8 @@ object VpnLink {
         p.writeInt(t.mtu ?: -1)
         p.writeString(t.remote)
         p.writeString(t.publicIp)
+        p.writeString(t.cipher)
+        p.writeInt(if (t.compressed) 1 else 0)
         p.writeLong(t.bytesIn)
         p.writeLong(t.bytesOut)
     }
@@ -269,6 +284,8 @@ object VpnLink {
             mtu = p.readInt().takeIf { it >= 0 },
             remote = p.readString(),
             publicIp = p.readString(),
+            cipher = p.readString(),
+            compressed = p.readInt() == 1,
             bytesIn = p.readLong(),
             bytesOut = p.readLong(),
         )

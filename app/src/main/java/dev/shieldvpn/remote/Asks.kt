@@ -18,6 +18,8 @@ object Asks {
         val yes: String,
         val no: String = "Not now",
         val danger: Boolean = false,
+        /** Asked by a phone that is paired already, rather than one pairing with a code. */
+        val paired: Boolean = true,
     )
 
     private class Waiting(val ask: Ask) {
@@ -36,8 +38,8 @@ object Asks {
     /** Set by the screens: true while they are in front and can show a question. */
     @Volatile var screensInFront = false
 
-    fun ask(eyebrow: String, title: String, text: String, yes: String, danger: Boolean = false): Ask =
-        synchronized(lock) { Ask(next++, eyebrow, title, text, yes, danger = danger) }
+    fun ask(eyebrow: String, title: String, text: String, yes: String, danger: Boolean = false, paired: Boolean = true): Ask =
+        synchronized(lock) { Ask(next++, eyebrow, title, text, yes, danger = danger, paired = paired) }
 
     /**
      * Shows [ask] on the TV and waits on this thread for the answer: true for [Ask.yes], false for

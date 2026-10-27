@@ -101,7 +101,16 @@ object RemoteApi : HttpServer.Route {
         seq++
         events.addLast(seq to event.put("seq", seq))
         while (events.size > 200) events.removeFirst()
+        if (event.optString("t") == "change") remember(event)
         lock.notifyAll()
+    }
+
+    /** The last word on each recent change, for a page that lost track of one. Under [lock]. */
+    private val outcomes = LinkedHashMap<String, JSONObject>()
+
+    private fun remember(event: JSONObject) {
+        outcomes[event.optString("change")] = event
+        while (outcomes.size > 30) outcomes.remove(outcomes.keys.first())
     }
 
     /** Numbers the log's lines as they come, so a page asks only for what it hasn't got. */
@@ -178,6 +187,8 @@ object RemoteApi : HttpServer.Route {
         "schema" -> JSONObject().put("ok", true).put("schema", onMain { launcherApps(); Schema.toJson(Control.state.value) })
         "changes" -> JSONObject(onMain { Changes.check(req).toJson().toString() }).put("ok", true)
         "changes/apply" -> apply(device, req.optString("change"), req.optBoolean("test"), req.optString("pin").ifEmpty { null })
+        // Null after the TV's app restarted, which forgets every change it was making.
+        "changes/state" -> JSONObject().put("ok", true).put("event", synchronized(lock) { outcomes[req.optString("change")] } ?: JSONObject.NULL)
         "files" -> file(req)
         "download" -> download(device, req)
         "devices/remove" -> removeDevice(device, req.optString("id"), req)
@@ -228,7 +239,8 @@ object RemoteApi : HttpServer.Route {
         }
         val req = runCatching { JSONObject(String(plain)) }.getOrNull() ?: JSONObject()
         val claim = req.optString("claim")
-        val name = req.optString("name").trim().take(40).ifEmpty { "Phone" }
+        // Numbered when a paired phone has the name already; the phone hears the name it got.
+        val name = Devices.uniqueName(req.optString("name"))
         var askNow = false
         val answer = synchronized(o) {
             when {
@@ -249,9 +261,11 @@ object RemoteApi : HttpServer.Route {
         } ?: run {
             if (askNow) {
                 Thread({
+                    // Not now first, as for every other question a phone causes: one OK hands it everything.
                     val ask = Asks.ask(
                         "Settings › Phone access", "Pair “$name”?",
-                        "It can see and change $APP_NAME from its browser, on your home network. Pair only a phone you know.", "Pair",
+                        "From ${r.from}. It can see and change $APP_NAME from its browser, on your home network. Pair only a phone you know.", "Pair",
+                        danger = true, paired = false,
                     )
                     val yes = Asks.await(ask, ASK_MS) == true
                     val result = if (yes) Devices.add(name).let { (d, key) -> Pairing.Result.Paired(d, key) } else Pairing.Result.Refused
@@ -480,6 +494,7 @@ object RemoteApi : HttpServer.Route {
 
     private fun apply(device: Device, id: String, test: Boolean, pin: String?): JSONObject {
         val p = onMain { Changes.take(id) } ?: return fail("This change has run out, or it was applied already. Check it again.")
+        synchronized(lock) { remember(JSONObject().put("t", "change").put("change", id).put("state", "started")) }
         applying.incrementAndGet()
         applier.execute {
             try {

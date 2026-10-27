@@ -107,8 +107,17 @@ object Control {
      * panel) needs it. While nobody does, nothing is bound, and an idle VPN process can go.
      */
     fun attachLink() {
-        if (linkUsers++ == 0) link = VpnLink.Client(app).also { it.open() }
+        if (linkUsers++ != 0) return
+        link = VpnLink.Client(app).also { c ->
+            c.open()
+            unsent.forEach(c::log)
+            unsent.clear()
+        }
     }
+
+    // Lines noted while nothing follows the VPN's process, such as the cut-off note at start: its
+    // log replaces this process's copy when the link opens, so they are sent there then.
+    private val unsent = mutableListOf<String>()
 
     fun detachLink() {
         if (linkUsers == 0) return
@@ -124,7 +133,9 @@ object Control {
 
     /** A line in the connection log, kept by the VPN's process with the rest: "Pixel 8 set …". */
     fun note(text: String) {
-        if (link?.log(text) != true) VpnController.log(text)
+        val l = link
+        if (l == null && unsent.size < 20) unsent += text
+        if (l?.log(text) != true) VpnController.log(text)
     }
 
     // ---- The tunnel ---------------------------------------------------------------
@@ -490,6 +501,15 @@ object Control {
 
     private fun peerKeys(text: String): List<String> =
         text.lines().map { it.substringBefore('#').trim() }.filter { it.lowercase().startsWith("publickey") }.map { it.substringAfter('=').trim() }
+
+    /** [review] is the file profile [id] has already, with the same keys: updating would change nothing. */
+    fun hasFile(id: String, review: ImportReview): Boolean {
+        val c = connection(id) ?: return false
+        val raw = ServerStore.rawConfig(app, c.serverId) ?: return false
+        if (raw.trim() != review.text.trim()) return false
+        if (review.wgSecrets != null && review.wgSecrets != CredentialStore.wireGuard(app, c.id)) return false
+        return review.username.isEmpty() || review.username == _state.value.logins[c.id]?.username && review.password.isEmpty()
+    }
 
     /**
      * Puts [review]'s file in place of profile [id]'s, keeping its name, look and settings; a login or

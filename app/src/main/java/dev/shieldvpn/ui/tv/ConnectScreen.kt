@@ -167,7 +167,9 @@ private fun Hero(
             }
             else -> Idle(state, c)
         }
-        Meta(listOfNotNull(server?.let { Words.serverLine(it.host, it.port, it.protocol, info?.cipher) }).ifEmpty { listOf(" ") })
+        // Connected, the cipher the server chose; otherwise what the file suggests.
+        val cipher = state.tunnel?.cipher?.takeIf { current } ?: info?.cipher
+        Meta(listOfNotNull(server?.let { Words.serverLine(it.host, it.port, it.protocol, cipher) }).ifEmpty { listOf(" ") })
         // The buttons change with the tunnel (Resume now goes, Pause comes), and the one pressed
         // goes with them: focus moves to the new first button instead of falling to the cards.
         var inActions by remember { mutableStateOf(false) }

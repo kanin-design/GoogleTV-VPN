@@ -275,7 +275,7 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
                         "Tunnel IP" to (t?.address ?: "—"),
                         "DNS servers" to (t?.dns?.joinToString(", ")?.ifEmpty { null } ?: "—"),
                         "Routes" to (t?.routes?.lastOrNull() ?: "—"),
-                        "Data cipher" to (info?.cipher ?: "Chosen by the server"),
+                        "Data cipher" to ((t?.cipher ?: info?.cipher)?.let { if (t?.compressed == true) "$it, with compression" else it } ?: "Chosen by the server"),
                         if (info?.kind == VpnKind.WireGuard) "Key exchange" to "Curve25519" else "Control channel" to (info?.tls ?: "TLS"),
                         "Transferred" to (bytes?.let { "${fmtBytes(it[0])} in · ${fmtBytes(it[1])} out" } ?: "—"),
                         "Connected for" to (since?.let { fmtDuration((now - it).coerceAtLeast(0) / 1000) } ?: "—"),

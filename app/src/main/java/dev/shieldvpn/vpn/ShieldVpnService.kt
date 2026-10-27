@@ -665,6 +665,10 @@ class ShieldVpnService : VpnService() {
         private var dnsFromServer = false
         private var hasIpv6 = false
         private var info = TunnelInfo()
+        // What the server chose for this session. The file's data-ciphers line is only a guess:
+        // the core offers every cipher it has, and the server picks.
+        private var cipher: String? = null
+        private var compressed = false
 
         // The core's thread calls these; an exception must not end the VPN's process.
         override fun onEvent(name: String, info: String, error: Boolean) {
@@ -677,6 +681,16 @@ class ShieldVpnService : VpnService() {
             when (name) {
                 "CONNECTED" -> onConnected(id)
                 "RECONNECTING" -> onReconnecting(id)
+                // Each session asks for its options again, and the server may choose differently.
+                "GET_CONFIG" -> {
+                    cipher = null
+                    compressed = false
+                }
+                "COMPRESSION_ENABLED" -> {
+                    compressed = true
+                    VpnController.updateTunnel { it.copy(compressed = true) }
+                    VpnController.log("The server compresses what it sends. Video is compressed already, so this only costs the server speed: turn compression off in the server’s settings.")
+                }
                 // finish() reports how the session ended.
                 "DISCONNECTED" -> Unit
                 else -> if (error) failure = reasonFor(name, info)
@@ -687,6 +701,8 @@ class ShieldVpnService : VpnService() {
             Log.d(TAG, text)
             val line = text.trim()
             if (line.isEmpty()) return
+            // The options the server pushed name the data cipher it chose.
+            if (line.startsWith("OPTIONS:")) PUSHED_CIPHER.find(line)?.let { cipher = it.groupValues[1] }
             val kind = when {
                 "AUTH_FAILED" in line || "rror" in line || "TIMEOUT" in line -> LogKind.Err
                 "Session is ACTIVE" in line -> LogKind.Ok
@@ -745,7 +761,7 @@ class ShieldVpnService : VpnService() {
         private fun establishTunnel(): Int {
             val b = builder ?: return -1
             // OpenVPN always carries all IPv4 traffic, whatever the server pushes.
-            info = applyRules(b, info, hasIpv6, dnsFromServer, allTraffic = true)
+            info = applyRules(b, info, hasIpv6, dnsFromServer, allTraffic = true).copy(cipher = cipher, compressed = compressed)
             val pfd = b.establish() ?: return -1
             // The new interface has taken over from the blackhole, if one was holding traffic back.
             stopBlackhole()
@@ -801,6 +817,9 @@ class ShieldVpnService : VpnService() {
 
         private const val EXTRA_PLAN = "plan"
         private const val EXTRA_UNTIL = "until"
+
+        /** One option in the core's "OPTIONS:" log of what the server pushed: `3 [cipher] [AES-256-GCM]`. */
+        private val PUSHED_CIPHER = Regex("""\[cipher\] \[([A-Za-z0-9-]+)\]""")
 
         /** IPv4 without 10/8, 172.16/12, 192.168/16 and multicast: the internet, minus the home network. */
         private val PUBLIC_ROUTES = listOf(

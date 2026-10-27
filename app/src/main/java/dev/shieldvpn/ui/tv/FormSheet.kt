@@ -179,7 +179,8 @@ fun FormSheet(nav: Nav, req: Requesters, spec: FormSpec, close: () -> Unit, sess
 
     Sheet(if (spec.phone != null) 1100f else 820f) {
         Row(horizontalArrangement = Arrangement.spacedBy(34.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            // An error line or the Back note takes room the buttons need on the tallest sheets.
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(if (errors.isEmpty() && !warned) 14.dp else 8.dp)) {
                 PanelHeading(spec.eyebrow, spec.title, spec.sub, titleSize = 32f)
                 @Composable
                 fun box(f: FormField, modifier: Modifier) {

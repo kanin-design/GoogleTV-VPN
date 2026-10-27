@@ -34,14 +34,10 @@
     phone: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(235,242,248,.8)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/></svg>',
   };
   const fmtBytes = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
-  const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  function fmtFor(ms) {
-    const m = Math.floor(ms / 60000);
-    if (m < 1) return 'less than a minute';
-    if (m < 60) return m + ' min';
-    const h = Math.floor(m / 60);
-    return h + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
-  }
+  // Hours and minutes on a 24-hour clock, as the TV shows them.
+  const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  // A running time as the TV's Connect shows it: 00:02:10.
+  const hms = (ms) => { const t = Math.max(0, Math.floor(ms / 1000)); return [Math.floor(t / 3600), Math.floor(t / 60) % 60, t % 60].map((n) => String(n).padStart(2, '0')).join(':'); };
   function ago(ms) {
     const m = Math.floor((Date.now() - ms) / 60000);
     if (m < 1) return 'just now';
@@ -139,7 +135,8 @@
       }
       // Only the TV's own "not paired" forgets the key; anything else may pass, and is tried again.
       if (j.error === 'pair') {
-        unpaired('removed');
+        // A request still out when this phone unpaired itself is refused too: that page stays.
+        if (me) unpaired('removed');
         throw new Unpaired();
       }
       throw new Offline('The TV didn’t accept this phone’s request. Trying again…');
@@ -161,6 +158,16 @@
   let lastTest = null;
   const draft = new Map(); // path -> op
   let sheetWatch = null; // the change the sheet follows
+
+  // What is typed into a form the page draws again on every push from the TV: kept by a name
+  // until the form is done with, so a redraw refills it instead of emptying it.
+  const typed = new Map();
+  function keepTyped(input, key) {
+    if (typed.has(key)) input.value = typed.get(key);
+    input.addEventListener('input', () => typed.set(key, input.value));
+    return input;
+  }
+  function forgetTyped(prefix) { [...typed.keys()].forEach((k) => { if (k.startsWith(prefix)) typed.delete(k); }); }
 
   function setOnline(on, why) {
     online = on;
@@ -268,7 +275,7 @@
         }
         if (res.r.status === 401) {
           status.className = 'info bad';
-          status.textContent = 'This code has ended. On the TV, open Settings › Phone access › Pair a phone and scan the new code.';
+          status.textContent = 'This code was used already, or it ran out. On the TV, open Settings › Phone access › Pair a phone and scan the new code.';
           return;
         }
         const plain = res.j && res.j.c ? unseal(k.down, 1, n, aad, unb64(res.j.c)) : null;
@@ -313,8 +320,8 @@
     $('tabs').hidden = true;
     $('tray').hidden = true;
     $('live').hidden = true;
-    add(main, el('h1', null, why === 'new' ? 'Pair this phone first' : 'This phone isn’t paired any more'),
-      el('p', 'lede', why === 'removed' ? 'It was removed on the TV, or it wasn’t used for 90 days.' : why === 'key' ? 'Its key doesn’t match the TV’s.' : 'The panel works on phones paired with the TV.'));
+    add(main, el('h1', null, why === 'new' ? 'Pair this phone first' : why === 'self' ? 'This phone is unpaired' : 'This phone isn’t paired any more'),
+      el('p', 'lede', why === 'removed' ? 'It was removed on the TV, or it wasn’t used for 90 days.' : why === 'self' ? 'You unpaired it. Pair it again to use the panel.' : 'The panel works on phones paired with the TV.'));
     add(main, add(el('section', 'card'), el('h2', null, 'To pair it'),
       add(el('ol', 'lede'), el('li', null, 'On the TV, open ' + APP + ' › Settings › Phone access.'), el('li', null, 'Choose Pair a phone.'), el('li', null, 'Scan the code with this phone’s camera.'))));
   }
@@ -326,11 +333,15 @@
     while (running) {
       try {
         const r = await api('events', { after: SEQ, v: V, log: [LOG.epoch, LOG.next] });
+        const cameBack = !online;
         if (!online) setOnline(true);
         wait = 1000;
         V = r.v;
-        const prevSeq = SEQ;
+        // The TV's app started again: its events count from the start, and what it was doing is gone.
+        const restarted = SEQ >= 0 && r.seq < SEQ;
+        const prevSeq = restarted ? -1 : SEQ;
         SEQ = r.seq;
+        if (sheetWatch && (cameBack || restarted || Date.now() - sheetWatch.seen > 90000)) checkWatch();
         if (r.state) {
           S = r.state;
           draw();
@@ -403,6 +414,11 @@
     window.scrollTo(0, y);
   }
   document.addEventListener('focusout', () => setTimeout(() => { if (pendingDraw) draw(); }, 150));
+  // A field typed in near the bottom stays clear of the tray of changes.
+  document.addEventListener('focusin', (e) => {
+    if (!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || $('tray').hidden) return;
+    setTimeout(() => e.target.scrollIntoView({ block: 'center' }), 250);
+  });
   window.addEventListener('hashchange', () => { window.scrollTo(0, 0); draw(true); });
   document.querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => { location.hash = '#/' + b.dataset.tab; }; });
 
@@ -419,7 +435,8 @@
     b.append(document.createTextNode(text));
     b.onclick = async () => {
       b.disabled = true;
-      try { await onclick(); } finally { b.disabled = false; }
+      // Buttons of a change that is under way stay off until it ends (data-busy on their row).
+      try { await onclick(); } finally { if (!b.closest('[data-busy]')) b.disabled = false; }
     };
     return b;
   }
@@ -434,9 +451,9 @@
   // ---- Status --------------------------------------------------------------------------------
   function heroWords(t, p) {
     switch (t.status) {
-      case 'connected': return ['on', 'Connected', 'for ' + fmtFor(Date.now() - t.since)];
-      case 'connecting': return ['busy', 'Connecting…', 'Setting up the tunnel to ' + (p ? p.name : 'the server') + '.'];
-      case 'paused': return ['busy', 'Paused', 'It comes back by itself at ' + clock(t.pausedUntil) + '.'];
+      case 'connected': return ['on', 'Connected', 'Connected · ' + hms(Date.now() - t.since)];
+      case 'connecting': return ['busy', 'Connecting…', p && p.server ? 'Reaching ' + p.server.split(' · ')[0] : 'Reaching the server'];
+      case 'paused': return ['busy', 'Paused', 'Paused until ' + clock(t.pausedUntil) + '. Traffic goes directly to the internet until then.'];
       case 'blocked': return ['bad', 'Blocking traffic', 'The tunnel dropped. The kill switch holds traffic back until it is back.'];
       case 'failed': return ['bad', 'Couldn’t connect', t.error || ''];
       default: return ['', 'Not connected', p ? p.status.line : ''];
@@ -461,21 +478,24 @@
     hero.append(w);
     const facts = el('dl', 'facts');
     if (t.status === 'connected') {
-      add(facts, fact('Sites see', t.ip || 'Looking it up…'), fact('Tunnel IP', t.address || '–'),
+      add(facts, fact('VPN IP', t.ip || 'Looking it up…'), fact('Tunnel IP', t.address || '–'),
         fact('Server', p.server || '–', true), fact('Traffic', '–', true, 'bytes'));
     } else {
       add(facts, fact('Server', p.server || '–', true), fact('Sign-in', p.signIn.summary, true, null, true));
     }
     hero.append(facts);
     const actions = el('div', 'actions');
+    // The TV's buttons for each state, in its words.
     if (t.status === 'paused') {
       add(actions, button('Resume now', 'mint', () => act('resume'), ICON.power),
-        add(el('div', 'pair'), button('15 more min', 'ghost', () => act('pauseMore')), button('Disconnect', 'ghost', () => act('disconnect'))));
+        add(el('div', 'pair'), button('15 more minutes', 'ghost', () => act('pauseMore')), button('Disconnect', 'ghost', () => act('disconnect'))));
+    } else if (t.status === 'connecting') {
+      add(actions, button('Cancel', '', () => act('disconnect'), ICON.power));
     } else if (live) {
       add(actions, button('Disconnect', '', () => act('disconnect'), ICON.power),
-        add(el('div', 'pair'), button('Pause 15 min', 'ghost', () => act('pause')), button('Test', 'ghost', runTest)));
+        add(el('div', 'pair'), button('Pause 15 minutes', 'ghost', () => act('pause')), button('Test', 'ghost', runTest)));
     } else {
-      add(actions, button('Connect', 'mint', () => connect(p.id), ICON.power));
+      add(actions, button(t.status === 'failed' ? 'Try again' : 'Connect', 'mint', () => connect(p.id), ICON.power));
     }
     hero.append(actions);
     main.append(hero);
@@ -505,9 +525,13 @@
     lastBytes = b;
     const e = $('bytes');
     if (e) e.textContent = '↓ ' + fmtBytes(b[0]) + '   ↑ ' + fmtBytes(b[1]);
-    const w = $('why');
-    if (w && S && S.tunnel.status === 'connected') w.textContent = 'for ' + fmtFor(Date.now() - S.tunnel.since);
+    tick();
   }
+  function tick() {
+    const w = $('why');
+    if (w && S && S.tunnel.status === 'connected' && route()[0] === 'status') w.textContent = 'Connected · ' + hms(Date.now() - S.tunnel.since);
+  }
+  setInterval(tick, 1000);
 
   async function runTest() {
     lastTest = { running: true };
@@ -552,7 +576,7 @@
     const pw = el('input', 'input');
     pw.type = 'password';
     pw.placeholder = 'Password';
-    pw.autocomplete = 'current-password';
+    pw.autocomplete = 'off';
     const keep = el('input', 'sw');
     keep.type = 'checkbox';
     // Saving a password is a change: with the PIN lock on, it is used this once only.
@@ -624,7 +648,7 @@
     const del = el('button', 'row');
     add(del, add(el('div', 'txt'), el('b', null, 'Delete this profile'), el('small', null, p.signIn.summary.startsWith('Password saved') ? 'It goes with its saved password. The TV asks first' : 'The TV asks first')));
     del.querySelector('b').style.color = 'var(--red)';
-    del.onclick = () => review([{ op: 'delete', path: 'profiles.' + p.id }], { title: 'Delete ' + p.name + '?' });
+    del.onclick = () => review([{ op: 'delete', path: 'profiles.' + p.id }], { title: 'Delete ' + p.name + '?', done: () => { location.hash = '#/profiles'; toast('Deleted ' + p.name); } });
     add(rows, dl, del);
     main.append(add(more, rows));
   }
@@ -639,7 +663,9 @@
       ta.value = text;
       document.body.append(ta);
       ta.select();
-      try { document.execCommand('copy'); toast('Copied'); } catch (x) { toast('Select it and copy it by hand', true); }
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (x) { /* not allowed */ }
+      if (ok) toast('Copied'); else toast('Select it and copy it by hand', true);
       ta.remove();
     }
   }
@@ -693,7 +719,7 @@
         const ta = el('textarea', 'input');
         ta.id = id;
         ta.value = (value || []).join('\n');
-        ta.placeholder = 'One a line';
+        ta.placeholder = 'One on each line';
         ta.spellcheck = false;
         ta.autocapitalize = 'off';
         ta.oninput = () => setDraft(path, ta.value.split(/[\s,]+/).filter(Boolean));
@@ -795,11 +821,12 @@
       pin = await askPin('Type it to remove ' + d.name + '.');
       if (pin == null) return;
     }
+    if (d.you && !(await confirmSheet('Unpair this phone?', 'It can’t reach the TV until it is paired again.', 'Unpair'))) return;
     if (!d.you) toast('Press Remove on the TV');
     try {
       const r = await api('devices/remove', { id: d.id, pin });
       if (!r.ok) return toast(r.text, true);
-      if (d.you) unpaired('new');
+      if (d.you) unpaired('self');
       else toast(d.name + ' was removed');
     } catch (e) { if (!(e instanceof Unpaired)) toast(e.message, true); }
   }
@@ -807,25 +834,26 @@
   function backupCard() {
     const card = el('section', 'card');
     card.append(el('p', 'lede', S.backup.last + '. Backups are encrypted with your passphrase and hold every profile, saved password and setting.'));
-    const pass = el('input', 'input');
+    const pass = keepTyped(el('input', 'input'), 'backup:new');
     pass.type = 'password';
     pass.autocomplete = 'new-password';
-    pass.placeholder = S.backup.passphrase ? 'A new passphrase' : 'Choose a passphrase: 6 characters or more';
-    const again = el('input', 'input');
+    pass.placeholder = S.backup.passphrase ? 'A new passphrase' : 'A passphrase: 6 characters or more';
+    const again = keepTyped(el('input', 'input'), 'backup:again');
     again.type = 'password';
     again.autocomplete = 'new-password';
     again.placeholder = 'The same again';
-    const current = el('input', 'input');
+    const current = keepTyped(el('input', 'input'), 'backup:current');
     current.type = 'password';
-    current.autocomplete = 'current-password';
+    current.autocomplete = 'off';
     current.placeholder = 'The current passphrase';
     const err = el('p', 'err');
     err.hidden = true;
-    const set = button(S.backup.passphrase ? 'Change the passphrase' : 'Set the passphrase', 'ghost', async () => {
+    // The TV's words for the same thing.
+    const set = button(S.backup.passphrase ? 'Change the backup passphrase' : 'Choose a backup passphrase', 'ghost', async () => {
       err.hidden = true;
       if (pass.value.length < 6) { err.hidden = false; err.textContent = 'At least 6 characters'; return; }
       if (pass.value !== again.value) { err.hidden = false; err.textContent = 'Not the same as the first. Type it again'; return; }
-      await review([Object.assign({ op: 'set', path: 'backup.passphrase', value: pass.value }, S.backup.passphrase ? { current: current.value } : {})]);
+      await review([Object.assign({ op: 'set', path: 'backup.passphrase', value: pass.value }, S.backup.passphrase ? { current: current.value } : {})], { done: () => forgetTyped('backup:') });
     });
     add(card, S.backup.passphrase ? current : null, pass, again, err, add(el('div', 'actions'),
       S.backup.passphrase ? button('Download a backup', '', () => download({ what: 'backup' })) : null,
@@ -899,7 +927,10 @@
   function arrivedCard(a) {
     const card = el('section', 'card');
     const again = el('button', 'link', 'Send something else');
-    again.onclick = () => { arrived = null; draw(true); };
+    again.onclick = () => { arrived = null; forgetTyped('add:'); draw(true); };
+    // Typed text survives the page being drawn again, until this file is done with.
+    const k = 'add:' + a.file + ':';
+    const finished = () => { arrived = null; forgetTyped('add:'); };
     if (a.what === 'profile') {
       const rv = a.review;
       add(card, add(el('div', 'meta'), tag(rv.kind, rv.kindLabel)), el('h2', null, rv.name));
@@ -907,6 +938,7 @@
       const name = el('input', 'input');
       name.value = rv.name;
       name.maxLength = 60;
+      keepTyped(name, k + 'name');
       add(card, add(el('div', 'field'), el('label', null, 'Name'), el('span', 'help', 'Shown on the TV’s cards and on Connect.'), name));
       card.lastChild.style.padding = '12px 0 0';
       let user = null;
@@ -915,11 +947,14 @@
         user = el('input', 'input');
         user.placeholder = 'Username';
         user.value = rv.username || '';
-        user.autocomplete = 'username';
+        user.autocomplete = 'off';
+        keepTyped(user, k + 'user');
         pw = el('input', 'input');
         pw.type = 'password';
         pw.placeholder = rv.hasPassword ? 'Password (in the file)' : 'Password';
-        pw.autocomplete = 'current-password';
+        // The VPN's password, not this page's: the browser shouldn't offer to save it.
+        pw.autocomplete = 'off';
+        keepTyped(pw, k + 'pw');
         const f = add(el('div', 'field'), el('label', null, 'Sign-in'), el('span', 'help', 'Saved on the TV, encrypted. Leave them empty to type them on the TV when it connects.'), user, pw);
         f.style.padding = '12px 0 0';
         card.append(f);
@@ -930,50 +965,71 @@
       const acts = el('div', 'actions');
       if (a.same) {
         card.append(el('p', 'info', a.same.name + ' is for the same server. Update it with this file, or add this as a new profile.'));
-        acts.append(button('Update ' + a.same.name, 'mint', () => review([{ op: 'update', file: a.file, path: 'profiles.' + a.same.id }], { done: () => { arrived = null; } })));
+        acts.append(button('Update ' + a.same.name, 'mint', () => review([{ op: 'update', file: a.file, path: 'profiles.' + a.same.id }], { done: finished })));
       }
-      add(acts, button(a.same ? 'Add as a new profile' : 'Add it', a.same ? 'ghost' : 'mint', () => review(ops(), { title: 'Add ' + (name.value.trim() || rv.name) + '?', done: () => { arrived = null; location.hash = '#/profiles'; } })));
+      add(acts, button(a.same ? 'Add as a new profile' : 'Add it', a.same ? 'ghost' : 'mint', () => review(ops(), { title: 'Add ' + (name.value.trim() || rv.name) + '?', done: () => { finished(); location.hash = '#/profiles'; } })));
       add(card, acts, again);
       return card;
     }
     if (a.what === 'backup') {
       add(card, el('h2', null, 'A backup: ' + a.name), el('p', 'lede', 'Type its passphrase. You see what it adds and changes before anything happens.'));
-      const pass = el('input', 'input');
+      const pass = keepTyped(el('input', 'input'), k + 'pass');
       pass.type = 'password';
       pass.placeholder = 'The backup’s passphrase';
-      const what = segmented([['profiles', 'Profiles only'], ['all', 'Profiles and settings']], 'all');
-      const sameName = segmented([['both', 'Keep both'], ['replace', 'Replace it']], 'both');
+      // The narrower choice first: settings come along only when asked for.
+      const what = segmented([['profiles', 'Profiles only'], ['all', 'Profiles and settings']], 'profiles', k + 'what');
+      const sameName = segmented([['both', 'Keep both'], ['replace', 'Replace it']], 'both', k + 'same');
       add(card, pass, el('span', 'help', 'What to restore'), what.el, el('span', 'help', 'When a profile with the same name is on the TV'), sameName.el,
-        add(el('div', 'actions'), button('Check the backup', 'mint', () => review([{ op: 'restore', file: a.file, passphrase: pass.value, settings: what.value() === 'all', replace: sameName.value() === 'replace' }], { title: 'Restore this backup?', done: () => { arrived = null; location.hash = '#/profiles'; } }))), again);
-      card.querySelectorAll('.help').forEach((h) => { h.style.marginTop = '14px'; });
+        add(el('div', 'actions'), button('Check the backup', 'mint', () => review([{ op: 'restore', file: a.file, passphrase: pass.value, settings: what.value() === 'all', replace: sameName.value() === 'replace' }], { title: 'Restore this backup?', done: () => { finished(); location.hash = '#/profiles'; } }))), again);
+      card.querySelectorAll('.help').forEach((h) => { h.style.margin = '14px 0 8px'; h.style.display = 'block'; });
       return card;
     }
     if (a.what === 'p12') {
       add(card, el('h2', null, 'A certificate: ' + a.name), el('p', 'lede', 'Type the password it was exported with. The TV finds the profile it belongs to.'));
-      const pass = el('input', 'input');
+      const pass = keepTyped(el('input', 'input'), k + 'pass');
       pass.type = 'password';
       pass.placeholder = 'The certificate’s password';
       const sel = el('select', 'input');
       [{ id: '', name: 'The profile it belongs to' }].concat(a.targets).forEach((t) => { const o = el('option', null, t.name); o.value = t.id; sel.append(o); });
-      const keep = segmented([['file', 'In the profile'], ['keystore', 'In Android’s keystore']], 'file');
-      add(card, pass, sel, el('span', 'help', 'Where the key is kept'), keep.el, add(el('div', 'actions'), button('Check it', 'mint', () => review([{ op: 'certificate', file: a.file, password: pass.value, path: sel.value ? 'profiles.' + sel.value : '', keep: keep.value() }], { done: () => { arrived = null; location.hash = '#/profiles'; } }))), again);
+      keepTyped(sel, k + 'profile');
+      const keep = segmented([['file', 'In the profile'], ['keystore', 'In Android’s keystore']], 'file', k + 'keep');
+      add(card, pass, sel, el('span', 'help', 'Where the key is kept'), keep.el, add(el('div', 'actions'), button('Check it', 'mint', () => review([{ op: 'certificate', file: a.file, password: pass.value, path: sel.value ? 'profiles.' + sel.value : '', keep: keep.value() }], { done: () => { finished(); location.hash = '#/profiles'; } }))), again);
       return card;
     }
     add(card, el('p', 'info bad', a.text || 'The TV couldn’t read that.'), again);
     return card;
   }
 
-  function segmented(options, initial) {
-    let v = initial;
+  /** Buttons for one of [options]; with [key], the choice survives the page being drawn again. */
+  function segmented(options, initial, key) {
+    let v = key && typed.has(key) ? typed.get(key) : initial;
     const box = el('div', 'seg');
     options.forEach(([value, label]) => {
       const b = el('button', null, label);
       b.type = 'button';
       b.setAttribute('aria-pressed', value === v);
-      b.onclick = () => { v = value; box.querySelectorAll('button').forEach((x, i) => x.setAttribute('aria-pressed', options[i][0] === v)); };
+      b.onclick = () => {
+        v = value;
+        if (key) typed.set(key, v);
+        box.querySelectorAll('button').forEach((x, i) => x.setAttribute('aria-pressed', options[i][0] === v));
+      };
       box.append(b);
     });
     return { el: box, value: () => v };
+  }
+
+  /** A yes-or-no question as a sheet; true when [yes] is pressed. */
+  function confirmSheet(title, text, yes) {
+    return new Promise((done) => {
+      const s = openSheet();
+      add(s, el('h2', null, title), el('p', 'lede', text), add(el('div', 'actions'),
+        button(yes, 'danger', () => { closeSheet(); done(true); }), button('Keep', 'ghost', () => { closeSheet(); done(false); })));
+    });
+  }
+
+  async function clearLog() {
+    if (!(await confirmSheet('Clear the log?', 'Its lines go on the TV too, including what phones changed. The log then starts with who cleared it.', 'Clear'))) return;
+    act('clearLog');
   }
 
   // ---- Downloads -----------------------------------------------------------------------------
@@ -1047,7 +1103,7 @@
     main.append(box);
     main.append(add(el('div', 'toolbar'),
       button('Download', 'ghost small', () => save((S ? S.tv.app : APP).toLowerCase().replace(/[^a-z0-9]/g, '') + '-log.txt', enc.encode(LOG.lines.map((x) => x[0] + '  ' + x[1]).join('\n') + '\n'), 'text/plain')),
-      button('Clear', 'ghost small', () => act('clearLog'))));
+      button('Clear', 'ghost small', clearLog)));
     setTimeout(() => { box.scrollTop = box.scrollHeight; }, 0);
   }
 
@@ -1096,7 +1152,7 @@
       return item ? item.label : op ? ({ import: 'The new profile', update: 'The file', restore: 'The backup', certificate: 'The certificate', delete: 'Delete' }[op.op] || 'This change') : 'This change';
     };
     if (p.conflicts.length) {
-      s.append(el('p', 'info warn', 'The TV changed these since this page showed them:'));
+      s.append(el('p', 'info warn', 'The TV or another phone changed these since this page showed them:'));
       const d = el('div', 'diff');
       p.conflicts.forEach((c) => d.append(add(el('div'), el('b', null, c.label), add(el('span'), el('s', null, c.phone), document.createTextNode('→ on the TV now:'), el('em', null, c.tv)))));
       s.append(d);
@@ -1126,18 +1182,23 @@
       return;
     }
     let pin = null;
+    // With the PIN lock on, Apply waits for a whole PIN: an empty one would only be refused.
+    const pinReady = () => !pin || pin.value.length >= 4;
+    const gate = () => acts.querySelectorAll('button[data-go]').forEach((b) => { b.disabled = !pinReady(); });
     if (p.pin) {
       pin = el('input', 'input');
       pin.type = 'password';
       pin.inputMode = 'numeric';
       pin.placeholder = 'The TV’s PIN';
       pin.maxLength = 8;
+      pin.oninput = gate;
       s.append(pin);
     }
     const progress = el('div', 'progress');
     progress.hidden = true;
     const acts = el('div', 'actions');
     const go = async (test) => {
+      acts.dataset.busy = '1';
       acts.querySelectorAll('button').forEach((b) => { b.disabled = true; });
       progress.hidden = false;
       progress.className = 'progress';
@@ -1147,20 +1208,40 @@
       try {
         const r = await api('changes/apply', { change: p.change, test, pin: pin ? pin.value : '' });
         if (!r.ok) throw new Error(r.text);
-        sheetWatch = { id: p.change, progress, acts, ops, opts, pin, sheet: s };
+        sheetWatch = { id: p.change, progress, acts, ops, opts, pin, sheet: s, seen: Date.now() };
         // Progress that came in before this answer did.
         recent.filter((x) => x.change === p.change).forEach(onEvent);
       } catch (e) {
         progress.className = 'info bad';
         progress.textContent = e.message;
+        delete acts.dataset.busy;
         acts.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+        gate();
       }
     };
     const testLabel = ops.some((o) => o.op === 'import') ? 'Test before saving' : 'Apply and test';
-    add(acts, button(ops.some((o) => o.op === 'delete') ? 'Delete' : ops.some((o) => o.op === 'import') ? 'Save' : 'Apply', ops.some((o) => o.op === 'delete') ? 'danger' : 'mint', () => go(false)),
-      p.testable ? button(testLabel, 'ghost', () => go(true)) : null,
-      button('Back', 'ghost', closeSheet));
+    const apply = button(ops.some((o) => o.op === 'delete') ? 'Delete' : ops.some((o) => o.op === 'import') ? 'Save' : 'Apply', ops.some((o) => o.op === 'delete') ? 'danger' : 'mint', () => go(false));
+    const test = p.testable ? button(testLabel, 'ghost', () => go(true)) : null;
+    [apply, test].forEach((b) => { if (b) b.dataset.go = '1'; });
+    add(acts, apply, test, button('Back', 'ghost', closeSheet));
     add(s, progress, acts);
+    gate();
+  }
+
+  /**
+   * The page lost track of the change its sheet follows: the TV went away, or nothing came for a
+   * while. It asks the TV where the change stands, and ends the sheet if it is over.
+   */
+  async function checkWatch() {
+    const w = sheetWatch;
+    if (!w) return;
+    w.seen = Date.now();
+    let r;
+    try { r = await api('changes/state', { change: w.id }); } catch (e) { return; }
+    if (sheetWatch !== w) return;
+    const ev = r.event;
+    if (!ev) onEvent({ t: 'change', change: w.id, state: 'lost', text: 'The TV’s app restarted before this finished. A test that was cut off puts the settings from before back. Check it again.' });
+    else if (!['started', 'asking', 'applying', 'testing'].includes(ev.state)) onEvent(ev);
   }
 
   const recent = [];
@@ -1171,6 +1252,7 @@
     }
     if (e.t !== 'change' || !sheetWatch || e.change !== sheetWatch.id) return;
     const w = sheetWatch;
+    w.seen = Date.now();
     const busy = (text) => { w.progress.className = 'progress'; w.progress.replaceChildren(svg(ICON.spin), document.createTextNode(' ' + text)); };
     const end = (cls, text) => {
       w.progress.className = 'info ' + cls;
@@ -1186,6 +1268,7 @@
       case 'applying': busy('Applying…'); break;
       case 'testing': busy(e.step || 'Testing…'); break;
       case 'applied': {
+        delete w.acts.dataset.busy;
         w.ops.forEach((o) => { if (o.path) draft.delete(o.path); });
         if (w.opts.done) w.opts.done();
         sheetWatch = null;
@@ -1195,6 +1278,7 @@
         break;
       }
       case 'rolledBack':
+        delete w.acts.dataset.busy;
         sheetWatch = null;
         end('bad', e.text);
         w.acts.replaceChildren(button('Done', 'ghost', () => { closeSheet(); draw(true); }));
@@ -1202,7 +1286,9 @@
       case 'pin':
         end('bad', e.text);
         if (w.pin) { w.pin.value = ''; w.pin.focus(); }
-        w.acts.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+        delete w.acts.dataset.busy;
+        // Back at once; Apply again once a whole PIN is typed.
+        w.acts.querySelectorAll('button').forEach((b) => { b.disabled = !!b.dataset.go; });
         sheetWatch = null;
         break;
       case 'conflict':
@@ -1214,6 +1300,7 @@
       default:
         sheetWatch = null;
         end('bad', e.text || 'It didn’t apply.');
+        delete w.acts.dataset.busy;
         if (e.retry) w.acts.querySelectorAll('button').forEach((b) => { b.disabled = false; });
         else w.acts.replaceChildren(button('Back', 'ghost', () => { closeSheet(); draw(true); }));
     }

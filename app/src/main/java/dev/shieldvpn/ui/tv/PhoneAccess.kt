@@ -109,7 +109,7 @@ fun PairSheet(nav: Nav, req: Requesters, o: Overlay.PairPhone, close: () -> Unit
             }
         }
         Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TvButton("Done", close, icon = Ic.Check, focusRequester = req["ov-first"])
+            TvButton(if (done is Pairing.Result.Paired) "Done" else "Close", close, icon = if (done is Pairing.Result.Paired) Ic.Check else null, focusRequester = req["ov-first"])
             if (left == 0L || done != null) {
                 TvButton("Show a new code", { nav.overlay = Overlay.PairPhone(Pairing.show().id) }, icon = Ic.Swap, glass = true)
             }
@@ -136,7 +136,7 @@ fun AskSheet(req: Requesters, o: Overlay.Ask, answer: (Boolean) -> Unit) {
             }
         }
         Text(
-            if (a.danger) "Asked from a paired phone. Phones are listed in Settings › Phone access, where they can be removed."
+            if (a.paired) "Asked from a paired phone. Phones are listed in Settings › Phone access, where they can be removed."
             else "Only a phone that scanned the code on this TV can ask this.",
             style = TvType.ui(14f, color = Tv.soft(0.5f)),
             modifier = Modifier.padding(top = 18.dp),

@@ -367,6 +367,20 @@ A third beta-tester pass and a code review found what is fixed below. What the l
 | Release | Debug and verbose log lines are left out of release builds. `tools/release.sh` refuses an APK signed with another key than the published ones, a tag that doesn't match `versionName`, and any APK with WireGuard's library. Device-to-device transfers leave everything out (`data_extraction_rules.xml`). |
 | Not tried on a device | IPv6 with Block IPv6 off; Always-on VPN (the emulator has no such setting); the phone's quiet retry while a tunnel comes up and its 30-second timeout; Copy's fallback; the startup column with the chosen profile below the fold; changing only the username; the startup-slot message; the PIN lock hiding the app; the wording changes in Profiles; a damaged store file or backup (covered by reading the code, not by a test). The release script's checks run when a release is made. |
 
+### Sixth pass, 0.2.0 (2026-10-27, emulator, build 59 tested, fixes checked on release build 118)
+
+A beta tester went through the phone panel and the TV. What is fixed below was checked on the emulator, with the panel in a phone-sized browser, except where the last row says otherwise.
+
+| Area | Result |
+|---|---|
+| Typed text | The panel's Add a profile, restore, certificate and backup passphrase fields keep what was typed when the TV pushes a change and the page is drawn again. A login typed before a failed "Test before saving" is still there after Done. |
+| Cut off | A test that the TV's app never finished (force-stopped mid-test) no longer leaves the phone spinning. When the page is Live again, or after 90 s with no news, it asks the TV how the change stands (`changes/state`); after a restart the answer is "none", and the sheet says so with Back. The TV's log now has "A change from a phone was cut off part way…". It was lost before: the note was written before the screens reached the VPN's process, whose log then replaced it. Notes now wait for the link. |
+| Pairing | The TV's "Pair …?" question starts on Not now, as every other question from a phone does, and says the phone's address ("From 10.0.2.2"). A name a paired phone has already gets a number ("Pixel 8 (2)"). The pairing sheet says Close, not Done, until a phone is paired. |
+| PIN | An empty PIN is not a try. Apply waits for four digits, and a wrong PIN says how many tries are left before a wait. |
+| Reviews | An update with the file the profile has already, or a restore that adds nothing, says so once and offers only Back. A kill switch change says it applies at once. Save and Test stay off while a change runs. |
+| Words | The panel says Pause 15 minutes, 15 more minutes, VPN IP, "Connected · 00:02:10" (ticking), "Reaching 192.0.2.79:1194" and Cancel while connecting, Try again after a failure, and "Paused until 07:24" on a 24-hour clock. Clear log and Unpair ask first. The TV: "Pick the apps that skip the VPN", the About line names WireGuard, the Automation line follows the switch, the import review says "Key in the profile", and the restore panel's eyebrow and line read plainly. A typed "https://http://…" link drops the doubled scheme, and the link sheet's buttons fit with an error showing. |
+| Not tried on a device | The panel's words while connected, connecting, paused and failed (no tunnel was connected for this check); the 90-second check when the TV is reachable but quiet; an identical update and an all-here restore; the empty-PIN path; the link sheet with an error. |
+
 ## Speed test (2026-10-24)
 
 Connect › Speed test, Profiles › a profile › Speed test, the quick menu, and Settings › Diagnostics › Speed test. It measures against speed.cloudflare.com: ping is the median of five TCP handshakes, download is four streams for 8 seconds without the first 1.5, and upload is four kept-alive TLS connections for 8 seconds, counting a request only when the server has answered it. (Counting written bytes measured the TV's send buffer, a megabyte or more: a burst, then nothing.) A profile that is not connected is connected first; with nothing connected, "Test without the VPN" gives a figure to compare with. The last result of each profile is kept (`shieldvpn_speed` preferences) and shown under its Speed test row.
@@ -374,6 +388,20 @@ Connect › Speed test, Profiles › a profile › Speed test, the quick menu, a
 On the emulator, through the home server: 77 Mbps down, 0.9 Mbps up, 254 ms ping. Without the VPN: 554 Mbps down, 336 Mbps up, 16 ms (Cloudflare’s nearest server). Closing the sheet mid-test leaves threads and open files where they were.
 
 The slow upload is the path, not the app: through the tunnel, 1380-byte pings lose 6 to 10 % on the emulator and 3 % on the Shield, while 56-byte pings lose none. With 250 ms round trips that loss keeps TCP's send window tiny. A 1 MB upload with `nc` from the emulator's shell stalls the same way, and a tunnel MTU of 1400 does not help. The Mac's own path MTU is 1492 (PPPoE); OpenVPN 3's default mssfix of 1492 already fits that. Streaming barely uploads, so the sheet says "Uploads are slow, which streaming does not mind" below 2 Mbps.
+
+### What the engines cost in speed (2026-10-27, Shield, build 118)
+
+Checked from the code, and on the Shield while it streamed:
+- **The packets' path:** neither engine passes packets through Java. OpenVPN 3 reads and writes the tunnel itself. wireguard-go owns the tunnel and its socket, as in the official app. The app's own code only sets up the tunnel, plus WireGuard's 2-second state check.
+- **Crypto:** both OpenSSL builds keep their ARM assembly (AES with ARMv8 instructions, GCM, ChaCha20-Poly1305, SHA).
+- **Metering:** the VPN is not marked metered (`setMetered(false)`), so apps don't treat it as mobile data.
+- **Packet size:** with no `mssfix` in the profile, OpenVPN 3 uses `mssfix 1492 mtu`. TCP through the tunnel then fits a 1492-byte PPPoE line without being split. The 3 % loss of 1380-byte pings above comes from those pings being larger than that; TCP is clamped below it.
+- **Streaming:** a stream through Hatlevika averaged about 1.3 Mbps, and the VPN's process used about 1 % of the CPU.
+- **Wi-Fi:** the Shield's own link is 5 GHz at 702 Mbps, signal -55 dBm.
+
+Two of the optimizer's size ideas would cost speed, so they are left out: `-Os` for the C++ part, and wireguard-go held to 2 cores with a tight GC.
+
+**The server decides the cipher.** OpenVPN 3 ignores `data-ciphers` in the profile, offers every cipher it has, and the server chooses. Connect and Details used to show the file's guess. They now show the cipher the server pushed, read from the core's `OPTIONS:` log line. Details also says "with compression" when the server compresses, and the log says so once. Video is compressed already, so compression only costs the server CPU. Hatlevika's file has `comp-lzo yes`.
 
 ## Resource use (2026-10-24)
 

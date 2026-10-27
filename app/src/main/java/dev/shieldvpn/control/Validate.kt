@@ -68,12 +68,20 @@ object PinTries {
     fun attempt(pin: String, check: (String) -> Boolean): String? {
         val wait = secondsLeft()
         if (wait > 0) return "Too many wrong PINs. Try again in $wait s."
+        // Nothing typed is not a try.
+        if (pin.isEmpty()) return "Type the PIN"
         if (check(pin)) {
             if (misses != 0) keep(0, 0)
             misses = 0
             return null
         }
         missed()
-        return if (secondsLeft() > 0) "Wrong PIN. Wait ${secondsLeft()} s before the next try." else "That isn’t the PIN"
+        val left = 5 - misses
+        return when {
+            secondsLeft() > 0 -> "Wrong PIN. Wait ${secondsLeft()} s before the next try."
+            left == 1 -> "That isn’t the PIN. One more try before a wait"
+            left > 1 -> "That isn’t the PIN. $left more tries before a wait"
+            else -> "That isn’t the PIN"
+        }
     }
 }

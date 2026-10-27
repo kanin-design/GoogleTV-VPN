@@ -116,6 +116,10 @@ data class TunnelInfo(
     val remote: String? = null,
     /** The address the internet sees through the tunnel, once it is looked up. */
     val publicIp: String? = null,
+    /** The data cipher the server chose for this session (OpenVPN), or null when it named none. */
+    val cipher: String? = null,
+    /** The server compresses what it sends (OpenVPN). */
+    val compressed: Boolean = false,
     val bytesIn: Long = 0,
     val bytesOut: Long = 0,
 )

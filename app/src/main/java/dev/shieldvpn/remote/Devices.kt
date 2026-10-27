@@ -51,13 +51,25 @@ object Devices {
     fun any(context: Context): Boolean =
         readAtomically(File(context.filesDir, FILE))?.let { runCatching { JSONObject(it).getJSONArray("devices").length() > 0 }.getOrNull() } == true
 
+    /**
+     * [name], or with a number when a paired phone has it already ("Pixel 8 (2)"), so the TV's
+     * list, its questions and the log can tell two phones apart.
+     */
+    fun uniqueName(name: String): String = synchronized(this) {
+        load()
+        val base = name.trim().take(36).ifEmpty { "Phone" }
+        val taken = live.values.map { it.device.name.lowercase() }.toSet()
+        if (base.lowercase() !in taken) return base
+        (2..99).map { "$base ($it)" }.firstOrNull { it.lowercase() !in taken } ?: base
+    }
+
     /** Pairs a phone called [name]; returns its id and the key to hand it, once. */
     fun add(name: String): Pair<Device, ByteArray> = synchronized(this) {
         load()
         val id = "d_" + Seal.b64url(Seal.randomBytes(6))
         val key = Seal.randomBytes(Seal.KEY_BYTES)
         val now = System.currentTimeMillis()
-        val device = Device(id, name.trim().take(40).ifEmpty { "Phone" }, now, now)
+        val device = Device(id, uniqueName(name), now, now)
         CredentialStore.putSecret(app, SECRET + id, Seal.b64(key))
         live[id] = Live(device, Seal.Keys.of(key), Seal.Window(0, 0), RESERVE)
         save()
