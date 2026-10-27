@@ -422,7 +422,7 @@ Measured on the emulator (1920x1080), release build, connected:
 | classes.dex | 2.0 MB | 2.0 MB (Material 3 is no longer a dependency) |
 
 How:
-- The background is one procedural network at 30 frames a second, with no pictures in memory: lines, circles and points, and no filled shapes that change, which the GPU would have to cut into triangles again every frame. Its gradients are made once per colour, not every frame. Behind Import, Settings and any sheet it holds still and draws nothing until the state changes; there every frame of it also redrew the panels on top.
+- The background is one procedural network at 30 frames a second, with no pictures in memory: lines, circles and points, and no filled shapes that change, which the GPU would have to cut into triangles again every frame. Its gradients are made once per colour, not every frame, and its mesh is laid out once a process, off the main thread (see "The background's mesh" below). Behind Import, Settings and any sheet it holds still and draws nothing until the state changes; there every frame of it also redrew the panels on top.
 - The native library exports only its JNI functions (`exports.map`), is linked with `--gc-sections` and `--icf=all`, and links a slim OpenSSL built with per-function sections (`third_party/OPENSSL-BUILD.md`).
 - Web requests (the VPN IP lookup, the connection test, download from a link) close their connection when done (`vpn/Http.kt`). Before, each left a socket open.
 
@@ -440,6 +440,20 @@ On the Shield (2026-10-24, release build, connected, 1920x1080):
 | In the background | 230 MB | 1 % of a core |
 
 On the Shield almost all of the CPU is drawing (the render thread about 18 %, the main thread 5 to 10 %); the tunnel's own encryption is near zero at normal traffic. After a visit to Settings, the graphics driver held 55 MB of GPU memory, 36 MB of it leftover offscreen buffers from partly transparent layers.
+
+### The background's mesh (2026-10-27, emulator, release build)
+
+The network behind the screens was rebuilt in the animation lab and the loose-curve version chosen. Each node wanders on its own, and each is linked to its natural neighbours: two nodes are linked when no third lies in the circle between them, so links never cross and nothing links across the map. The links are made once and stretch with the nodes, instead of popping in and out with distance. The device, the VPN and the internet are nodes of the mesh, and so are the hops of each way. The hops rest a little off a gentle curve: up and over to the VPN, down to the internet, and under the VPN when off. While a way is lit, its hops stay close to their curve, so traffic no longer takes a random zigzag. The backup, with the hops exactly on their curves, is one switch: `LOOSE_PATH = false` in `Backdrop.kt`. Each change of state plays its own beat. Connecting runs a head to the VPN, which answers with a ring. Connected opens the way on to the internet. Off pulls the tunnel back to a faint ghost. Connecting never looks like connected.
+
+On Connect, off, with both builds at a full 30 frames a second:
+
+| | Before | Now |
+|---|---|---|
+| Render thread | 6.9 % of a core | 5.7 % |
+| UI thread | 3.6 % | 1.7 % |
+| Memory (PSS) | 35 MB | 35 MB |
+
+The emulator's frame rate varies from run to run; these are the two runs that both held 30 frames a second. It costs less on the UI thread because the old network compared every pair of nodes on every frame to find its links. Laying the mesh out (40,000 tries to spread 118 nodes evenly, then the links) takes 0.1 to 0.25 s. It runs once a process on a background thread, and the background fades in about half a second after the first screen. On the main thread in a debug build it had taken 0.37 s before the screen could draw. Its random numbers come from a class rather than a lambda, which would box each of some 120,000 floats, and its neighbour searches go through a grid of 32 px squares. A frame allocates next to nothing: the mesh's lines and dots go into a few batches by brightness, at most 18 draw calls for all of it, and its strokes, paths and arrays are made once.
 
 ### GPU buffers left behind (2026-10-24, emulator, release build)
 
