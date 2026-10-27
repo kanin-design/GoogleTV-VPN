@@ -27,7 +27,7 @@ android {
         minSdk = 28
         targetSdk = 34
         versionCode = buildNumber
-        versionName = "0.2.0"
+        versionName = "0.2.1"
         buildConfigField("String", "COMMIT", "\"$buildCommit\"")
 
         // The name people see: appName in gradle.properties. Code reads it as APP_NAME (AppName.kt).
