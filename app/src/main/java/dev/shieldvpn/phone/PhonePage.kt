@@ -335,8 +335,24 @@ const tvValue = (f) => f.type === 'switch' ? (f.value ? 'true' : 'false') : (f.v
 const valueOf = (f) => (f.id in local && (dirty[f.id] || (pending[f.id] && rev <= pending[f.id]))) ? local[f.id] : tvValue(f);
 const textish = (f) => f.type === 'text' || f.type === 'lines';
 
+// The TV's last value of each field, to tell when the TV itself changed one the phone was editing.
+const seen = {};
+
 function render(focusSection) {
   view = 'form';
+  // The TV changed a field the phone was editing (renamed on the TV, say): the TV's value wins, and the page says so.
+  const changedOnTv = [];
+  form.sections.forEach((sec) => sec.fields.forEach((f) => {
+    if (!textish(f) || f.secret) return;
+    const tv = tvValue(f);
+    if (f.id in seen && seen[f.id] !== tv && dirty[f.id] && local[f.id] !== tv) {
+      delete local[f.id];
+      dirty[f.id] = false;
+      changedOnTv.push(f.label);
+    }
+    seen[f.id] = tv;
+  }));
+  if (changedOnTv.length && !statusNow) statusNow = { kind: 'waiting', text: changedOnTv.join(' and ') + ' changed on the TV.' };
   const active = document.activeElement;
   const keep = active && active.id;
   let s0 = null, s1 = null;
@@ -720,8 +736,23 @@ async function act(a, sec) {
   readiness();
 }
 
+/** A photo is far larger than the TV takes: a QR code in it reads just as well at 1600 pixels. */
+async function shrink(file) {
+  if (!file.type || !file.type.startsWith('image/')) return file;
+  try {
+    const img = await createImageBitmap(file);
+    const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * k);
+    c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return await new Promise((done) => c.toBlob((b) => done(b || file), 'image/jpeg', 0.85));
+  } catch (e) { return file; }
+}
+
 async function upload(f, sec, blob, name) {
   showStatus(sec.id, { kind: 'busy', text: 'Sending ' + name + '…' });
+  blob = await shrink(blob);
   const url = '/api/file?c=' + code + '&field=' + encodeURIComponent(f.id) + '&section=' + encodeURIComponent(sec.id) + '&name=' + encodeURIComponent(name);
   const got = await call(url, post(blob), sec.id);
   if (!got) return;

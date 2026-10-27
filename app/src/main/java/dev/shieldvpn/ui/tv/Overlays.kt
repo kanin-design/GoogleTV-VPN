@@ -33,6 +33,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import dev.shieldvpn.vpn.VpnKind
+import dev.shieldvpn.control.Words
 import dev.shieldvpn.vpn.VpnController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -66,6 +68,7 @@ import dev.shieldvpn.vpn.Login
 import dev.shieldvpn.vpn.UpdateState
 import dev.shieldvpn.vpn.VpnStatus
 import dev.shieldvpn.vpn.VpnUiState
+import dev.shieldvpn.vpn.isActive
 
 /** Sheets over the current screen. Focus stays inside the open sheet until it closes. */
 @OptIn(ExperimentalComposeUiApi::class)
@@ -136,6 +139,8 @@ private fun Sheets(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Req
         is Overlay.PickProfile -> PickProfileSheet(state, req, o, close)
         is Overlay.Speed -> SpeedSheet(state, actions, req, o, connect, close)
         Overlay.Update -> UpdateSheet(state, actions, req, close)
+        is Overlay.PairPhone -> PairSheet(nav, req, o, close)
+        is Overlay.Ask -> AskSheet(req, o) { yes -> answerAsk(nav, o, yes) }
     }
 }
 
@@ -263,14 +268,15 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
                 Spacer(Modifier.height(16.dp))
                 DetailGrid(
                     listOf(
-                        "Server" to listOfNotNull(server?.host, t?.remote).joinToString(" · "),
-                        "Protocol" to (server?.let { "${it.protocol.label} ${it.port}" } ?: "—"),
+                        // The address it resolved to, only when the file names the server.
+                        "Server" to listOfNotNull(server?.host, t?.remote?.takeIf { it != server?.host }).joinToString(" · "),
+                        "Protocol" to (server?.let { "${Words.kind(info?.kind ?: VpnKind.OpenVpn)} · ${it.protocol.label} ${it.port}" } ?: "—"),
                         "VPN IP (what sites see)" to (t?.publicIp ?: if (since != null) "Looking it up…" else "—"),
                         "Tunnel IP" to (t?.address ?: "—"),
                         "DNS servers" to (t?.dns?.joinToString(", ")?.ifEmpty { null } ?: "—"),
                         "Routes" to (t?.routes?.lastOrNull() ?: "—"),
                         "Data cipher" to (info?.cipher ?: "Chosen by the server"),
-                        "Control channel" to (info?.tls ?: "TLS"),
+                        if (info?.kind == VpnKind.WireGuard) "Key exchange" to "Curve25519" else "Control channel" to (info?.tls ?: "TLS"),
                         "Transferred" to (bytes?.let { "${fmtBytes(it[0])} in · ${fmtBytes(it[1])} out" } ?: "—"),
                         "Connected for" to (since?.let { fmtDuration((now - it).coerceAtLeast(0) / 1000) } ?: "—"),
                     ),
@@ -313,24 +319,31 @@ private fun MenuSheet(
 ) {
     val c = state.connection(o.id) ?: return
     val live = isLive(state, c.id)
+    // The menu opens with a held OK: while a tunnel is up, it doesn't open one press from changing it.
+    val tunnelUp = state.status.isActive || state.pausedUntil != null
     Sheet(460f) {
         PanelHeading("Quick menu", c.name)
         Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             ListRow(
-                if (live) "Disconnect" else "Connect",
+                when {
+                    live -> "Disconnect"
+                    tunnelUp -> "Connect instead"
+                    else -> "Connect"
+                },
                 {
                     nav.overlay = null
                     if (live) actions.disconnect() else connect(c.id)
                     nav.contentFocus = nav.screen
                 },
-                subtitle = state.serverOf(c)?.host,
-                focusRequester = req["ov-first"],
+                subtitle = profileStatus(state, c).line,
+                focusRequester = if (tunnelUp) null else req["ov-first"],
                 leading = { IconSquare(Ic.Power, it) },
             )
             ListRow(
                 "Speed test",
-                { nav.overlay = Overlay.Speed(c.id) },
+                { nav.overlay = Overlay.Speed(c.id, "Quick menu") },
                 subtitle = state.speeds[c.id]?.let { "Last: ${fmtMbps(it.downMbps)} Mbps, ${ago(it.at)}" } ?: "Is it fast enough for 4K?",
+                focusRequester = if (tunnelUp) req["ov-first"] else null,
                 leading = { IconSquare(Ic.Gauge, it) },
             )
             ListRow(
@@ -344,7 +357,7 @@ private fun MenuSheet(
                         nav.push(Col.Profile(c.id), "pe-name")
                     }
                 },
-                subtitle = "Name, sign-in, advanced",
+                subtitle = if (state.serverOf(c)?.kind == VpnKind.WireGuard) "Name, key, advanced" else "Name, sign-in, advanced",
                 leading = { IconSquare(Ic.Pencil, it) },
             )
             ListRow(
@@ -360,7 +373,7 @@ private fun MenuSheet(
                         nav.push(Col.Profile(copy), "pe-name")
                     }
                 },
-                subtitle = "A copy to try other settings",
+                subtitle = Words.DUPLICATE_HELP,
                 leading = { IconSquare(Ic.Copy, it) },
             )
             ListRow(
@@ -377,7 +390,7 @@ private fun MenuSheet(
             if (confirm) {
                 ConfirmBar(
                     // Short, to fit beside the buttons in this narrow sheet; the row above says the rest.
-                    "Delete ${c.name}?", "Delete", req["qm-del-no"],
+                    deleteQuestion(state, c), "Delete", req["qm-del-no"],
                     onConfirm = {
                         close()
                         nav.guard(state) {
@@ -400,7 +413,7 @@ private fun MenuSheet(
             } else {
                 ListRow(
                     "Delete profile", { confirm = true },
-                    subtitle = "Removes it and its saved password",
+                    subtitle = Words.deleteHelp(state.logins[c.id]?.hasPassword == true),
                     danger = true,
                     focusRequester = req["qm-del"],
                     leading = { IconSquare(Ic.Trash, it) },

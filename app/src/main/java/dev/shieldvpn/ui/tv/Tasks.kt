@@ -1,10 +1,15 @@
 package dev.shieldvpn.ui.tv
 
+import dev.shieldvpn.control.Control
+import dev.shieldvpn.control.Validate
+import dev.shieldvpn.control.Words
 import dev.shieldvpn.phone.PhoneReply
 import dev.shieldvpn.phone.PhoneStatus
 import dev.shieldvpn.vpn.Backup
 import dev.shieldvpn.vpn.Connection
 import dev.shieldvpn.vpn.VpnUiState
+import dev.shieldvpn.vpn.connectionId
+import dev.shieldvpn.vpn.isActive
 
 /*
  * Each task a person can do from a TV sheet or from a phone page, written once: its checks, its
@@ -43,11 +48,9 @@ fun locked(state: VpnUiState, nav: Nav): Boolean = state.settings.pinMode != "Of
 // ---- Sign-in ------------------------------------------------------------------------
 
 /** What is missing from a username and password, or null. With [keepsSaved], an empty password keeps the saved one. */
-fun loginProblems(user: String, pw: String, keepsSaved: Boolean = false): Outcome.Problems? = when {
-    user.isBlank() -> Outcome.Problems("user", "Type the username")
-    pw.isEmpty() && !keepsSaved -> Outcome.Problems("pw", "Type the password")
-    else -> null
-}
+fun loginProblems(user: String, pw: String, keepsSaved: Boolean = false): Outcome.Problems? =
+    Validate.usernameProblem(user)?.let { Outcome.Problems("user", it) }
+        ?: Validate.passwordProblem(pw).takeIf { !keepsSaved }?.let { Outcome.Problems("pw", it) }
 
 /** Saves the login of [c]; for [forStartup], it then connects by itself when the device starts. */
 fun saveLogin(actions: TunnelActions, nav: Nav, c: Connection, user: String, pw: String, forStartup: Boolean = false, keepsSaved: Boolean = false): Outcome {
@@ -77,7 +80,7 @@ fun startAtBoot(state: VpnUiState, actions: TunnelActions, nav: Nav, c: Connecti
 
 fun renameProfile(actions: TunnelActions, nav: Nav, c: Connection, name: String): Outcome {
     val clean = name.trim()
-    if (clean.isEmpty()) return Outcome.Problems("name", "A profile needs a name")
+    Validate.nameProblem(clean)?.let { return Outcome.Problems("name", it) }
     if (clean != c.name) actions.rename(c.id, clean)
     nav.flash("pe-name")
     return Outcome.Done("Saved on the TV.")
@@ -86,8 +89,8 @@ fun renameProfile(actions: TunnelActions, nav: Nav, c: Connection, name: String)
 /** What is wrong with a server address and port, by field, or null. */
 fun serverProblems(host: String, port: String): Outcome.Problems? {
     val errors = buildMap {
-        if (host.isEmpty() || host.any { it.isWhitespace() }) put("host", "Type the server’s address")
-        if (port.toIntOrNull()?.let { it in 1..65535 } != true) put("port", "A number from 1 to 65535")
+        Validate.hostProblem(host)?.let { put("host", it) }
+        Validate.portProblem(port)?.let { put("port", it) }
     }
     return if (errors.isEmpty()) null else Outcome.Problems(errors)
 }
@@ -110,11 +113,8 @@ fun saveCustomDns(actions: TunnelActions, nav: Nav, text: String, flash: String)
 // ---- Backup -----------------------------------------------------------------------------
 
 /** What is wrong with a new passphrase typed twice, by field, or null. */
-fun passphraseProblems(first: String, again: String, firstId: String = "pass1", againId: String = "pass2"): Outcome.Problems? = when {
-    first.length < 6 -> Outcome.Problems(firstId, "At least 6 characters")
-    first != again -> Outcome.Problems(againId, "Not the same as the first. Type it again")
-    else -> null
-}
+fun passphraseProblems(first: String, again: String, firstId: String = "pass1", againId: String = "pass2"): Outcome.Problems? =
+    Validate.passphraseProblem(first, again)?.let { (which, text) -> Outcome.Problems(if (which == 0) firstId else againId, text) }
 
 /**
  * Sets the backup passphrase to [first], typed twice. From a phone, a passphrase that is set
@@ -140,7 +140,8 @@ suspend fun restoreBackup(actions: TunnelActions, nav: Nav, bytes: ByteArray?, p
         is Backup.Restored.Done -> {
             val text = restoredText(r)
             nav.toast(text)
-            nav.go(Screen.Profiles)
+            // From Import, the new profiles are what comes next; from Settings › Backup the TV stays there.
+            if (nav.screen == Screen.Import && r.profiles > 0) nav.go(Screen.Profiles)
             Outcome.Done("$text.")
         }
         is Backup.Restored.Problem -> Outcome.Problems(field, r.message)
@@ -155,9 +156,17 @@ suspend fun restoreBackup(actions: TunnelActions, nav: Nav, bytes: ByteArray?, p
  */
 suspend fun attachCertificate(state: VpnUiState, actions: TunnelActions, nav: Nav, bytes: ByteArray, values: Map<String, String>, id: String?): Outcome {
     val password = values["p12pass"].orEmpty()
-    val target = id ?: values["target"]?.takeIf { it.isNotEmpty() } ?: return Outcome.Problems("target", "Pick the profile it is for")
-    val c = state.connection(target) ?: return Outcome.Problems("target", "That profile is gone")
     actions.checkP12(bytes, password)?.let { return Outcome.Problems("p12pass", it) }
+    // Without a choice, the profile whose CA issued the certificate is the one; only a tie or no match asks.
+    val target = id ?: values["target"]?.takeIf { it.isNotEmpty() } ?: run {
+        val fits = Control.profilesForCertificate(bytes, password)
+        when (fits.size) {
+            1 -> fits.single().id
+            0 -> return Outcome.Problems("target", "No profile here trusts who issued this certificate. Pick the profile it is for.")
+            else -> return Outcome.Problems("target", "${fits.joinToString(" and ") { it.name }} could both use it. Pick one.")
+        }
+    }
+    val c = state.connection(target) ?: return Outcome.Problems("target", "That profile is gone")
     if (values["keep"] == "keystore") {
         val alias = actions.keepP12(bytes, password) ?: return Outcome.Problems("p12pass", "Android could not keep this key")
         actions.setKeyAlias(target, alias)
@@ -183,3 +192,10 @@ suspend fun downloadLink(actions: TunnelActions, nav: Nav, url: String, user: St
 
 /** Said on a phone page that wants a file holding keys before the TV asked for it. */
 fun pressOnTv(row: String) = "Press $row on the TV first. Then the file can be downloaded here."
+
+/** The delete bar's question for [c], with what happens to startup. */
+fun deleteQuestion(state: VpnUiState, c: Connection): String {
+    val isStartup = state.settings.boot && state.settings.startupId == c.id
+    val live = state.status.connectionId == c.id && (state.status.isActive || state.pausedUntil != null)
+    return Words.deleteQuestion(c.name, state.logins[c.id]?.hasPassword == true, isStartup, if (isStartup) Control.startupFallback(c.id)?.name else null, connected = live)
+}

@@ -2,6 +2,7 @@ package dev.shieldvpn.ui.tv
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -148,6 +149,8 @@ fun LookCard(
     onFocus: () -> Unit = {},
     onBlur: () -> Unit = {},
     focusRequester: FocusRequester? = null,
+    /** A short label in the top-right corner: the kind of VPN. */
+    tag: String? = null,
 ) {
     val f = rememberFocusState()
     val scale by animateFloatAsState(if (f.focused) 1.09f else 1f, tween(200, easing = FocusEase), label = "card")
@@ -179,6 +182,19 @@ fun LookCard(
             .then(if (onClick != null) Modifier.onFocusChanged { if (!it.isFocused) onBlur() }.tvFocus(f, onClick, focusRequester, onFocus) else Modifier),
     ) {
         MsIcon(iconPath, iconSize, modifier = Modifier.padding(14.dp))
+        if (tag != null) {
+            Text(
+                tag.uppercase(),
+                style = TvType.eyebrow(10.5f, 0.9f).copy(color = Color.White),
+                maxLines = 1,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(Color.Black.copy(alpha = 0.28f))
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            )
+        }
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)

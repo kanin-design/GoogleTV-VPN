@@ -76,6 +76,13 @@ object ConnectionStore {
     @Synchronized
     fun clear(context: Context) = locked(context) { write(context, emptyList()) }
 
+    /** Puts back the file as [text] had it (a snapshot), under the lock the VPN's process also takes. */
+    fun replaceFile(context: Context, text: String?) = locked(context) {
+        val file = File(context.filesDir, FILE)
+        if (text == null) file.delete() else writeAtomically(file, text)
+        lastGood = null
+    }
+
     /** Holds the lock file while [block] reads and rewrites the list; the other process waits. */
     private inline fun <T> locked(context: Context, block: () -> T): T =
         RandomAccessFile(File(context.filesDir, "$FILE.lock"), "rw").use { file ->

@@ -154,7 +154,8 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
     }
 
     Sheet(820f) {
-        Text("SPEED TEST", style = TvType.eyebrow(13.5f, 0.55f))
+        // Where it was opened, as every other sheet's eyebrow says.
+        Text("${o.eyebrow} › Speed test".uppercase(), style = TvType.eyebrow(13.5f, 0.55f))
         Text(if (direct) "Without the VPN" else c.name, style = TvType.display(34f), modifier = Modifier.padding(top = 6.dp))
         Text(sub, style = TvType.ui(17f, color = Tv.soft(0.62f)), maxLines = 1, modifier = Modifier.padding(top = 6.dp))
         Row(Modifier.padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(34.dp)) {
@@ -190,7 +191,7 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
                     connect(c.id)
                 }
                 Stage.Connecting, Stage.Testing -> Triple("Close", null, close)
-                Stage.Done -> Triple("Done", Ic.Check, close)
+                Stage.Done -> Triple("Close", null, close)
                 Stage.Failed -> Triple("Try again", Ic.Swap) {
                     if (direct || here) {
                         test(direct)
@@ -287,13 +288,13 @@ private fun Verdict(stage: Stage, down: Double?, up: Double?, error: String?, ba
         stage == Stage.Done && down != null -> {
             val (t, tone) = speedVerdict(down)
             val keeps = baseline?.takeIf { it.downMbps > 0 }?.let { b ->
-                " Without the VPN: ${fmtMbps(b.downMbps)} Mbps (${ago(b.at)}), so the VPN keeps ${(down / b.downMbps * 100).toInt().coerceAtMost(100)}%."
+                " That is ${(down / b.downMbps * 100).toInt().coerceAtMost(100)} % of the ${fmtMbps(b.downMbps)} Mbps measured without the VPN ${ago(b.at)}."
             }
             // Streaming barely uploads, but video calls and sending files feel a slow upload.
             val slowUp = if (up != null && up < 2) " Uploads are slow, which streaming does not mind." else ""
             Triple(t, tone, "4K needs about 25 Mbps, HD about 8." + keeps.orEmpty() + slowUp)
         }
-        else -> Triple(null, Tv.soft(0.5f), "4K streams need about 25 Mbps, HD about 8.")
+        else -> Triple(null, Tv.soft(0.5f), "4K needs about 25 Mbps, HD about 8.")
     }
     Row(
         modifier = Modifier

@@ -4,9 +4,10 @@
 # usage: tools/release.sh TAG [--dry-run]     e.g. tools/release.sh v0.1.2-beta
 #
 # update.json is what the app's update check reads (app/src/main/java/dev/shieldvpn/vpn/Updates.kt):
-# the build number (commits on the branch, also the APKs' versionCode), the commit, and each APK's
-# name, size and SHA-256 by ABI. With --dry-run it builds and writes everything to build/release/
-# without uploading. The release notes are left to you; the checksums are printed for them.
+# the build number (100 plus the commits on the branch, as app/build.gradle.kts counts; also the
+# APKs' versionCode), the commit, and each APK's name, size and SHA-256 by ABI. With --dry-run it
+# builds and writes everything to build/release/ without uploading. The release notes are left to
+# you; the checksums are printed for them.
 set -euo pipefail
 cd "${0:A:h}/.."
 
@@ -22,17 +23,20 @@ if [[ ${tag#v} != $version* ]]; then
   echo "The tag $tag does not match versionName $version in app/build.gradle.kts." >&2
   exit 1
 fi
-build=$(git rev-list --count HEAD)
+build=$(( $(git rev-list --count HEAD) + 100 ))
 commit=$(git rev-parse --short=7 HEAD)
 name=$(sed -n 's/^appName=//p' gradle.properties | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
 base="$name-${tag#v}"
 
-# WireGuard is work in progress and never published: the flag on the command line wins over any
-# gradle.properties, and the APKs are checked for its library.
-./gradlew -q assembleRelease -Pwireguard=false
+./gradlew -q assembleRelease
+# The WireGuard library also has tools for rooted devices, which are GPL; the build leaves them out.
 for apk in app/build/outputs/apk/release/app-*-release.apk; do
-  if unzip -l "$apk" | grep -q 'libwg'; then
-    echo "$apk carries WireGuard's library. Published builds must not." >&2
+  if unzip -l "$apk" | grep -E -q '/(libwg|libwg-quick)\.so$'; then
+    echo "$apk carries WireGuard's GPL tools (libwg.so, libwg-quick.so). Published builds must not." >&2
+    exit 1
+  fi
+  if ! unzip -l "$apk" | grep -q '/libwg-go\.so$'; then
+    echo "$apk is missing wireguard-go (libwg-go.so)." >&2
     exit 1
   fi
 done

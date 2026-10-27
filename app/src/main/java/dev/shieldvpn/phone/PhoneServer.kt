@@ -2,39 +2,24 @@ package dev.shieldvpn.phone
 
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.shieldvpn.http.HttpServer
+import dev.shieldvpn.http.Request
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
-import java.io.BufferedInputStream
-import java.io.ByteArrayOutputStream
-import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
-import java.net.Inet4Address
-import java.net.InetSocketAddress
-import java.net.NetworkInterface
-import java.net.ServerSocket
-import java.net.Socket
-import java.net.SocketException
-import java.net.URLDecoder
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.RejectedExecutionException
-import java.util.concurrent.SynchronousQueue
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
 
 /**
- * The web server a phone talks to, one for the app. It listens only while a screen shows a phone
- * code (and for two minutes after, so a page can report what happened), and only on the home
- * network's address.
+ * The phone pages, one per TV screen, on the app's [HttpServer]. They are answered only while a
+ * screen shows a phone code (and for two minutes after, so a page can report what happened), and
+ * only while the screens are in front.
  *
  * Each TV screen a phone can help with owns a [PhoneSession] with its own six-digit code, and
  * describes its page as a [PhoneForm]. The phone's page draws that form, sends what is typed by
@@ -43,14 +28,12 @@ import java.util.concurrent.TimeUnit
  * Wrong codes are counted per phone in a ten-minute window that a right code does not reset, and
  * many wrong codes from anywhere give every idle screen a new code.
  */
-class PhoneServer {
+class PhoneServer : HttpServer.Route {
     /** "192.168.1.20:8080" while the server runs, or null without a home network. */
-    var address by mutableStateOf<String?>(null)
-        private set
+    val address: String? get() = HttpServer.address
 
-    private var socket: ServerSocket? = null
-    private var pool: ThreadPoolExecutor? = null
-    private var boundIp: String? = null
+    // While the screens are hidden, a page gets no answer, as if the server were off.
+    @Volatile private var inFront = false
     private val sessions = ConcurrentHashMap<String, PhoneSession>()
     private val main = Handler(Looper.getMainLooper())
 
@@ -68,8 +51,8 @@ class PhoneServer {
         var strikes = 0
     }
 
-    /** Stops the server once no screen has shown a code for a while. */
-    private val idleStop = Runnable { if (!needed()) stop() }
+    /** Lets the server go once no screen has shown a code for a while. */
+    private val idleStop = Runnable { if (!needed()) HttpServer.release(HOLDER) }
 
     /** Some screen shows a code, or a session still answers for what a phone did. */
     private fun needed(): Boolean {
@@ -77,66 +60,36 @@ class PhoneServer {
         return sessions.values.any { it.owners > 0 || it.holdUntil > now }
     }
 
-    /** Starts listening on the home network's address, if a screen needs it. Main thread only. */
-    fun start() {
-        if (socket != null || !needed()) return
-        val ip = lanAddress() ?: return
-        // Only on the home network's address: not on the VPN tunnel, where the VPN's side could reach it.
-        val server = listOf(8080, 8081, 8090, 0).firstNotNullOfOrNull { port ->
-            val s = ServerSocket()
-            runCatching {
-                s.reuseAddress = true
-                s.bind(InetSocketAddress(ip, port))
-                s
-            }.getOrElse {
-                runCatching { s.close() }
-                null
-            }
-        } ?: return
-        // Browsers open spare connections and send nothing on them, and every open page waits on one
-        // request; enough threads for a few phones, and a short wait for the first line, keep those
-        // from holding up the request that matters.
-        val threads = ThreadPoolExecutor(4, MAX_THREADS, 30, TimeUnit.SECONDS, SynchronousQueue())
-        socket = server
-        pool = threads
-        boundIp = ip
-        address = "$ip:${server.localPort}"
-        Thread({
-            while (true) {
-                val s = try {
-                    server.accept()
-                } catch (_: SocketException) {
-                    break
-                }
-                try {
-                    threads.execute { runCatching { handle(s) }.onFailure { Log.w(TAG, "request failed: ${it.message}") } }
-                } catch (_: RejectedExecutionException) {
-                    runCatching { s.close() }
-                }
-            }
-        }, "phone-server").start()
-    }
+    override fun takes(path: String): Boolean = path == "/" || (path.startsWith("/api/") && !path.startsWith("/api/v2/"))
 
-    /** Stops listening. Sessions keep their codes, so pages left open work again after [start]. */
-    fun stop() {
-        main.removeCallbacks(idleStop)
-        runCatching { socket?.close() }
-        socket = null
-        pool?.shutdownNow()
-        pool = null
-        boundIp = null
-        address = null
+    override fun stopped() {
         // Pages waiting for a change get an answer now instead of a dead connection later.
         sessions.values.forEach { it.bump() }
     }
 
-    /** Moves to the new address after the TV changed networks, or starts once there is one. */
-    fun recheck() {
-        if (!needed()) return
-        if (lanAddress() == boundIp && socket != null) return
-        stop()
-        start()
+    /** The screens are in front: pages are answered, and the server listens while a screen needs it. Main thread only. */
+    fun start() {
+        inFront = true
+        HttpServer.add(this)
+        if (needed()) HttpServer.hold(HOLDER)
     }
+
+    /** The screens are hidden. Sessions keep their codes, so pages left open work again after [start]. */
+    fun stop() {
+        inFront = false
+        main.removeCallbacks(idleStop)
+        HttpServer.release(HOLDER)
+        stopped()
+    }
+
+    /** The screens have gone for good: this server answers nothing more, and a new one takes its place. */
+    fun close() {
+        stop()
+        HttpServer.remove(this)
+    }
+
+    /** Moves to the new address after the TV changed networks. */
+    fun recheck() = HttpServer.recheck()
 
     /** The session of screen [key], made with a new code if there is none. Call [hold] and [release] around its use. */
     fun session(key: String): PhoneSession {
@@ -152,7 +105,7 @@ class PhoneServer {
         s.owners++
         s.bump()
         main.removeCallbacks(idleStop)
-        start()
+        if (inFront) HttpServer.hold(HOLDER)
     }
 
     /** A screen showing [s] has gone. With none left, the phone hears that the TV moved on. Main thread only. */
@@ -194,132 +147,109 @@ class PhoneServer {
 
     // ---- Requests ------------------------------------------------------------------
 
-    private fun handle(client: Socket): Unit = client.use { s ->
-        s.soTimeout = 3_000
-        val from = s.inetAddress?.hostAddress.orEmpty()
-        val input = BufferedInputStream(s.getInputStream())
-        val out = s.getOutputStream()
-        val requestLine = readLine(input) ?: return
-        val headers = HashMap<String, String>()
-        var headerBytes = 0
-        while (true) {
-            val line = readLine(input) ?: return
-            if (line.isEmpty()) break
-            headerBytes += line.length
-            // Before any code is checked, a request gets only so much room.
-            if (headers.size >= MAX_HEADERS || headerBytes > MAX_HEADER_BYTES) return text(out, 400, "Too many headers.")
-            val i = line.indexOf(':')
-            if (i > 0) headers[line.substring(0, i).trim().lowercase()] = line.substring(i + 1).trim()
+    override fun handle(r: Request) {
+        // Hidden screens: no answer, as before the server was shared.
+        if (!inFront) return
+        val method = r.method
+        val path = r.path
+        val query = r.query
+        val from = r.from
+        if ((method == "GET" || r.head) && path == "/") {
+            return r.send(200, "text/html; charset=utf-8", PhonePage.shell.toByteArray(), "Content-Security-Policy" to CSP, head = r.head)
         }
-        val parts = requestLine.split(' ')
-        if (parts.size < 2) return
-        val method = parts[0]
-        val head = method == "HEAD"
-        val target = parts[1]
-        val path = target.substringBefore('?')
-        val query = parseQuery(target.substringAfter('?', ""))
-        val length = headers["content-length"]?.let { it.toIntOrNull() ?: -1 } ?: 0
-        if (length < 0) return text(out, 400, "A length is needed.")
-        // A phone still sending sees a reset instead of the answer if the body is left unread.
-        val skipBody = { if (length in 1..MAX_DRAIN) drain(input, length) }
-
-        // The page is reached by the TV's address. A name in the Host header is another site
-        // pointing its name at this TV (DNS rebinding), which is refused.
-        val host = headers["host"]?.substringBeforeLast(':')
-        if (host == null || !IPV4.matches(host)) {
-            skipBody()
-            return text(out, 403, "Open the address shown on the TV.")
-        }
-        if ((method == "GET" || head) && path == "/") {
-            return send(out, 200, "text/html; charset=utf-8", PhonePage.shell.toByteArray(), "Content-Security-Policy" to CSP, head = head)
-        }
-        if (!path.startsWith("/api/")) {
-            skipBody()
-            return text(out, 404, "Not found.", head)
-        }
-        // Only the page sends this header; a form on another site can't, without a preflight this server never answers.
-        if (method == "POST" && headers["x-phone"] != "1") {
-            skipBody()
-            return json(out, 403, JSONObject().put("error", "origin").put("text", "Open the address shown on the TV."))
+        if (method == "POST" && !r.fromPage) {
+            r.skipBody()
+            return r.json(403, JSONObject().put("error", "origin").put("text", "Open the address shown on the TV."))
         }
         tooMany(from)?.let {
-            skipBody()
-            return json(out, 429, JSONObject().put("error", "wait").put("text", it))
+            r.skipBody()
+            return r.json(429, JSONObject().put("error", "wait").put("text", it))
         }
         val code = query["c"].orEmpty().filter(Char::isDigit)
         val session = sessions.values.firstOrNull { it.code == code }
         if (session == null) {
-            skipBody()
-            if (code in ended) return json(out, 410, JSONObject().put("error", "ended").put("text", "This code has ended. Scan the new one on the TV."))
+            r.skipBody()
+            if (code in ended) return r.json(410, JSONObject().put("error", "ended").put("text", "This code has ended. Scan the new one on the TV."))
             countWrong(from)
-            return json(out, 403, JSONObject().put("error", "code").put("text", "That code isn’t on the TV now. Check the code on the TV."))
+            return r.json(403, JSONObject().put("error", "code").put("text", "That code isn’t on the TV now. Check the code on the TV."))
         }
         session.seen()
-        s.soTimeout = 15_000
+        r.waitUpTo(15_000)
 
         when {
             method == "GET" && path == "/api/state" -> {
                 val seen = query["rev"]?.toIntOrNull()
-                if (seen != null && seen == session.revision) session.await(seen, WAIT_MS) { this.socket == null }
-                json(out, 200, session.stateJson())
+                if (seen != null && seen == session.revision) {
+                    r.waitUpTo(WAIT_MS.toInt() + 10_000)
+                    session.await(seen, WAIT_MS) { !inFront || !HttpServer.running }
+                }
+                r.json(200, session.stateJson())
             }
             method == "POST" && path == "/api/act" -> {
-                if (length !in 1..MAX_JSON) {
-                    skipBody()
-                    return json(out, 413, JSONObject().put("error", "size").put("text", "That is too much text."))
+                if (r.length !in 1..MAX_JSON) {
+                    r.skipBody()
+                    return r.json(413, JSONObject().put("error", "size").put("text", "That is too much text."))
                 }
-                val body = runCatching { JSONObject(String(readExactly(input, length) ?: return)) }.getOrNull()
-                    ?: return json(out, 400, JSONObject().put("error", "json").put("text", "The TV could not read that."))
-                if (session.moved) return json(out, 200, JSONObject().put("ok", false).put("moved", true).put("rev", session.revision))
+                val body = runCatching { JSONObject(String(r.body(MAX_JSON) ?: return)) }.getOrNull()
+                    ?: return r.json(400, JSONObject().put("error", "json").put("text", "The TV could not read that."))
+                if (session.moved) return r.json(200, JSONObject().put("ok", false).put("moved", true).put("rev", session.revision))
                 val action = body.optString("action")
                 val sent = body.optJSONObject("values")?.let { v -> v.keys().asSequence().associateWith { v.optString(it) } } ?: emptyMap()
+                val section = body.optString("section").ifEmpty { null }
                 val reply = onMain(session) {
                     // Only the fields this page has, each no longer than the page allows.
                     val values = session.clean(sent)
-                    session.onAction(session, action, values).also { if (it.holdMs > 0) session.holdFor(it.holdMs) }
+                    session.phoneAction(section, null)
+                    val lineBefore = session.tvLine
+                    session.onAction(session, action, values).also { reply ->
+                        if (reply.holdMs > 0) session.holdFor(reply.holdMs)
+                        // The TV shows what the phone did, unless the task said it already.
+                        if (session.tvLine == lineBefore && reply.status?.kind == PhoneStatus.Kind.Done) session.tvLine = reply.tv ?: "Saved from your phone"
+                        session.phoneAction(section, reply)
+                    }
                 } ?: PhoneReply.error(null, "The TV took too long to answer. Try again.")
-                json(out, 200, session.applyReply(reply, body.optString("section").ifEmpty { null }))
+                r.json(200, session.applyReply(reply, section))
             }
             method == "POST" && path == "/api/file" -> {
                 val field = query["field"].orEmpty()
-                if (length > MAX_FILE) {
-                    skipBody()
-                    return json(out, 200, PhoneReply.error(field, "That file is too large. A profile, backup or certificate is much smaller.").toJson(session.revision))
+                if (r.length > MAX_FILE) {
+                    r.skipBody()
+                    return r.json(200, PhoneReply.error(field, "That file is too large. A profile, backup or certificate is much smaller.").toJson(session.revision))
                 }
-                val bytes = readExactly(input, length) ?: return
-                if (session.moved) return json(out, 200, JSONObject().put("ok", false).put("moved", true).put("rev", session.revision))
+                val bytes = r.body(MAX_FILE) ?: return
+                if (session.moved) return r.json(200, JSONObject().put("ok", false).put("moved", true).put("rev", session.revision))
                 val name = query["name"].orEmpty().take(120)
                 val reply = onMain(session) {
                     session.onUpload(session, field, name, bytes).also { if (it.holdMs > 0) session.holdFor(it.holdMs) }
                 } ?: PhoneReply.error(field, "The TV took too long to answer. Try again.")
-                json(out, 200, session.applyReply(reply, query["section"]))
+                r.json(200, session.applyReply(reply, query["section"]))
             }
             method == "POST" && path == "/api/input" -> {
-                if (length !in 1..MAX_JSON) {
-                    skipBody()
-                    return json(out, 413, JSONObject().put("error", "size").put("text", "That is too much text."))
+                if (r.length !in 1..MAX_JSON) {
+                    r.skipBody()
+                    return r.json(413, JSONObject().put("error", "size").put("text", "That is too much text."))
                 }
-                val body = runCatching { JSONObject(String(readExactly(input, length) ?: return)) }.getOrNull()
+                val body = runCatching { JSONObject(String(r.body(MAX_JSON) ?: return)) }.getOrNull()
                 if (body != null && !session.moved) {
                     val field = body.optString("field")
                     val value = body.optString("value")
                     main.post { session.typed(field, value) }
                 }
-                json(out, 200, JSONObject().put("ok", true))
+                r.json(200, JSONObject().put("ok", true))
             }
             method == "GET" && path == "/api/download" -> {
                 val id = query["id"].orEmpty()
                 val file = onMain(session) { session.download(session, id) }
-                    ?: return json(out, 404, JSONObject().put("error", "file").put("text", "That file isn’t on the TV now."))
-                file.refusal?.let { return json(out, 403, JSONObject().put("error", "refused").put("text", it)) }
-                send(out, 200, file.mime, file.bytes, "Content-Disposition" to disposition(file.name))
+                    ?: return r.json(404, JSONObject().put("error", "file").put("text", "That file isn’t on the TV now."))
+                file.refusal?.let { return r.json(403, JSONObject().put("error", "refused").put("text", it)) }
+                r.send(200, file.mime, file.bytes, "Content-Disposition" to disposition(file.name))
                 // Kept by the session, so the line stays when the page is drawn again.
                 session.say(PhoneStatus(PhoneStatus.Kind.Done, "Downloaded ${file.name}. Look in Files › Downloads on your phone.", query["section"]))
                 main.post { session.onDownloaded(session, id, file.name) }
             }
             else -> {
-                skipBody()
-                text(out, 404, "Not found.", head)
+                r.skipBody()
+                r.text(404, "Not found.", r.head)
             }
         }
     }
@@ -379,51 +309,10 @@ class PhoneServer {
         return "attachment; filename=\"$plain\"; filename*=UTF-8''$encoded"
     }
 
-    private fun json(out: OutputStream, status: Int, body: JSONObject) =
-        send(out, status, "application/json; charset=utf-8", body.toString().toByteArray())
-
-    private fun text(out: OutputStream, status: Int, body: String, head: Boolean = false) =
-        send(out, status, "text/plain; charset=utf-8", body.toByteArray(), head = head)
-
-    private fun send(out: OutputStream, status: Int, type: String, body: ByteArray, vararg extra: Pair<String, String>, head: Boolean = false) {
-        val reason = when (status) {
-            200 -> "OK"
-            400 -> "Bad Request"
-            403 -> "Forbidden"
-            404 -> "Not Found"
-            410 -> "Gone"
-            413 -> "Payload Too Large"
-            429 -> "Too Many Requests"
-            else -> "Error"
-        }
-        val header = buildString {
-            append("HTTP/1.1 $status $reason\r\n")
-            append("Content-Type: $type\r\n")
-            append("Content-Length: ${body.size}\r\n")
-            append("Cache-Control: no-store\r\n")
-            append("X-Content-Type-Options: nosniff\r\n")
-            append("Referrer-Policy: no-referrer\r\n")
-            append("X-Frame-Options: DENY\r\n")
-            append("Connection: close\r\n")
-            extra.forEach { (k, v) -> append("$k: $v\r\n") }
-            append("\r\n")
-        }
-        try {
-            out.write(header.toByteArray())
-            if (!head) out.write(body)
-            out.flush()
-        } catch (_: IOException) {
-            // The phone went away mid-answer; nothing to tell it.
-        }
-    }
-
     companion object {
-        private const val TAG = "PhoneServer"
-        private const val MAX_THREADS = 24
+        private const val HOLDER = "phone pages"
         private const val MAX_FILE = 512 * 1024
         private const val MAX_JSON = 256 * 1024
-        private const val MAX_HEADERS = 64
-        private const val MAX_HEADER_BYTES = 16 * 1024
         private const val WAIT_MS = 25_000L
         private const val ANSWER_MS = 45_000L
         private const val WINDOW_MS = 10 * 60_000L
@@ -431,62 +320,9 @@ class PhoneServer {
         /** A session no screen shows any more keeps its code this long, so the TV can come back to it. */
         const val KEEP_MS = 2 * 60_000L
 
-        /** Up to this much of a refused upload is read and dropped, so the phone gets the answer. */
-        private const val MAX_DRAIN = 8 * 1024 * 1024
-
-        private val IPV4 = Regex("""\d{1,3}(\.\d{1,3}){3}""")
-
         // The page needs only itself: its own script and style, pictures it makes, and requests to the TV.
         private const val CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; " +
             "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-
-        /** The TV's address on the home network: Wi-Fi or Ethernet, never the tunnel. */
-        fun lanAddress(): String? = runCatching {
-            NetworkInterface.getNetworkInterfaces().toList()
-                .filter { it.isUp && !it.isLoopback && !it.name.startsWith("tun") && !it.isVirtual }
-                .flatMap { it.inetAddresses.toList() }
-                .filterIsInstance<Inet4Address>()
-                .firstOrNull { it.isSiteLocalAddress }
-                ?.hostAddress
-        }.getOrNull()
-
-        private fun parseQuery(q: String): Map<String, String> =
-            q.split('&').filter { '=' in it }.associate {
-                runCatching { URLDecoder.decode(it.substringBefore('='), "UTF-8") to URLDecoder.decode(it.substringAfter('='), "UTF-8") }
-                    .getOrDefault("" to "")
-            }
-
-        private fun readLine(input: InputStream): String? {
-            val buf = ByteArrayOutputStream()
-            while (true) {
-                val b = input.read()
-                if (b == -1) return if (buf.size() == 0) null else buf.toString("UTF-8")
-                if (b == '\n'.code) return buf.toString("UTF-8").trimEnd('\r')
-                if (buf.size() > 8192) return null
-                buf.write(b)
-            }
-        }
-
-        private fun drain(input: InputStream, length: Int) {
-            val buf = ByteArray(16 * 1024)
-            var left = length
-            while (left > 0) {
-                val n = runCatching { input.read(buf, 0, minOf(buf.size, left)) }.getOrDefault(-1)
-                if (n < 0) return
-                left -= n
-            }
-        }
-
-        private fun readExactly(input: InputStream, length: Int): ByteArray? {
-            val body = ByteArray(length)
-            var read = 0
-            while (read < length) {
-                val n = input.read(body, read, length - read)
-                if (n < 0) return null
-                read += n
-            }
-            return body
-        }
     }
 }
 
@@ -520,8 +356,15 @@ class PhoneSession internal constructor(val key: String, code: String) {
     var lastSeen by mutableLongStateOf(0L)
         private set
 
-    /** What a phone did last, for the TV's status line: "Received Home.ovpn". */
-    var tvLine by mutableStateOf<String?>(null)
+    /** What a phone did last, for the TV's status line: "Received Home.ovpn". A new task on the TV clears it. */
+    var tvLine: String?
+        get() = tvLineNow
+        set(value) {
+            tvLineNow = value
+            tvLineAt = System.currentTimeMillis()
+        }
+    private var tvLineNow by mutableStateOf<String?>(null)
+    @Volatile private var tvLineAt = 0L
 
     @Volatile internal var owners = 0
     @Volatile internal var leftAt = System.currentTimeMillis()
@@ -548,6 +391,9 @@ class PhoneSession internal constructor(val key: String, code: String) {
 
     /** Who listens for a section the phone saved, so a TV sheet editing it can close. */
     private val savers = mutableListOf<(String) -> Unit>()
+
+    /** Who follows a phone's action on a section: a null reply when it starts, then its reply. */
+    private val watchers = mutableListOf<(String?, PhoneReply?) -> Unit>()
 
     /** Forgets the screen's handlers, so a page left open can't act through a screen that has gone. */
     internal fun detach() {
@@ -618,8 +464,6 @@ class PhoneSession internal constructor(val key: String, code: String) {
         var moved = false
         change {
             if (section != focusNow) {
-                // A new sheet on the TV is a new task: the last one's result line goes.
-                if (section != null && System.currentTimeMillis() - statusAt > 3000) statusNow = null
                 focusNow = section
                 moved = true
                 true
@@ -627,7 +471,30 @@ class PhoneSession internal constructor(val key: String, code: String) {
                 false
             }
         }
+        // A new sheet on the TV is a new task: the last one's result line goes.
+        if (moved && section != null) newTask()
         if (moved) rebuild()
+    }
+
+    /**
+     * The TV starts another task with this session (another sheet, another Import method): the last
+     * task's result lines go, on the TV and the phone, unless they are only just in, from the phone
+     * action that started this one. Main thread only.
+     */
+    fun newTask() {
+        val now = System.currentTimeMillis()
+        if (tvLineNow != null && now - tvLineAt > 3000) tvLine = null
+        change { if (statusNow != null && now - statusAt > 3000) { statusNow = null; true } else false }
+    }
+
+    fun listenActions(listener: (section: String?, reply: PhoneReply?) -> Unit): () -> Unit {
+        watchers += listener
+        return { watchers -= listener }
+    }
+
+    /** A phone's action on [section] starts (null [reply]) or has its reply. Main thread only. */
+    internal fun phoneAction(section: String?, reply: PhoneReply?) {
+        watchers.toList().forEach { it(section, reply) }
     }
 
     /** Keeps the session answering for [ms] after its screen closes, to report what happened. */

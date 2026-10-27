@@ -123,6 +123,8 @@ class PhoneReply(
     val holdMs: Long = 0,
     /** A file the phone downloads straight away, by id and name: the backup after its passphrase is chosen. */
     val download: Pair<String, String>? = null,
+    /** What the TV's status line says after this, when not "Saved from your phone". */
+    val tv: String? = null,
 ) {
     val ok: Boolean get() = errors.isEmpty() && status?.kind != PhoneStatus.Kind.Error
 

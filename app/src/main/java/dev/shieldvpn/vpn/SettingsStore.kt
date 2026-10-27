@@ -2,13 +2,14 @@ package dev.shieldvpn.vpn
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
 
 /** Settings that must survive an app restart. */
 object SettingsStore {
 
-    private const val PREFS = "shieldvpn_settings"
+    const val PREFS = "shieldvpn_settings"
 
     fun load(context: Context): AppSettings {
         val p = prefs(context)
@@ -17,6 +18,7 @@ object SettingsStore {
             killSwitch = p.getBoolean("killSwitch", d.killSwitch),
             boot = p.getBoolean("connectAtStartup", d.boot),
             startupId = p.getString("startupId", null),
+            startupBefore = p.getString("startupBefore", null),
             allowLan = p.getBoolean("allowLan", d.allowLan),
             blockIpv6 = p.getBoolean("blockIpv6", d.blockIpv6),
             advanced = p.getBoolean("advanced", d.advanced),
@@ -38,6 +40,7 @@ object SettingsStore {
             searchDomains = p.getString("searchDomains", "")?.split(' ')?.filter { it.isNotBlank() } ?: emptyList(),
             automation = p.getBoolean("automation", d.automation),
             autoUpdate = p.getBoolean("autoUpdate", d.autoUpdate),
+            phoneReach = p.getString("phoneReach", d.phoneReach) ?: d.phoneReach,
         )
     }
 
@@ -46,6 +49,7 @@ object SettingsStore {
             .putBoolean("killSwitch", s.killSwitch)
             .putBoolean("connectAtStartup", s.boot)
             .putString("startupId", s.startupId)
+            .putString("startupBefore", s.startupBefore)
             .remove("backdrop")
             .putBoolean("allowLan", s.allowLan)
             .putBoolean("blockIpv6", s.blockIpv6)
@@ -68,7 +72,24 @@ object SettingsStore {
             .putString("searchDomains", s.searchDomains.joinToString(" "))
             .putBoolean("automation", s.automation)
             .putBoolean("autoUpdate", s.autoUpdate)
+            .putString("phoneReach", s.phoneReach)
             .apply()
+        syncReach(context, s.phoneReach)
+    }
+
+    private const val REACH_FILE = "phone-reach"
+
+    /**
+     * "When phones can reach the TV", kept in a file of its own as well: the VPN's process reads it
+     * there each time, as preferences are cached per process and never see the app's writes.
+     */
+    fun phoneReach(context: Context): String =
+        readAtomically(File(context.filesDir, REACH_FILE))?.trim()?.ifEmpty { null } ?: AppSettings().phoneReach
+
+    /** Writes the file when it differs; the app's process only. */
+    fun syncReach(context: Context, reach: String) {
+        val file = File(context.filesDir, REACH_FILE)
+        if (readAtomically(file)?.trim() != reach) runCatching { writeAtomically(file, reach) }
     }
 
     /**

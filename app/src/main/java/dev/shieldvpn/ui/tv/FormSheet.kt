@@ -140,11 +140,23 @@ fun FormSheet(nav: Nav, req: Requesters, spec: FormSpec, close: () -> Unit, sess
             }
         }
         val stopSaved = session?.listenSaved { section -> if (section == spec.phoneSection) finish(spec.phoneSaved()) }
+        // A task the phone runs on this sheet's part shows here too: busy while it runs, then its problems.
+        val stopActions = session?.listenActions { section, reply ->
+            if (section != spec.phoneSection) return@listenActions
+            if (reply == null) {
+                busy = true
+            } else {
+                busy = false
+                reply.errors.forEach { (k, v) -> errors[if (spec.fields.any { f -> f.id == k }) k else spec.fields.first().id] = v }
+                if (reply.status?.kind == dev.shieldvpn.phone.PhoneStatus.Kind.Error && reply.errors.isEmpty()) errors[spec.fields.first().id] = reply.status.text
+            }
+        }
         session?.point(spec.phoneSection)
         session?.clearOldStatus()
         onDispose {
             stopTyping?.invoke()
             stopSaved?.invoke()
+            stopActions?.invoke()
             if (session?.focus == spec.phoneSection) session?.point(null)
         }
     }
@@ -199,7 +211,7 @@ fun FormSheet(nav: Nav, req: Requesters, spec: FormSpec, close: () -> Unit, sess
                         },
                         onKeep = {
                             confirming = false
-                            nav.refocus(req["ov-go"])
+                            nav.refocus(req["ov-extra"])
                         },
                     )
                 } else {
@@ -213,7 +225,7 @@ fun FormSheet(nav: Nav, req: Requesters, spec: FormSpec, close: () -> Unit, sess
                             TvButton(if (show) "Hide" else "Show", { show = !show }, icon = Ic.Eye, small = true, glass = true)
                         }
                         if (extra != null) {
-                            TvButton(extra.label, { if (extra.confirm != null) confirming = true else finish(extra.run()) }, small = true, glass = true, danger = extra.danger)
+                            TvButton(extra.label, { if (extra.confirm != null) confirming = true else finish(extra.run()) }, small = true, glass = true, danger = extra.danger, focusRequester = req["ov-extra"])
                         }
                         spec.toggle?.let { t ->
                             Spacer(Modifier.weight(1f))

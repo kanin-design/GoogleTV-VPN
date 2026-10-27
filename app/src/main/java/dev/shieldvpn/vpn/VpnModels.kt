@@ -47,11 +47,15 @@ data class Connection(
 
 sealed interface VpnStatus {
     data object Disconnected : VpnStatus
-    data class Connecting(val connectionId: String) : VpnStatus
+    /** [sinceMillis]: when this attempt began, so every screen counts from the same moment. */
+    data class Connecting(val connectionId: String, val sinceMillis: Long = System.currentTimeMillis()) : VpnStatus
     data class Connected(val connectionId: String, val sinceMillis: Long) : VpnStatus
 
-    /** The tunnel dropped and the kill switch is holding traffic back. */
-    data class Blocked(val connectionId: String) : VpnStatus
+    /**
+     * The kill switch is holding traffic back: the tunnel dropped, or with [reason], a new one
+     * (a switch, or a try again) never came up, and that is why.
+     */
+    data class Blocked(val connectionId: String, val reason: String? = null) : VpnStatus
     data class Failed(val connectionId: String?, val message: String) : VpnStatus
 }
 
@@ -70,7 +74,8 @@ val VpnStatus.isActive: Boolean
     get() = this is VpnStatus.Connecting || this is VpnStatus.Connected || this is VpnStatus.Blocked
 
 /** What the screens may show about a saved login. The password itself stays in [CredentialStore]. */
-data class Login(val username: String, val hasPassword: Boolean)
+/** [publicKey] is a WireGuard profile's own public key, which its server needs; not secret. */
+data class Login(val username: String, val hasPassword: Boolean, val publicKey: String? = null)
 
 /** The client certificate inside an .ovpn file. */
 data class CertInfo(
@@ -139,6 +144,8 @@ data class ImportReview(
     val wg: WireGuardFile.Facts? = null,
     /** A WireGuard file's keys, taken out of [text], held until the profile is saved. */
     val wgSecrets: WireGuardFile.Secrets? = null,
+    /** Where it came from, when not straight from a file: "From the QR code in photo.jpg". */
+    val note: String? = null,
 ) {
     // So a log line or a crash report never carries the file's keys or the password.
     override fun toString() = "ImportReview($fileName, $host:$port)"
@@ -157,6 +164,8 @@ data class AppSettings(
     /** Connect the startup profile when the TV turns on. */
     val boot: Boolean = false,
     val startupId: String? = null,
+    /** The startup profile before this one, which gets the slot back if this one is deleted. Not in backups. */
+    val startupBefore: String? = null,
     /** Keep casting and devices at home reachable outside the tunnel. */
     val allowLan: Boolean = false,
     /** Send IPv6 into the tunnel, where it is dropped, so it cannot leak. */
@@ -196,10 +205,14 @@ data class AppSettings(
     val automation: Boolean = false,
     /** Look for a newer build on GitHub each time the app opens. */
     val autoUpdate: Boolean = true,
+    /** When paired phones can reach the TV: [REACH_OPEN] or [REACH_VPN]. Not in backups. */
+    val phoneReach: String = REACH_VPN,
 ) {
     companion object {
         const val APPS_SKIP = "Selected apps skip the VPN"
         const val APPS_ONLY = "Only selected apps use it"
+        const val REACH_OPEN = "While the app is open"
+        const val REACH_VPN = "While the app is open or the VPN is on"
     }
 }
 

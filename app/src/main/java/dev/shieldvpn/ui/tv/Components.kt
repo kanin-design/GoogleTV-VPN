@@ -560,13 +560,8 @@ fun IconSquare(icon: Ic, focused: Boolean, size: Float = 40f, radius: Float = 12
 /** .addi: the dashed square on "Add" rows. */
 @Composable
 fun AddSquare(focused: Boolean, icon: Ic = Ic.Plus) {
-    Box(
-        modifier = Modifier
-            .size(96.dp, 54.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .border(2.dp, if (focused) Tv.dark(0.3f) else Tv.white(0.25f), RoundedCornerShape(10.dp)),
-        contentAlignment = Alignment.Center,
-    ) { TvIcon(icon, 22f, if (focused) Tv.OnFocus else Tv.Ink) }
+    // A row's icon like the others, filled, so the row doesn't read as a button inside a row.
+    IconSquare(icon, focused, size = 44f, radius = 13f)
 }
 
 /** .sect: a small heading between rows. */
@@ -773,14 +768,14 @@ private fun Caret() {
 
 // ---- Toast --------------------------------------------------------------------
 
-/** .toast: a short message at the bottom of the screen. */
+/** .toast: a short message just under the tabs, where it covers no card, row or hint. */
 @Composable
 fun BoxScope.TvToast(message: String?) {
     AnimatedVisibility(
         visible = message != null,
-        enter = fadeIn(tween(200)) + slideInVertically(tween(200)) { it / 4 },
-        exit = fadeOut(tween(200)) + slideOutVertically(tween(200)) { it / 4 },
-        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp),
+        enter = fadeIn(tween(200)) + slideInVertically(tween(200)) { -it / 4 },
+        exit = fadeOut(tween(200)) + slideOutVertically(tween(200)) { -it / 4 },
+        modifier = Modifier.align(Alignment.TopCenter).padding(top = 92.dp),
     ) {
         var last by remember { mutableStateOf("") }
         if (message != null) last = message
@@ -841,13 +836,15 @@ fun ConfirmBar(text: String, confirm: String, keep: FocusRequester, onConfirm: (
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // As tall as the row it takes the place of, so the sheet or list around it doesn't jump.
+            .height(RowKind.Row.minHeight.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Tv.Red.copy(alpha = 0.12f))
-            .padding(start = 18.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
+            .padding(start = 18.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(text, style = TvType.ui(16f, FontWeight.SemiBold), modifier = Modifier.weight(1f))
+        Text(text, style = TvType.ui(15f, FontWeight.SemiBold).copy(lineHeight = 18.sp), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         TvButton(confirm, onConfirm, icon = icon, small = true, danger = true)
         TvButton("Keep", onKeep, small = true, focusRequester = keep)
     }

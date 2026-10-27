@@ -29,6 +29,14 @@ object Tunnels {
             val onlyApps: Boolean = false,
             val roam: Boolean = true,
             val stayAwake: Boolean = false,
+            /** Which engine runs it. [config] is then the .conf without its keys, which come here. */
+            val kind: VpnKind = VpnKind.OpenVpn,
+            val wgPrivateKey: String = "",
+            val wgPresharedKeys: Map<String, String> = emptyMap(),
+            /** Settings › OpenVPN › Connection timeout, which WireGuard's first handshake waits for too. */
+            val timeoutSeconds: Int = 60,
+            /** The profile's name, for the log's lines. */
+            val name: String = "",
         ) : Plan {
             // So a log line or a crash report never carries the file's keys or the password.
             override fun toString() = "Plan.Ready($connectionId)"
@@ -36,6 +44,7 @@ object Tunnels {
             /** All of it goes to the VPN's process in the start intent. */
             fun toBundle(): Bundle = Bundle().apply {
                 putString("id", connectionId)
+                putString("name", name)
                 putString("config", config)
                 putString("user", username)
                 putString("pass", password)
@@ -53,6 +62,10 @@ object Tunnels {
                 putBoolean("onlyApps", onlyApps)
                 putBoolean("roam", roam)
                 putBoolean("stayAwake", stayAwake)
+                putString("kind", kind.name)
+                putString("wgKey", wgPrivateKey)
+                putBundle("wgPsk", Bundle().apply { wgPresharedKeys.forEach { (k, v) -> putString(k, v) } })
+                putInt("timeout", timeoutSeconds)
             }
 
             companion object {
@@ -60,6 +73,7 @@ object Tunnels {
                     if (b == null) return null
                     return Ready(
                         connectionId = b.getString("id") ?: return null,
+                        name = b.getString("name").orEmpty(),
                         config = b.getString("config").orEmpty(),
                         username = b.getString("user").orEmpty(),
                         password = b.getString("pass").orEmpty(),
@@ -77,6 +91,10 @@ object Tunnels {
                         onlyApps = b.getBoolean("onlyApps"),
                         roam = b.getBoolean("roam", true),
                         stayAwake = b.getBoolean("stayAwake"),
+                        kind = runCatching { VpnKind.valueOf(b.getString("kind").orEmpty()) }.getOrDefault(VpnKind.OpenVpn),
+                        wgPrivateKey = b.getString("wgKey").orEmpty(),
+                        wgPresharedKeys = b.getBundle("wgPsk")?.let { k -> k.keySet().associateWith { k.getString(it).orEmpty() } }.orEmpty(),
+                        timeoutSeconds = b.getInt("timeout", 60),
                     )
                 }
             }
@@ -93,11 +111,16 @@ object Tunnels {
         val connection = ConnectionStore.list(context).firstOrNull { it.id == id }
             ?: return Plan.Fails(id, "This profile no longer exists.")
         if (ServerStore.hidden(context, connection.serverId)) return Plan.Fails(id, "This profile no longer exists.")
-        if (ServerStore.list(context).firstOrNull { it.id == connection.serverId }?.kind == VpnKind.WireGuard) {
-            return Plan.Fails(id, "WireGuard can’t connect yet in this build.")
-        }
         val base = ServerStore.effectiveConfig(context, connection.serverId)
             ?: return Plan.Fails(id, "The profile's file is missing. Import it again.")
+        val settings = SettingsStore.load(context)
+        if (ServerStore.list(context).firstOrNull { it.id == connection.serverId }?.kind == VpnKind.WireGuard) {
+            // The keys are kept apart from the file, encrypted; the tunnel puts them back.
+            val keys = CredentialStore.wireGuard(context, id) ?: return Plan.Fails(id, "The profile's key is missing. Import its .conf file again.")
+            return shared(connection, settings).copy(
+                config = base, kind = VpnKind.WireGuard, wgPrivateKey = keys.privateKey, wgPresharedKeys = keys.presharedKeys,
+            )
+        }
         if (!ServerStore.hasCertificate(base)) {
             return Plan.Fails(id, "This profile has no server certificate. Import its .ovpn file again.")
         }
@@ -105,9 +128,24 @@ object Tunnels {
         if (ServerStore.needsLogin(base) && (creds.username.isEmpty() || creds.password.isEmpty())) {
             return Plan.NeedsLogin(id)
         }
-        val settings = SettingsStore.load(context)
         val ordered = if (connection.order == "Random" && "remote-random" !in base) "remote-random\n$base" else base
         val config = if (connection.keyAlias != null) Certificates.withoutClientCertificate(ordered) else ordered
+        return shared(connection, settings).copy(
+            config = config,
+            username = creds.username,
+            password = creds.password,
+            coreOptions = coreOptions(settings) + when {
+                connection.keyAlias != null -> "epki=${connection.keyAlias}\n"
+                // Without one the core expects a key in the keystore, and fails before it dials.
+                // Most providers' files sign in with a username and password only.
+                !ServerStore.hasClientCertificate(config) -> "nocert=1\n"
+                else -> ""
+            },
+        )
+    }
+
+    /** What every kind of tunnel takes from the app's settings and the profile's own choices. */
+    private fun shared(connection: Connection, settings: AppSettings): Plan.Ready {
         val killSwitch = when (connection.killMode) {
             "Always on" -> true
             "Off" -> false
@@ -116,21 +154,15 @@ object Tunnels {
         // Custom DNS servers replace the pushed ones, unless the profile only trusts its server.
         val useCustom = connection.dnsMode != "Server only" && settings.customDns.isNotEmpty()
         return Plan.Ready(
-            connectionId = id,
-            config = config,
-            username = creds.username,
-            password = creds.password,
+            connectionId = connection.id,
+            name = connection.name,
+            config = "",
+            username = "",
+            password = "",
             killSwitch = killSwitch,
             allowLan = settings.allowLan,
             blockIpv6 = settings.blockIpv6,
             dnsServerOnly = connection.dnsMode == "Server only",
-            coreOptions = coreOptions(settings) + when {
-                connection.keyAlias != null -> "epki=${connection.keyAlias}\n"
-                // Without one the core expects a key in the keystore, and fails before it dials.
-                // Most providers' files sign in with a username and password only.
-                !ServerStore.hasClientCertificate(config) -> "nocert=1\n"
-                else -> ""
-            },
             mtu = settings.mtu.toIntOrNull(),
             pushedDns = connection.dnsMode == "Server only" || (settings.pushedDns && !useCustom),
             customDns = if (useCustom) settings.customDns else emptyList(),
@@ -140,6 +172,7 @@ object Tunnels {
             onlyApps = settings.appMode == AppSettings.APPS_ONLY,
             roam = settings.roam,
             stayAwake = settings.stayAwake,
+            timeoutSeconds = settings.timeout,
         )
     }
 

@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.shieldvpn.APP_NAME
+import dev.shieldvpn.control.PinTries
 import dev.shieldvpn.phone.PhoneField
 import dev.shieldvpn.phone.PhoneOption
 import dev.shieldvpn.vpn.Backup
@@ -60,22 +61,6 @@ fun PhoneSheet(req: Requesters, o: Overlay.Phone, close: () -> Unit) {
             o.extra?.let { (label, run) -> TvButton(label, run, glass = true) }
         }
     }
-}
-
-/**
- * Wrong PINs in a row, for this run of the app. After five, each try waits: 30 seconds, then
- * twice as long each time, so a 4-digit PIN can't be tried through from the remote.
- */
-private object PinTries {
-    var misses = 0
-    var waitUntil = 0L
-
-    fun missed() {
-        misses++
-        if (misses >= 5) waitUntil = System.currentTimeMillis() + 30_000L * (1L shl (misses - 5).coerceAtMost(6))
-    }
-
-    fun secondsLeft(): Long = ((waitUntil - System.currentTimeMillis() + 999) / 1000).coerceAtLeast(0)
 }
 
 /** Asks for the PIN, or sets a new one with a second entry to confirm. What is wrong shows under the dots. */
@@ -108,14 +93,13 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
                 wait = PinTries.secondsLeft()
             }
             digits.length < 4 -> problem = "The PIN has 4 to 8 digits"
-            !o.setting -> if (actions.checkPin(digits)) {
-                PinTries.misses = 0
+            // Counted with the PINs typed on a phone: one count for every way in.
+            !o.setting -> if (PinTries.attempt(digits, actions::checkPin) == null) {
                 nav.unlocked = true
                 close()
                 o.then?.invoke()
             } else {
                 digits = ""
-                PinTries.missed()
                 wait = PinTries.secondsLeft()
                 if (wait == 0L) problem = "That isn’t the PIN. Try again"
             }
@@ -400,7 +384,8 @@ fun p12Fields(state: VpnUiState, only: Connection?): List<PhoneField> = listOfNo
     if (only == null) {
         PhoneField.Select(
             "target", "Use it for",
-            state.connections.map { c ->
+            // The TV finds the profile from who issued the certificate; picking one is for a tie.
+            listOf(PhoneOption("", "The profile it belongs to", sub = "The TV finds it from who issued the certificate")) + state.connections.filter { state.infoOf(it)?.kind != dev.shieldvpn.vpn.VpnKind.WireGuard }.map { c ->
                 val has = state.infoOf(c)?.cert != null
                 PhoneOption(
                     c.id, c.name,
@@ -408,7 +393,7 @@ fun p12Fields(state: VpnUiState, only: Connection?): List<PhoneField> = listOfNo
                     confirm = if (has) "${c.name} has its own certificate and key. Replace them?" else null,
                 )
             },
-            null,
+            "",
         )
     } else {
         null

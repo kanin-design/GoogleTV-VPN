@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
 import android.widget.Toast
+import dev.shieldvpn.control.Control
 import dev.shieldvpn.vpn.ConnectionStore
 import dev.shieldvpn.vpn.ServerStore
 import dev.shieldvpn.vpn.SettingsStore
@@ -51,7 +52,7 @@ class AutomationActivity : Activity() {
         }
         when (val plan = Tunnels.plan(this, target.id)) {
             is Tunnels.Plan.Ready -> {
-                SettingsStore.setActiveConnection(this, target.id)
+                Control.setActive(target.id)
                 Tunnels.start(this, plan)
             }
             is Tunnels.Plan.NeedsLogin -> say("${target.name} needs its password saved first")

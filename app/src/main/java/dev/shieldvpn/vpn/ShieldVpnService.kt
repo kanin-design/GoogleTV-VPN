@@ -4,8 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.ApplicationInfo
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
@@ -25,6 +27,8 @@ import dev.shieldvpn.APP_NAME
 import dev.shieldvpn.AlwaysOnReceiver
 import dev.shieldvpn.MainActivity
 import dev.shieldvpn.R
+import dev.shieldvpn.remote.Devices
+import dev.shieldvpn.remote.RemoteService
 
 /**
  * Owns the tunnel. The OpenVPN 3 core runs on its own thread; this class
@@ -42,7 +46,7 @@ class ShieldVpnService : VpnService() {
     // The app's screens run in another process; they follow the tunnel through this.
     private val link = VpnLink.Server()
 
-    @Volatile private var handle = 0L
+    @Volatile private var engine: TunnelEngine? = null
     @Volatile private var connectionId: String? = null
     @Volatile private var killSwitchOn = true
     @Volatile private var allowLan = false
@@ -76,7 +80,7 @@ class ShieldVpnService : VpnService() {
     private val handler = Handler(Looper.getMainLooper())
     private val resume = Runnable { resumeAfterPause() }
 
-    // Guards the native handle, which the UI thread reads for the byte counters.
+    // Guards the engine, which the UI thread reads for the byte counters.
     private val engineLock = Any()
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -86,9 +90,45 @@ class ShieldVpnService : VpnService() {
     private var lastStart = 0
     private var destroyed = false
 
+    // Keeps the phone panel's server up in the app's process while a tunnel is up or paused.
+    private var remoteBound = false
+    private val remote = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) = Unit
+        override fun onServiceDisconnected(name: ComponentName?) = Unit
+    }
+
     override fun onCreate() {
         super.onCreate()
         VpnController.watcher = link
+        link.onKillSwitch = { on -> handler.post { killSwitchNow(on) } }
+    }
+
+    /**
+     * The kill switch was changed while this tunnel is up. It holds from now; turned off while
+     * traffic is held back after a drop, the block ends.
+     */
+    private fun killSwitchNow(on: Boolean) {
+        if (killSwitchOn != on) VpnController.log(if (on) "The kill switch is on for this tunnel now." else "The kill switch is off for this tunnel now.")
+        killSwitchOn = on
+        plan = plan?.copy(killSwitch = on)
+        val status = VpnController.status.value
+        if (!on && status is VpnStatus.Blocked && worker == null) {
+            VpnController.log("The kill switch was turned off, so traffic is no longer held back.")
+            VpnController.update(VpnStatus.Failed(status.connectionId, "Connection dropped"))
+            leave()
+        }
+    }
+
+    /** With phone access while the VPN is on, and a phone paired, the panel's server stays up. */
+    private fun checkRemote() {
+        val wanted = !destroyed && (worker != null || holding || blackhole != null) &&
+            SettingsStore.phoneReach(this) == AppSettings.REACH_VPN && Devices.any(this)
+        if (wanted && !remoteBound) {
+            remoteBound = runCatching { bindService(Intent(this, RemoteService::class.java), remote, Context.BIND_AUTO_CREATE) }.getOrDefault(false)
+        } else if (!wanted && remoteBound) {
+            runCatching { unbindService(remote) }
+            remoteBound = false
+        }
     }
 
     // Android binds with VpnService.SERVICE_INTERFACE for the VPN itself; the app binds for the link.
@@ -106,6 +146,7 @@ class ShieldVpnService : VpnService() {
             ACTION_DISCONNECT -> disconnect()
             ACTION_PAUSE -> pause(intent.getLongExtra(EXTRA_UNTIL, System.currentTimeMillis() + 15 * 60_000L))
             ACTION_SIMULATE_DROP -> if (isDebuggable()) simulateDrop()
+            ACTION_REMOTE -> if (worker != null || holding || blackhole != null) checkRemote() else if (engine == null) stopSelf(startId)
             SERVICE_INTERFACE -> alwaysOn()
         }
         return START_NOT_STICKY
@@ -116,10 +157,16 @@ class ShieldVpnService : VpnService() {
         cancelResume()
         val id = next?.connectionId.orEmpty()
         if (worker != null) {
-            // Switching profiles: end this tunnel, and finish() starts the new one.
+            // Switching profiles: end this tunnel, and finish() starts the new one. With the kill
+            // switch, traffic is held back from now: the old tunnel can take a moment to go down.
             pending = next
             userStopped = true
+            next?.name?.takeIf { it.isNotEmpty() }?.let { VpnController.log("Switching to $it.") }
             VpnController.update(VpnStatus.Connecting(id))
+            if (wasConnected && next?.killSwitch == true) {
+                plan = next
+                startBlackhole()
+            }
             stopEngine()
             return
         }
@@ -137,29 +184,21 @@ class ShieldVpnService : VpnService() {
         dnsServerOnly = next.dnsServerOnly
         connectionId = id
         plan = next
+        if (next.name.isNotEmpty()) VpnController.log("Connecting to ${next.name}.")
         VpnController.update(VpnStatus.Connecting(id))
 
-        val h = OpenVpnEngine.create(bridge)
-        handle = h
-
-        val evalError = OpenVpnEngine.evaluate(h, next.config, next.coreOptions)
-        if (evalError.isNotEmpty()) {
-            VpnController.log(evalError, LogKind.Err)
-            finish(VpnStatus.Failed(id, "The profile's file has an error: $evalError"))
+        val e = if (next.kind == VpnKind.WireGuard) WireGuardTunnel(wireGuardHost) else OpenVpnTunnel(bridge)
+        synchronized(engineLock) { engine = e }
+        e.prepare(next)?.let { problem ->
+            VpnController.log(problem, LogKind.Err)
+            finish(VpnStatus.Failed(id, problem))
             return
-        }
-        if (OpenVpnEngine.needsCredentials(h)) {
-            val credError = OpenVpnEngine.provideCredentials(h, next.username, next.password)
-            if (credError.isNotEmpty()) {
-                finish(VpnStatus.Failed(id, credError))
-                return
-            }
         }
 
         worker = Thread({
-            val result = OpenVpnEngine.connect(h)
+            val result = runCatching { e.run() }.getOrElse { "The tunnel stopped: ${it.message}" }
             handler.post { finish(outcome(id, result)) }
-        }, "openvpn-core").also { it.start() }
+        }, "tunnel").also { it.start() }
     }
 
     /**
@@ -221,9 +260,9 @@ class ShieldVpnService : VpnService() {
 
     /** Asks the running core to end. Returns false when no core is running. */
     private fun stopEngine(): Boolean = synchronized(engineLock) {
-        val h = handle
-        if (h != 0L) OpenVpnEngine.stop(h)
-        h != 0L
+        val e = engine
+        e?.stop()
+        e != null
     }
 
     /** Android turned the VPN off, or another VPN app took over. */
@@ -243,6 +282,8 @@ class ShieldVpnService : VpnService() {
         stopWatching()
         releaseWake()
         stopBlackhole()
+        if (remoteBound) runCatching { unbindService(remote) }
+        remoteBound = false
         VpnController.stats = null
         if (VpnController.watcher === link) VpnController.watcher = null
         super.onDestroy()
@@ -265,13 +306,12 @@ class ShieldVpnService : VpnService() {
         stopWatching()
         releaseWake()
         synchronized(engineLock) {
-            val h = handle
-            if (h != 0L) {
-                OpenVpnEngine.destroy(h)
-                handle = 0L
-            }
+            engine?.close()
+            engine = null
         }
         worker = null
+        // "Last connected" is when it was last up, so a tunnel that ends counts as now.
+        if (wasConnected) connectionId?.let { endedId -> ConnectionStore.update(this, endedId) { it.copy(lastUsed = System.currentTimeMillis()) } }
         if (destroyed) return
         val id = connectionId
         connectionId = null
@@ -293,12 +333,17 @@ class ShieldVpnService : VpnService() {
         // keep holding it back instead of letting it leak.
         val retried = !wasConnected && blackhole != null
         if (!userStopped && (wasConnected || retried) && killSwitchOn && id != null && startBlackhole()) {
-            if (retried && status is VpnStatus.Failed) VpnController.log(status.message, LogKind.Err)
+            // A new tunnel that never came up says why, on the screens too, not only in the log.
+            val why = (status as? VpnStatus.Failed)?.message?.takeIf { retried }
+            if (why != null) {
+                VpnController.log(why, LogKind.Err)
+                ConnectionStore.update(this, id) { it.copy(lastError = why) }
+            }
             VpnController.log(
                 if (retried) "The kill switch is still blocking traffic." else "The tunnel dropped. The kill switch is blocking traffic.",
                 LogKind.Err,
             )
-            VpnController.update(VpnStatus.Blocked(id))
+            VpnController.update(VpnStatus.Blocked(id, why))
             showForeground("Blocking traffic until the tunnel is back")
             return
         }
@@ -345,12 +390,15 @@ class ShieldVpnService : VpnService() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        // After the worker has started, so the check sees the tunnel.
+        handler.post { checkRemote() }
     }
 
     /** Nothing left to own: drop the notification and stop, unless a newer command came in. */
     private fun leave() {
         holding = false
         stopBlackhole()
+        checkRemote()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf(lastStart)
     }
@@ -436,7 +484,7 @@ class ShieldVpnService : VpnService() {
                 if (!lost || !wasConnected) return
                 lost = false
                 VpnController.log("The network changed. Reconnecting.")
-                synchronized(engineLock) { handle.takeIf { it != 0L }?.let { OpenVpnEngine.reconnect(it, 1) } }
+                synchronized(engineLock) { engine?.networkChanged() }
             }
         }
         // The networks under the tunnel, not the tunnel itself.
@@ -475,6 +523,142 @@ class ShieldVpnService : VpnService() {
         else -> name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
 
+    // ---- What every tunnel shares -----------------------------------------------------
+
+    /** The tunnel is up: the screens, the notification, the counters and the network watch follow. Any thread. */
+    private fun onConnected(id: String) {
+        wasConnected = true
+        failure = null
+        // Recorded here too, so a connect at boot or from another app counts as used.
+        ConnectionStore.update(this, id) { it.copy(lastError = null, lastUsed = System.currentTimeMillis()) }
+        VpnController.log("Connected", LogKind.Ok)
+        VpnController.update(VpnStatus.Connected(id, System.currentTimeMillis()))
+        showForeground("Protected")
+        VpnController.stats = { synchronized(engineLock) { engine?.stats() } }
+        lookUpPublicIp()
+        if (plan?.stayAwake == true) holdWake()
+        if (plan?.roam != false) watchNetworks()
+    }
+
+    private fun onReconnecting(id: String) {
+        if (wasConnected && !userStopped) VpnController.update(VpnStatus.Connecting(id))
+    }
+
+    /**
+     * The app's rules for every VPN interface, after the engine has added its own addresses, routes
+     * and DNS servers: the local network, IPv6, custom and fallback DNS, the MTU and which apps use
+     * it. With [allTraffic], all IPv4 goes into the tunnel. Returns the details the screens show.
+     */
+    private fun applyRules(b: Builder, start: TunnelInfo, hasIpv6: Boolean, dnsFromServerAlready: Boolean, allTraffic: Boolean): TunnelInfo {
+        var info = start
+        var dnsFromServer = dnsFromServerAlready
+        fun attempt(block: () -> Any?): Boolean = runCatching { block() != null }.getOrElse { Log.w(TAG, "tun setup failed: ${it.message}"); false }
+        if (allTraffic && allowLan) {
+            // Everything except the home network, so casting and devices at home keep working.
+            PUBLIC_ROUTES.forEach { (address, prefix) -> attempt { b.addRoute(address, prefix) } }
+            info = info.copy(routes = info.routes + "All traffic except the local network")
+        } else if (allTraffic) {
+            attempt { b.addRoute("0.0.0.0", 0) }
+            info = info.copy(routes = info.routes + "All traffic")
+        }
+        if (blockIpv6) {
+            // IPv6 goes into the tunnel too. If the server does not carry it, it is dropped there.
+            if (!hasIpv6) attempt { b.addAddress("fd74:756e:6e65:6c00::1", 64) }
+            attempt { b.addRoute("::", 0) }
+        } else if (!hasIpv6) {
+            // Android blocks a family the VPN has no address for; Block IPv6 off lets it out.
+            attempt { b.allowFamily(OsConstants.AF_INET6) }
+        }
+        // Android counts a VPN as metered unless told otherwise; this follows the network under it.
+        if (Build.VERSION.SDK_INT >= 29) attempt { b.setMetered(false) }
+        val p = plan
+        p?.customDns?.forEach { dns ->
+            if (attempt { b.addDnsServer(dns) }) {
+                dnsFromServer = true
+                info = info.copy(dns = info.dns + "$dns (custom)")
+            }
+        }
+        p?.searchDomains?.forEach { attempt { b.addSearchDomain(it) } }
+        // Without DNS from the server, queries would go to the home router through the tunnel, so
+        // use a public resolver instead. A tunnel for some networks only leaves DNS to the network.
+        if (!dnsFromServer && !dnsServerOnly && allTraffic) {
+            attempt { b.addDnsServer("1.1.1.1") }
+            info = info.copy(dns = listOf("1.1.1.1 (fallback)"))
+        }
+        // With the local network allowed, a DNS server at home would be reached outside
+        // the tunnel. Route each one into it anyway.
+        if (allowLan && p?.blockDns != false) {
+            info.dns.map { it.substringBefore(' ') }.filter { isPrivateV4(it) }.forEach { attempt { b.addRoute(it, 32) } }
+        }
+        if (p?.mtu != null && info.mtu == null) {
+            attempt { b.setMtu(p.mtu) }
+            info = info.copy(mtu = p.mtu)
+        }
+        applyApps(b)
+        return info
+    }
+
+    /** What the service does for a WireGuard tunnel. It runs on the tunnel's thread. */
+    private val wireGuardHost = object : WireGuardTunnel.Host {
+        override fun openTun(spec: WireGuardTunnel.TunSpec): ParcelFileDescriptor? = runCatching {
+            val b = Builder().setSession(APP_NAME)
+            var info = TunnelInfo(remote = spec.remote)
+            var hasIpv6 = false
+            spec.addresses.forEach { (address, prefix) ->
+                b.addAddress(address, prefix)
+                if (':' in address) hasIpv6 = true else if (info.address == null) info = info.copy(address = "$address/$prefix")
+            }
+            spec.routes.forEach { (address, prefix) ->
+                // IPv6 networks only go in when IPv6 isn't blocked whole anyway.
+                if (':' !in address || !blockIpv6) {
+                    b.addRoute(address, prefix)
+                    info = info.copy(routes = info.routes + "$address/$prefix")
+                }
+            }
+            if (spec.allIpv6 && !blockIpv6) b.addRoute("::", 0)
+            var dnsFromServer = false
+            // The file's DNS servers count as the server's: Settings › DNS can replace them.
+            if (plan?.pushedDns != false) {
+                spec.dns.forEach { dns ->
+                    b.addDnsServer(dns)
+                    dnsFromServer = true
+                    info = info.copy(dns = info.dns + dns)
+                }
+            }
+            spec.searchDomains.forEach { runCatching { b.addSearchDomain(it) } }
+            val mtu = plan?.mtu ?: spec.mtu ?: 1280
+            b.setMtu(mtu)
+            info = info.copy(mtu = mtu)
+            info = applyRules(b, info, hasIpv6, dnsFromServer, allTraffic = spec.allTraffic)
+            if (!spec.allTraffic) info = info.copy(routes = info.routes + "Only these networks")
+            val pfd = b.establish()
+            if (pfd != null) {
+                stopBlackhole()
+                VpnController.setTunnel(info)
+            }
+            pfd
+        }.onFailure { VpnController.log("Android did not open the VPN: ${it.message}", LogKind.Err) }.getOrNull()
+
+        override fun protect(fd: Int): Boolean = fd >= 0 && this@ShieldVpnService.protect(fd)
+
+        override fun connected() {
+            connectionId?.let(::onConnected)
+        }
+
+        override fun reconnecting() {
+            connectionId?.let(::onReconnecting)
+        }
+
+        override fun log(text: String, kind: LogKind) = VpnController.log(text, kind)
+
+        override fun hasNetwork(): Boolean = runCatching {
+            val cm = getSystemService(ConnectivityManager::class.java)
+            cm.allNetworks.any { n ->
+                cm.getNetworkCapabilities(n)?.let { it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) } == true
+            }
+        }.getOrDefault(true)
+    }
+
     /** Receives the core's TUN instructions and applies them to a VpnService.Builder. */
     private inner class TunBridge : NativeCallbacks {
         private var builder: Builder? = null
@@ -491,22 +675,8 @@ class ShieldVpnService : VpnService() {
             Log.i(TAG, "event=$name error=$error")
             val id = connectionId ?: return
             when (name) {
-                "CONNECTED" -> {
-                    wasConnected = true
-                    failure = null
-                    // Recorded here too, so a connect at boot or from another app counts as used.
-                    ConnectionStore.update(this@ShieldVpnService, id) { it.copy(lastError = null, lastUsed = System.currentTimeMillis()) }
-                    VpnController.log("Connected", LogKind.Ok)
-                    VpnController.update(VpnStatus.Connected(id, System.currentTimeMillis()))
-                    showForeground("Protected")
-                    VpnController.stats = {
-                        synchronized(engineLock) { handle.takeIf { it != 0L }?.let { OpenVpnEngine.stats(it) } }
-                    }
-                    lookUpPublicIp()
-                    if (plan?.stayAwake == true) holdWake()
-                    if (plan?.roam != false) watchNetworks()
-                }
-                "RECONNECTING" -> if (wasConnected && !userStopped) VpnController.update(VpnStatus.Connecting(id))
+                "CONNECTED" -> onConnected(id)
+                "RECONNECTING" -> onReconnecting(id)
                 // finish() reports how the session ended.
                 "DISCONNECTED" -> Unit
                 else -> if (error) failure = reasonFor(name, info)
@@ -573,51 +743,10 @@ class ShieldVpnService : VpnService() {
         }
 
         private fun establishTunnel(): Int {
-            if (allowLan) {
-                // Everything except the home network, so casting and devices at home keep working.
-                PUBLIC_ROUTES.forEach { (address, prefix) -> attempt { builder?.addRoute(address, prefix) } }
-                info = info.copy(routes = info.routes + "All traffic except the local network")
-            } else {
-                // Full tunnel: send all IPv4 traffic through the VPN.
-                attempt { builder?.addRoute("0.0.0.0", 0) }
-                info = info.copy(routes = info.routes + "All traffic")
-            }
-            if (blockIpv6) {
-                // IPv6 goes into the tunnel too. If the server does not carry it, it is dropped there.
-                if (!hasIpv6) attempt { builder?.addAddress("fd74:756e:6e65:6c00::1", 64) }
-                attempt { builder?.addRoute("::", 0) }
-            } else if (!hasIpv6) {
-                // Android blocks a family the VPN has no address for; Block IPv6 off lets it out.
-                attempt { builder?.allowFamily(OsConstants.AF_INET6) }
-            }
-            // Android counts a VPN as metered unless told otherwise; this follows the network under it.
-            if (Build.VERSION.SDK_INT >= 29) attempt { builder?.setMetered(false) }
-            val p = plan
-            p?.customDns?.forEach { dns ->
-                if (attempt { builder?.addDnsServer(dns) }) {
-                    dnsFromServer = true
-                    info = info.copy(dns = info.dns + "$dns (custom)")
-                }
-            }
-            p?.searchDomains?.forEach { attempt { builder?.addSearchDomain(it) } }
-            // Without DNS from the server, queries would go to the home router
-            // through the tunnel, so use a public resolver instead.
-            if (!dnsFromServer && !dnsServerOnly) {
-                attempt { builder?.addDnsServer("1.1.1.1") }
-                info = info.copy(dns = listOf("1.1.1.1 (fallback)"))
-            }
-            // With the local network allowed, a DNS server at home would be reached outside
-            // the tunnel. Route each one into it anyway.
-            if (allowLan && p?.blockDns != false) {
-                info.dns.map { it.substringBefore(' ') }.filter { isPrivateV4(it) }.forEach { attempt { builder?.addRoute(it, 32) } }
-            }
-            if (p?.mtu != null && info.mtu == null) {
-                attempt { builder?.setMtu(p.mtu) }
-                info = info.copy(mtu = p.mtu)
-            }
-            builder?.let { applyApps(it) }
-
-            val pfd = builder?.establish() ?: return -1
+            val b = builder ?: return -1
+            // OpenVPN always carries all IPv4 traffic, whatever the server pushes.
+            info = applyRules(b, info, hasIpv6, dnsFromServer, allTraffic = true)
+            val pfd = b.establish() ?: return -1
             // The new interface has taken over from the blackhole, if one was holding traffic back.
             stopBlackhole()
             VpnController.setTunnel(info)
@@ -660,6 +789,9 @@ class ShieldVpnService : VpnService() {
         const val ACTION_DISCONNECT = "dev.shieldvpn.action.DISCONNECT"
         const val ACTION_PAUSE = "dev.shieldvpn.action.PAUSE"
         const val ACTION_SIMULATE_DROP = "dev.shieldvpn.action.SIMULATE_DROP"
+
+        /** Phone access or the paired phones changed: the service binds or lets go of the panel's server. */
+        const val ACTION_REMOTE = "dev.shieldvpn.action.REMOTE"
 
         private const val CHANNEL = "status"
 

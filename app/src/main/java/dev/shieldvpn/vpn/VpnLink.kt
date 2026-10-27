@@ -25,6 +25,8 @@ object VpnLink {
     private const val UNREGISTER = REGISTER + 1
     private const val STATS = REGISTER + 2
     private const val CLEAR_LOG = REGISTER + 3
+    private const val LOG = REGISTER + 4
+    private const val KILL_SWITCH = REGISTER + 5
 
     // The service calls the app, one way, in order.
     private const val STATUS = REGISTER + 10
@@ -37,6 +39,9 @@ object VpnLink {
     /** In the VPN's process: passes every change in [VpnController] to the app's screens. */
     class Server : Binder(), VpnController.Watcher {
         private val clients = CopyOnWriteArrayList<IBinder>()
+
+        /** The kill switch changed while a tunnel is up: the service takes it at once. */
+        @Volatile var onKillSwitch: (Boolean) -> Unit = {}
 
         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
             when (code) {
@@ -60,6 +65,8 @@ object VpnLink {
                     if (bytes != null) reply?.writeLongArray(bytes)
                 }
                 CLEAR_LOG -> VpnController.clearLog()
+                LOG -> data.readString()?.let { VpnController.log(it.take(500)) }
+                KILL_SWITCH -> onKillSwitch(data.readInt() == 1)
                 else -> return super.onTransact(code, data, reply, flags)
             }
             return true
@@ -155,6 +162,11 @@ object VpnLink {
             if (!call(CLEAR_LOG) {}) VpnController.clearLog()
         }
 
+        /** Adds a line to the service's log, which comes back over the link. False when it isn't bound. */
+        fun log(text: String): Boolean = call(LOG) { it.writeString(text) }
+
+        fun setKillSwitch(on: Boolean): Boolean = call(KILL_SWITCH) { it.writeInt(if (on) 1 else 0) }
+
         private fun stats(): LongArray? {
             val s = service ?: return null
             val data = Parcel.obtain()
@@ -193,6 +205,7 @@ object VpnLink {
             is VpnStatus.Connecting -> {
                 p.writeInt(1)
                 p.writeString(s.connectionId)
+                p.writeLong(s.sinceMillis)
             }
             is VpnStatus.Connected -> {
                 p.writeInt(2)
@@ -202,6 +215,7 @@ object VpnLink {
             is VpnStatus.Blocked -> {
                 p.writeInt(3)
                 p.writeString(s.connectionId)
+                p.writeString(s.reason)
             }
             is VpnStatus.Failed -> {
                 p.writeInt(4)
@@ -212,9 +226,9 @@ object VpnLink {
     }
 
     private fun readStatus(p: Parcel): VpnStatus = when (p.readInt()) {
-        1 -> VpnStatus.Connecting(p.readString().orEmpty())
+        1 -> VpnStatus.Connecting(p.readString().orEmpty(), p.readLong())
         2 -> VpnStatus.Connected(p.readString().orEmpty(), p.readLong())
-        3 -> VpnStatus.Blocked(p.readString().orEmpty())
+        3 -> VpnStatus.Blocked(p.readString().orEmpty(), p.readString())
         4 -> VpnStatus.Failed(p.readString(), p.readString().orEmpty())
         else -> VpnStatus.Disconnected
     }

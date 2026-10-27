@@ -4,18 +4,18 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// The build number: the commits on the checked-out branch, so every published build is higher than
-// the one before, even under the same version name. It is the versionCode, and updates compare it.
-// -PbuildNumber=N overrides it, to test an update.
+// The build number: 100 plus the commits on the checked-out branch, so every published build is
+// higher than the one before, even under the same version name. The 100 keeps releases above the
+// test builds (58 to 60) installed while 0.2.0 was made. It is the versionCode, and updates compare
+// it; tools/release.sh counts the same way. -PbuildNumber=N overrides it, to test an update.
 fun git(vararg args: String): String? = runCatching {
     providers.exec { commandLine("git", *args) }.standardOutput.asText.get().trim().ifEmpty { null }
 }.getOrNull()
-val buildNumber = providers.gradleProperty("buildNumber").orNull?.toInt() ?: git("rev-list", "--count", "HEAD")?.toInt() ?: 1
+val buildNumber = providers.gradleProperty("buildNumber").orNull?.toInt() ?: git("rev-list", "--count", "HEAD")?.toInt()?.plus(100) ?: 1
 val buildCommit = git("rev-parse", "--short=7", "HEAD") ?: "unknown"
 
-// WireGuard, work in progress: only with -Pwireguard=true, never in a published build (tools/release.sh
-// refuses). With it off, the code that reads WireGuard files is compiled out (Features.kt).
-val wireguard = providers.gradleProperty("wireguard").orNull == "true"
+// WireGuard is on; -Pwireguard=false builds an OpenVPN-only app, with WireGuard's code compiled out (Features.kt).
+val wireguard = providers.gradleProperty("wireguard").orNull != "false"
 
 android {
     namespace = "dev.shieldvpn"
@@ -27,7 +27,7 @@ android {
         minSdk = 28
         targetSdk = 34
         versionCode = buildNumber
-        versionName = "0.1.2"
+        versionName = "0.2.0"
         buildConfigField("String", "COMMIT", "\"$buildCommit\"")
 
         // The name people see: appName in gradle.properties. Code reads it as APP_NAME (AppName.kt).
@@ -83,6 +83,15 @@ android {
             path = file("src/main/cpp/Android.mk")
         }
     }
+
+    packaging {
+        jniLibs {
+            // The WireGuard library's tools for rooted devices (wg, wg-quick) are GPL and unused here:
+            // the app runs wireguard-go (libwg-go.so) through its own VPN service.
+            excludes += listOf("**/libwg.so", "**/libwg-quick.so")
+            if (!wireguard) excludes += "**/libwg-go.so"
+        }
+    }
 }
 
 dependencies {
@@ -97,8 +106,13 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
+    // WireGuard: wireguard-go (libwg-go.so, MIT) and its key classes, from the official Android library (Apache-2.0).
+    implementation("com.wireguard.android:tunnel:1.0.20260102")
+
     // QR codes for sending files between the TV and a phone.
     implementation("com.google.zxing:core:3.5.3")
 
     testImplementation("junit:junit:4.13.2")
+    // Android's org.json is a stub on the JVM; the tests of the panel's JSON need the real one.
+    testImplementation("org.json:json:20240303")
 }

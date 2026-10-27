@@ -24,7 +24,10 @@ import javax.crypto.Cipher
 object Certificates {
 
     /** A client certificate and key as the .ovpn file carries them. */
-    class Bundle(val certPem: String, val keyPem: String, val caPem: String?, val subject: String)
+    /** [issuer] is who signed the certificate, to find the profile whose CA it belongs to. */
+    class Bundle(val certPem: String, val keyPem: String, val caPem: String?, val subject: String, val issuer: String = "") {
+        override fun toString() = "Bundle($subject)"
+    }
 
     sealed interface Read {
         class Done(val bundle: Bundle) : Read
@@ -53,7 +56,7 @@ object Certificates {
         val chain = store.getCertificateChain(alias)?.filterIsInstance<X509Certificate>().orEmpty()
         val leaf = chain.firstOrNull() ?: return Read.Problem("This .p12 file has no certificate.")
         val ca = chain.drop(1).takeIf { it.isNotEmpty() }?.joinToString("\n") { pem("CERTIFICATE", it.encoded) }
-        return Read.Done(Bundle(pem("CERTIFICATE", leaf.encoded), pem("PRIVATE KEY", key.encoded), ca, leaf.subjectX500Principal.name))
+        return Read.Done(Bundle(pem("CERTIFICATE", leaf.encoded), pem("PRIVATE KEY", key.encoded), ca, leaf.subjectX500Principal.name, leaf.issuerX500Principal.name))
     }
 
     /** Aliases of keys the app keeps in Android's keystore itself, as opposed to ones installed on the TV. */
@@ -219,5 +222,16 @@ object Certificates {
             "SHA224", "SHA256", "SHA384", "SHA512" -> "SHA-" + n.removePrefix("SHA")
             else -> error("Unsupported hash: $openssl")
         }
+    }
+
+    /** The subjects of the CA certificates in a profile's <ca> block, as X.500 names. */
+    fun caSubjects(config: String): List<String> {
+        val block = Regex("<ca>([\\s\\S]*?)</ca>").find(config)?.groupValues?.get(1) ?: return emptyList()
+        return runCatching {
+            java.security.cert.CertificateFactory.getInstance("X.509")
+                .generateCertificates(ByteArrayInputStream(block.trim().toByteArray()))
+                .filterIsInstance<X509Certificate>()
+                .map { javax.security.auth.x500.X500Principal(it.subjectX500Principal.encoded).name }
+        }.getOrDefault(emptyList())
     }
 }

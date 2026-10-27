@@ -56,3 +56,11 @@ LOCAL_LDLIBS := -llog -landroid
 LOCAL_STATIC_LIBRARIES := ssl_static crypto_static
 
 include $(BUILD_SHARED_LIBRARY)
+
+# The bridge to wireguard-go (libwg-go.so, from the WireGuard Android library), found at run time.
+include $(CLEAR_VARS)
+LOCAL_MODULE := shieldwg
+LOCAL_SRC_FILES := wg_jni.c
+LOCAL_CFLAGS := -O2 -fvisibility=hidden -Wall
+LOCAL_LDLIBS := -ldl
+include $(BUILD_SHARED_LIBRARY)

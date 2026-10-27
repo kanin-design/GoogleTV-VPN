@@ -219,7 +219,7 @@ fun PhoneStatusLine(session: PhoneSession, small: Boolean = false) {
         when {
             line != null -> {
                 TvIcon(Ic.Check, 16f, Tv.Mint, stroke = 3f)
-                Text(line, style = text, maxLines = 2)
+                Text(line, style = text, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             here -> {
                 GlowDot(Tv.Mint, 9f)

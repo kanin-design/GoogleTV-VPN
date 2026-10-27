@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.CompositionLocalProvider
@@ -57,8 +58,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.shieldvpn.control.Words
+import dev.shieldvpn.control.ProfileStatus
 import dev.shieldvpn.APP_NAME
+import dev.shieldvpn.http.HttpServer
 import dev.shieldvpn.phone.PhoneServer
+import dev.shieldvpn.remote.Asks
+import dev.shieldvpn.remote.Devices
+import dev.shieldvpn.remote.Pairing
 import dev.shieldvpn.phone.PhoneStatus
 import dev.shieldvpn.vpn.AppSettings
 import dev.shieldvpn.vpn.Backup
@@ -234,10 +241,16 @@ sealed interface Overlay {
     class PickProfile(val title: String, val sub: String, val cancelled: (() -> Unit)? = null, val eyebrow: String = "Profiles", val picked: (String) -> Unit) : Overlay
 
     /** Tests how fast profile [id] is, connecting to it first if the user agrees. */
-    data class Speed(val id: String) : Overlay
+    data class Speed(val id: String, val eyebrow: String = "Connect") : Overlay
 
     /** Installs the newer build that was found. */
     data object Update : Overlay
+
+    /** Settings › Phone access › Pair a phone, with the code [offerId]. */
+    data class PairPhone(val offerId: String) : Overlay
+
+    /** A paired phone's question for the remote; [back] is the sheet it covered, shown again after. */
+    data class Ask(val ask: Asks.Ask, val back: Overlay?) : Overlay
 }
 
 /** A file a phone sent that a screen holds until it is used. */
@@ -284,8 +297,14 @@ class Nav {
     var confirmReset by mutableStateOf(false)
     var confirmRemovePass by mutableStateOf(false)
 
+    /** Settings › Phone access: the paired phone whose Remove bar is open. */
+    var confirmRemovePhone by mutableStateOf<String?>(null)
+
     // The log opened from another screen: Back from it goes there, not to Settings.
     var logReturn: Screen? = null
+
+    /** A Connect button that should take focus when Connect shows again ("log" for View log). */
+    var connectReturn by mutableStateOf<String?>(null)
 
     /** Settings › Diagnostics › Connection log, opened from [from]. */
     fun openLog(from: Screen) {
@@ -301,7 +320,11 @@ class Nav {
         set(value) {
             if (overlayState == null && value != null) opener = focusedRequester()
             overlayState = value
+            if (value == null) pendingFlash?.let { pendingFlash = null; flash(it) }
         }
+
+    // A row changed while a sheet covers it flashes once the sheet is gone, where it can be seen.
+    private var pendingFlash: String? = null
     private var overlayState by mutableStateOf<Overlay?>(null)
 
     /** What had focus when the sheet opened. */
@@ -373,6 +396,10 @@ class Nav {
     var flashCount by mutableIntStateOf(0)
 
     fun flash(key: String) {
+        if (overlayState != null) {
+            pendingFlash = key
+            return
+        }
         flashKey = key
         flashCount++
     }
@@ -538,13 +565,20 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     // The observer lives as long as the screen, so it reads the settings as they are now.
     val latest by rememberUpdatedState(state)
+    var inFront by remember { mutableStateOf(false) }
     DisposableEffect(lifecycle) {
         val watch = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
                 nav.unlocked = false
+                inFront = false
+                // Nobody can answer a phone's question now.
+                Asks.screensInFront = false
+                Asks.dropAll()
                 server.stop()
             }
             if (event == Lifecycle.Event.ON_START) {
+                inFront = true
+                Asks.screensInFront = true
                 server.start()
                 if (latest.settings.pinMode == "For everything" && latest.hasPin && !nav.unlocked) nav.overlay = Overlay.Pin(locksApp = true)
             }
@@ -552,9 +586,43 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
         lifecycle.addObserver(watch)
         onDispose {
             lifecycle.removeObserver(watch)
-            server.stop()
+            Asks.screensInFront = false
+            HttpServer.release(PANEL_HOLDER)
+            HttpServer.release(PAIRING_HOLDER)
+            server.close()
         }
     }
+    // With phones paired, the panel answers while the app is open.
+    val devices by Devices.list.collectAsState()
+    LaunchedEffect(inFront, devices.isNotEmpty()) {
+        if (inFront && devices.isNotEmpty()) HttpServer.hold(PANEL_HOLDER) else HttpServer.release(PANEL_HOLDER)
+    }
+    // A phone's question shows over whatever is open, which comes back once it is answered.
+    val ask by Asks.current.collectAsState()
+    // Never over the PIN that locks the app: anyone with the remote could answer it there.
+    val appLocked = (nav.overlay as? Overlay.Pin)?.locksApp == true
+    LaunchedEffect(ask, appLocked) {
+        if (appLocked) return@LaunchedEffect
+        val a = ask
+        val shown = nav.overlay as? Overlay.Ask
+        if (a == null) {
+            if (shown != null) nav.overlay = shown.back
+            return@LaunchedEffect
+        }
+        if (shown?.ask?.id == a.id) return@LaunchedEffect
+        nav.overlay = Overlay.Ask(a, shown?.back ?: nav.overlay)
+    }
+    // While the pairing sheet, or its question, is open, the server listens; closing it ends the code.
+    val pairing = nav.overlay is Overlay.PairPhone || (nav.overlay as? Overlay.Ask)?.back is Overlay.PairPhone
+    LaunchedEffect(pairing) {
+        if (pairing) {
+            HttpServer.hold(PAIRING_HOLDER)
+        } else {
+            HttpServer.release(PAIRING_HOLDER)
+            Pairing.close()
+        }
+    }
+
     // The TV can change networks while it shows a code; the server follows it to the new address.
     LaunchedEffect(server) {
         while (true) {
@@ -698,6 +766,10 @@ private fun back(nav: Nav, state: VpnUiState, actions: TunnelActions, server: Ph
         if (nav.sheetBack?.invoke() == true) return true
         (nav.overlay as? Overlay.Form)?.spec?.cancelled?.invoke()
         if (nav.overlay is Overlay.P12Target) actions.cancelP12()
+        (nav.overlay as? Overlay.Ask)?.let {
+            answerAsk(nav, it, false)
+            return true
+        }
         (nav.overlay as? Overlay.PickProfile)?.cancelled?.invoke()
         val opener = nav.opener
         nav.overlay = null
@@ -715,6 +787,8 @@ private fun back(nav: Nav, state: VpnUiState, actions: TunnelActions, server: Ph
         Screen.Settings -> {
             val from = nav.logReturn
             if (nav.showLog && from != null) {
+                // Back to the button that opened the log, not to one that would connect again.
+                if (from == Screen.Connect) nav.connectReturn = "log"
                 nav.go(from)
                 return true
             }
@@ -762,50 +836,28 @@ fun modeOf(s: VpnUiState): Mode = when {
     else -> Mode.Off
 }
 
+/** How [c] is doing: the tunnel's state when it is the profile Connect shows, its history otherwise. */
+fun profileStatus(state: VpnUiState, c: Connection): ProfileStatus {
+    val live = if (c.id != state.activeId) {
+        null
+    } else {
+        when (modeOf(state)) {
+            Mode.On -> ProfileStatus.Live.Connected
+            Mode.Busy -> ProfileStatus.Live.Connecting
+            Mode.Paused -> ProfileStatus.Live.Paused
+            Mode.Error -> (state.status as? VpnStatus.Failed)?.let { ProfileStatus.Live.Failed(it.message) } ?: ProfileStatus.Live.Blocked
+            Mode.Off -> null
+        }
+    }
+    return ProfileStatus.of(c, live, state.asksForLogin(c))
+}
+
 /** The line under a profile's name in lists and on cards. */
-fun statusText(state: VpnUiState, c: Connection): String {
-    if (c.id == state.activeId) {
-        return when (modeOf(state)) {
-            Mode.On -> "Connected"
-            Mode.Busy -> "Connecting…"
-            Mode.Paused -> "Paused"
-            Mode.Error -> (state.status as? VpnStatus.Failed)?.let { "Failed: ${it.message}" } ?: "Blocking traffic"
-            Mode.Off -> "Not connected"
-        }
-    }
-    if (state.asksForLogin(c)) return "Asks for a password"
-    if (c.lastError != null) return "Failed: ${c.lastError}"
-    return c.lastUsed?.let { "Last used ${ago(it)}" } ?: "Never connected"
-}
+fun statusText(state: VpnUiState, c: Connection): String = profileStatus(state, c).line
 
-fun authText(state: VpnUiState, c: Connection): String {
-    val info = state.infoOf(c)
-    val login = state.logins[c.id]
-    return when {
-        info != null && !info.needsLogin -> when {
-            c.keyAlias != null -> "Key in the device’s keystore"
-            info.clientCert -> "Certificate in the file"
-            else -> "No certificate or password in the file"
-        }
-        login != null && login.hasPassword && login.username.isNotEmpty() -> "Password saved · ${login.username}"
-        else -> "Asks for a password"
-    }
-}
+fun authText(state: VpnUiState, c: Connection): String = Words.signIn(state.infoOf(c), state.logins[c.id], c.keyAlias).summary
 
-fun ago(millis: Long): String {
-    val minutes = (System.currentTimeMillis() - millis) / 60_000
-    val hours = minutes / 60
-    val days = hours / 24
-    return when {
-        minutes < 1 -> "just now"
-        minutes < 60 -> "$minutes min ago"
-        hours < 24 -> "$hours h ago"
-        days == 1L -> "yesterday"
-        days < 7 -> "$days days ago"
-        days < 14 -> "last week"
-        else -> "${days / 7} weeks ago"
-    }
-}
+fun ago(millis: Long): String = Words.ago(millis)
 
 fun fmtDuration(seconds: Long): String =
     "%02d:%02d:%02d".format(seconds / 3600, (seconds / 60) % 60, seconds % 60)

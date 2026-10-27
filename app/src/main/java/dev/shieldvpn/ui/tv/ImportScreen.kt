@@ -41,6 +41,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.shieldvpn.APP_NAME
+import dev.shieldvpn.control.Control
+import dev.shieldvpn.control.Words
 import dev.shieldvpn.phone.PhoneAction
 import dev.shieldvpn.phone.PhoneField
 import dev.shieldvpn.phone.PhoneForm
@@ -51,6 +53,7 @@ import dev.shieldvpn.phone.PhoneSession
 import dev.shieldvpn.phone.PhoneStatus
 import dev.shieldvpn.phone.Staged
 import dev.shieldvpn.vpn.Backup
+import dev.shieldvpn.vpn.Connection
 import dev.shieldvpn.vpn.ImportReview
 import dev.shieldvpn.vpn.Inspected
 import dev.shieldvpn.vpn.ServerStore
@@ -148,6 +151,8 @@ private fun MethodRow(m: ImportMethod, state: VpnUiState, nav: Nav, actions: Tun
             if (nav.importMethod != m) {
                 nav.importMethod = m
                 dropReview(nav, actions, session)
+                // Another way in is another task: what the last one said goes.
+                session?.newTask()
             }
         },
         leading = { IconSquare(m.icon, it, size = 44f, radius = 13f) },
@@ -247,6 +252,8 @@ private fun ColumnScope.PhonePanel(nav: Nav, actions: TunnelActions, req: Reques
     Spacer(Modifier.weight(1f))
     // Something waits on the phone's page; it can be finished on the TV instead.
     val item = nav.importItem
+    // A file that arrives takes focus to Continue here, one press from its review.
+    LaunchedEffect(item) { if (item != null && nav.overlay == null) req["im-entry"].focusWhenReady() }
     if (item != null) {
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Tv.white(0.05f)).padding(start = 18.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
@@ -390,6 +397,7 @@ fun reviewHasCert(r: ImportReview): Boolean =
 fun reviewSignIn(r: ImportReview): String {
     val cert = reviewHasCert(r)
     return when {
+        r.kind == VpnKind.WireGuard -> "Key in the file"
         r.loginFromPhone && cert -> "Certificate + password · ${r.username}, from your phone"
         r.loginFromPhone -> "Username + password · ${r.username}, from your phone"
         r.needsLogin && cert -> "Certificate + password"
@@ -411,11 +419,28 @@ fun dropReview(nav: Nav, actions: TunnelActions, session: PhoneSession?) {
     val r = actions.stateNow().review ?: return
     actions.cancelReview()
     if (r.problem != null) return
-    nav.toast("${r.name} was not saved")
+    nav.toast(Words.notSaved(r.name))
     // The line under the code shows what the phone did, with a tick: a file let go isn't that.
     session?.tvLine = null
     session?.say(PhoneStatus.error("${r.name} wasn’t saved: it was cancelled on the TV. Send it again to add it."))
     session?.rebuild?.invoke()
+}
+
+/** Puts the file under review in place of [into]'s, which keeps its name and settings. */
+fun updateImport(nav: Nav, actions: TunnelActions, session: PhoneSession?, into: Connection): Boolean {
+    val review = actions.stateNow().review ?: return false
+    if (!Control.updateProfile(into.id, review)) return false
+    actions.cancelReview()
+    nav.importItem = null
+    session?.tvLine = "Updated ${into.name}"
+    session?.holdFor(PhoneServer.KEEP_MS)
+    session?.say(PhoneStatus.done("${into.name} is updated on the TV with the new file."))
+    session?.rebuild?.invoke()
+    nav.toast("Updated ${into.name}")
+    nav.go(Screen.Profiles, focusContent = false)
+    nav.profFocus = into.id
+    nav.moveStackFocus("pl-${into.id}")
+    return true
 }
 
 fun saveImport(nav: Nav, actions: TunnelActions, session: PhoneSession?): String? {
@@ -443,23 +468,36 @@ fun saveImport(nav: Nav, actions: TunnelActions, session: PhoneSession?): String
 
 @Composable
 private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav: Nav, actions: TunnelActions, req: Requesters) {
-    PanelHeading("Import › Review · ${review.fileName}", review.name)
+    // Pasted text has no file: the eyebrow doesn't make one up.
+    PanelHeading("Import › Review · " + if (review.fileName == "pasted.ovpn") "pasted text" else review.fileName, review.name)
     Box(Modifier.padding(top = 12.dp)) {
-        DetailGrid(listOf("Server" to "${review.host} · ${review.protocol.label} ${review.port}", "Sign-in" to reviewSignIn(review)), columns = 1)
+        DetailGrid(listOf("Server" to Words.serverLine(review.host, review.port, review.protocol), "Sign-in" to reviewSignIn(review)), columns = 1)
     }
-    if (review.warnings.isNotEmpty()) {
-        Notice(Ic.Bang, review.warnings.joinToString(" "), amber = true, modifier = Modifier.padding(top = 14.dp))
-    } else {
-        val note = when {
-            review.needsLogin && review.username.isEmpty() -> " Asks for a username and password when you connect."
-            review.loginFromPhone -> " The login from your phone is saved with it, encrypted."
-            review.needsLogin -> " The login in the file is saved, encrypted, and taken out of the file."
-            else -> ""
+    review.note?.let { Text("$it.", style = TvType.ui(15f, color = Tv.soft(0.62f)), modifier = Modifier.padding(top = 10.dp, start = 4.dp)) }
+    val wireGuard = review.kind == VpnKind.WireGuard
+    // A file that can't sign in anywhere gets no tick: neither a certificate nor a login is in it.
+    val canSignIn = wireGuard || review.needsLogin || reviewHasCert(review)
+    when {
+        !canSignIn -> Notice(
+            Ic.Bang,
+            "This profile has no way to sign in: no certificate and no password. After saving, send its .p12 from your phone, or ask for a file with a login." +
+                (review.warnings.takeIf { it.isNotEmpty() }?.joinToString(" ", prefix = " ") ?: ""),
+            amber = true, modifier = Modifier.padding(top = 14.dp),
+        )
+        review.warnings.isNotEmpty() -> Notice(Ic.Bang, review.warnings.joinToString(" "), amber = true, modifier = Modifier.padding(top = 14.dp))
+        else -> {
+            val note = when {
+                wireGuard -> " The private key is saved, encrypted, and taken out of the file."
+                review.needsLogin && review.username.isEmpty() -> " Asks for a username and password when you connect."
+                review.loginFromPhone -> " The login from your phone is saved with it, encrypted."
+                review.needsLogin -> " The login in the file is saved, encrypted, and taken out of the file."
+                else -> ""
+            }
+            Notice(Ic.Check, "Looks good.$note", modifier = Modifier.padding(top = 14.dp))
         }
-        Notice(Ic.Check, "Looks good.$note", modifier = Modifier.padding(top = 14.dp))
     }
     // Many servers also want a client certificate; say where to add one if the file has none.
-    if (!reviewHasCert(review)) {
+    if (!wireGuard && canSignIn && !reviewHasCert(review)) {
         Text(
             "There is no client certificate in this file. If the server asks for one, send the .p12 from your phone, or use Import › Certificates.",
             style = TvType.ui(15f, color = Tv.soft(0.62f)),
@@ -472,7 +510,7 @@ private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav
             {
                 nav.overlay = Overlay.Form(
                     FormSpec(
-                        "Import › Review", "Name", "Shown on cards and on Connect.",
+                        "Import › Review", "Name", "${Words.NAME_HELP}.",
                         listOf(FormField("name", "Name", review.name)), primary = "Save", phone = "import", phoneSection = "review",
                     ) { v, _ ->
                         val name = v["name"].orEmpty().trim()
@@ -502,7 +540,14 @@ private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav
     Spacer(Modifier.weight(1f))
     Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         val session = phoneSession("import")
-        TvButton("Save", { nav.guard(state) { saveImport(nav, actions, session) } }, icon = Ic.Check, focusRequester = req["rv-save"])
+        // A file for a server that has a profile already updates that one, unless it should be a second.
+        val same = remember(review) { Control.sameServer(review) }
+        if (same != null) {
+            TvButton("Update ${same.name}", { nav.guard(state) { updateImport(nav, actions, session, same) } }, icon = Ic.Swap, focusRequester = req["rv-save"])
+            TvButton("Add as a new one", { nav.guard(state) { saveImport(nav, actions, session) } }, glass = true)
+        } else {
+            TvButton("Save", { nav.guard(state) { saveImport(nav, actions, session) } }, icon = Ic.Check, focusRequester = req["rv-save"])
+        }
         TvButton("Cancel", {
             dropReview(nav, actions, session)
             nav.contentFocus = Screen.Import
@@ -512,7 +557,8 @@ private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav
 
 // ---- The phone's Import page ---------------------------------------------------------
 
-private val ACCEPT = ".ovpn,.conf,.p12,.pfx,.${Backup.EXTENSION},text/plain,application/x-pkcs12,application/octet-stream"
+// A picture too: a QR code from a WireGuard server's app, photographed or saved as a screenshot.
+private val ACCEPT = ".ovpn,.conf,.zip,.p12,.pfx,.${Backup.EXTENSION},text/plain,application/x-pkcs12,application/zip,application/octet-stream,image/*"
 
 private fun kindOf(item: ImportItem): String = when (item) {
     is ImportItem.Profile -> if (item.review.kind == VpnKind.WireGuard) "WireGuard profile" else "OpenVPN profile"
@@ -536,16 +582,23 @@ fun importForm(state: VpnUiState, nav: Nav): PhoneForm {
                     fields = listOf(
                         PhoneField.Info(
                             "facts",
-                            rows = listOf("Server" to "${review.host} · ${review.protocol.label} ${review.port}", "Sign-in" to reviewSignIn(review)),
-                            text = review.warnings.joinToString(" ").ifEmpty { null },
+                            rows = listOf("Server" to Words.serverLine(review.host, review.port, review.protocol), "Sign-in" to reviewSignIn(review)),
+                            text = (listOfNotNull(review.note?.let { "$it." }) + review.warnings).joinToString(" ").ifEmpty { null },
                             tone = if (review.warnings.isEmpty()) null else "warn",
                         ),
                         PhoneField.Text(
-                            "name", "Name", review.name, required = true,
-                            help = if (state.connections.any { it.name == review.name }) "A profile with this name is on the TV already. Saving adds another." else "Shown on the TV’s cards and on Connect.",
+                            "name", "Name", review.name, required = true, mirror = true,
+                            help = if (state.connections.any { it.name == review.name }) "A profile with this name is on the TV already. Saving adds another." else Words.NAME_HELP_PHONE,
                         ),
                     ),
-                    actions = listOf(PhoneAction("save", "Save on the TV", primary = true, needs = listOf("name")), PhoneAction("cancel", "Don’t save it")),
+                    // The same choices as the TV: a file for a server that has a profile already updates it.
+                    actions = Control.sameServer(review)?.let { same ->
+                        listOf(
+                            PhoneAction("update", "Update ${same.name}", primary = true),
+                            PhoneAction("save", "Add as a new one", needs = listOf("name")),
+                            PhoneAction("cancel", "Don’t save it"),
+                        )
+                    } ?: listOf(PhoneAction("save", "Save on the TV", primary = true, needs = listOf("name")), PhoneAction("cancel", "Don’t save it")),
                 ),
             ),
         )
@@ -591,7 +644,7 @@ fun importForm(state: VpnUiState, nav: Nav): PhoneForm {
             sections += PhoneSection(
                 "profile", if (item.pasted) "The pasted profile" else item.name,
                 fields = listOfNotNull(
-                    PhoneField.Text("name", "Name", item.review.name, required = true, mirror = true, help = "Shown on the TV’s cards and on Connect."),
+                    PhoneField.Text("name", "Name", item.review.name, required = true, mirror = true, help = Words.NAME_HELP_PHONE),
                     if (asks) PhoneField.Text("user", "Username") else null,
                     if (asks) {
                         PhoneField.Text(
@@ -616,7 +669,7 @@ fun importForm(state: VpnUiState, nav: Nav): PhoneForm {
         is ImportItem.Pkcs12 -> sections += if (state.connections.isEmpty()) {
             PhoneSection("p12", "Add this certificate", fields = listOf(PhoneField.Info("none", text = "There is no profile on the TV yet. Add the profile first, then its certificate.", tone = "warn")))
         } else {
-            PhoneSection("p12", "Add this certificate", fields = p12Fields(state, null), actions = listOf(PhoneAction("attach", "Add the certificate", primary = true, needs = listOf("p12pass", "target"))))
+            PhoneSection("p12", "Add this certificate", fields = p12Fields(state, null), actions = listOf(PhoneAction("attach", "Add the certificate", primary = true, needs = listOf("p12pass"))))
         }
         null -> Unit
     }
@@ -700,8 +753,20 @@ private suspend fun importAction(session: PhoneSession, nav: Nav, actions: Tunne
                 }
             }
         }
+        "update" -> {
+            val review = state.review ?: return PhoneReply.error(null, "There is nothing on the TV to save. Send it again.")
+            val same = Control.sameServer(review) ?: return PhoneReply.error(null, "That profile is gone. Save it as a new one.")
+            when {
+                isLocked -> PhoneReply.error(null, LOCKED_ON_TV)
+                updateImport(nav, actions, session, same) -> {
+                    session.saved("review")
+                    PhoneReply(holdMs = PhoneServer.KEEP_MS)
+                }
+                else -> PhoneReply.error(null, "The TV couldn’t update ${same.name}.")
+            }
+        }
         "cancel" -> {
-            state.review?.let { nav.toast("${it.name} was not saved") }
+            state.review?.let { nav.toast(Words.notSaved(it.name)) }
             actions.cancelReview()
             PhoneReply()
         }

@@ -175,6 +175,13 @@ object ServerStore {
     fun needsLogin(config: String): Boolean =
         config.lineSequence().any { it.trim().startsWith("auth-user-pass") }
 
+    /** A name for a new profile: the file's, unless that says nothing (pasted, client, download), then the server's. */
+    fun nameFor(fileName: String, host: String): String {
+        val base = fileName.substringBeforeLast('.').lowercase().replace('-', ' ').replace('_', ' ').trim()
+        val says = base.isNotEmpty() && base !in setOf("pasted", "download", "client", "profile", "config", "vpn", "wg0", "wireguard", "openvpn", "qr")
+        return if (says || host.isEmpty()) nameFromFile(fileName) else host
+    }
+
     /** "client-home.ovpn" becomes "Client home". */
     fun nameFromFile(fileName: String): String {
         val base = fileName.removeSuffix(".ovpn").removeSuffix(".conf").replace('-', ' ').replace('_', ' ').trim()
@@ -205,7 +212,7 @@ object ServerStore {
         return ImportReview(
             fileName = fileName,
             text = config,
-            name = nameFromFile(fileName),
+            name = nameFor(fileName, host),
             host = host,
             port = port,
             protocol = protocol,
@@ -222,7 +229,7 @@ object ServerStore {
             is WireGuardFile.Review.Ok -> ImportReview(
                 fileName = fileName,
                 text = r.text,
-                name = nameFromFile(fileName),
+                name = nameFor(fileName, r.facts.host),
                 host = r.facts.host,
                 port = r.facts.port,
                 protocol = Protocol.UDP,

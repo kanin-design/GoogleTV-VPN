@@ -146,6 +146,62 @@ object WireGuardFile {
         return out.joinToString("\n")
     }
 
+    /** One server in a file, as the tunnel needs it. */
+    data class Peer(
+        val publicKey: String,
+        val presharedKey: String?,
+        val host: String?,
+        val port: Int?,
+        val allowedIps: List<String>,
+        val keepalive: Int?,
+    ) {
+        override fun toString() = "Peer($host:$port)"
+    }
+
+    /** A file with its keys put back, read for the tunnel. Null when it isn't complete. */
+    data class Tunnel(
+        val privateKey: String,
+        val addresses: List<String>,
+        val dns: List<String>,
+        val searchDomains: List<String>,
+        val mtu: Int?,
+        val listenPort: Int?,
+        val peers: List<Peer>,
+    ) {
+        override fun toString() = "Tunnel(${peers.size} peers)"
+    }
+
+    fun tunnel(text: String): Tunnel? {
+        val sections = parse(text)
+        val i = sections.singleOrNull { it.name == "interface" } ?: return null
+        val privateKey = i.one("privatekey")?.takeIf(::isKey) ?: return null
+        val dnsWords = i.all("dns")
+        val peers = sections.filter { it.name == "peer" }.map { p ->
+            val e = p.one("endpoint")?.let(::endpointOf)
+            Peer(
+                publicKey = p.one("publickey")?.takeIf(::isKey) ?: return null,
+                presharedKey = p.one("presharedkey")?.takeIf(::isKey),
+                host = e?.first,
+                port = e?.second,
+                allowedIps = p.all("allowedips"),
+                keepalive = p.one("persistentkeepalive")?.toIntOrNull()?.takeIf { it > 0 },
+            )
+        }
+        if (peers.isEmpty()) return null
+        return Tunnel(
+            privateKey = privateKey,
+            addresses = i.all("address"),
+            dns = dnsWords.filter(::isAddress),
+            searchDomains = dnsWords.filterNot(::isAddress),
+            mtu = i.one("mtu")?.toIntOrNull(),
+            listenPort = i.one("listenport")?.toIntOrNull(),
+            peers = peers,
+        )
+    }
+
+    /** A Base64 key as the lowercase hex wireguard-go's settings take. */
+    fun hex(key: String): String = Base64.getDecoder().decode(key).joinToString("") { "%02x".format(it) }
+
     /** The first server's address and port, or null. */
     fun endpoint(text: String): Pair<String, Int>? =
         parse(text).filter { it.name == "peer" }.firstNotNullOfOrNull { p -> p.one("endpoint")?.let(::endpointOf) }

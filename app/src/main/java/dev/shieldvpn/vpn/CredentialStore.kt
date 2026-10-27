@@ -19,7 +19,7 @@ import javax.crypto.spec.GCMParameterSpec
  */
 object CredentialStore {
 
-    private const val PREFS = "shieldvpn_credentials"
+    const val PREFS = "shieldvpn_credentials"
     private const val KEY_ALIAS = "shieldvpn_credentials_key"
     private const val GCM_TAG_BITS = 128
 

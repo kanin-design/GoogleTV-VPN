@@ -22,6 +22,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
+import dev.shieldvpn.control.Control
+import dev.shieldvpn.remote.RemoteApi
+import dev.shieldvpn.remote.RemoteService
 import dev.shieldvpn.ui.tv.LauncherApp
 import dev.shieldvpn.ui.tv.TunnelActions
 import dev.shieldvpn.ui.tv.TunnelApp
@@ -115,8 +118,11 @@ class MainActivity : ComponentActivity(), TunnelActions {
     override fun onDestroy() {
         away.removeCallbacks(closeAway)
         super.onDestroy()
-        // Nothing else lives in this process, so end it instead of leaving it cached.
-        if (closedAway) away.post { Process.killProcess(Process.myPid()) }
+        // Nothing else needs the screens' memory, so the process ends instead of staying cached.
+        // While the phones' panel keeps it up for the VPN, Android starts it again for the panel
+        // alone: about half the memory the screens leave behind.
+        val panelOnly = isFinishing && RemoteService.running && !RemoteApi.busy
+        if (closedAway || panelOnly) away.post { Process.killProcess(Process.myPid()) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -147,7 +153,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
             if (intent.getBooleanExtra("demo", false)) {
                 // After the link has reported the real state, which is then left alone while idle.
                 val demoState = intent.getStringExtra("demostate")
-                window.decorView.postDelayed({ viewModel.showDemo(demoState) }, if (demoState == null) 1500L else 0L)
+                window.decorView.postDelayed({ viewModel.showDemo(demoState) }, 1500L)
                 intent.removeExtra("demo")
             }
             intent.getIntExtra("closeafterseconds", 0).takeIf { it > 0 }?.let { seconds ->
@@ -225,7 +231,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
     }
 
     private fun start(id: String, login: CredentialStore.Credentials?, remember: Boolean) {
-        if (!viewModel.connect(id, login, remember)) {
+        if (!Control.connect(id, login, remember)) {
             VpnController.update(VpnStatus.Failed(id, "Add the username and password first"))
         }
     }
@@ -244,42 +250,42 @@ class MainActivity : ComponentActivity(), TunnelActions {
         }
     }
 
-    override fun disconnect() = viewModel.disconnect()
+    override fun disconnect() = Control.disconnect()
 
-    override fun saveSpeed(key: String, result: SpeedTest.Result) = viewModel.saveSpeed(key, result)
+    override fun saveSpeed(key: String, result: SpeedTest.Result) = Control.saveSpeed(key, result)
 
-    override fun pause() = viewModel.pause()
+    override fun pause() = Control.pause()
 
-    override fun pauseMore() = viewModel.pauseMore()
+    override fun pauseMore() = Control.pauseMore()
 
-    override fun resume() = viewModel.resume()
+    override fun resume() = Control.resume()
 
-    override fun rename(id: String, name: String) = viewModel.rename(id, name)
+    override fun rename(id: String, name: String) = Control.rename(id, name)
 
-    override fun saveLogin(id: String, username: String, password: String?) = viewModel.saveLogin(id, username, password)
+    override fun saveLogin(id: String, username: String, password: String?) = Control.saveLogin(id, username, password)
 
-    override fun forgetPassword(id: String) = viewModel.forgetPassword(id)
+    override fun forgetPassword(id: String) = Control.forgetPassword(id)
 
-    override fun setServer(id: String, host: String, port: Int) = viewModel.setServer(id, host, port)
+    override fun setServer(id: String, host: String, port: Int) = Control.setServer(id, host, port)
 
-    override fun resetServer(id: String) = viewModel.resetServer(id)
+    override fun resetServer(id: String) = Control.resetServer(id)
 
-    override fun setProtocol(id: String, value: String) = viewModel.setProtocol(id, value)
+    override fun setProtocol(id: String, value: String) = Control.setProtocol(id, value)
 
-    override fun setKillMode(id: String, value: String) = viewModel.setKillMode(id, value)
+    override fun setKillMode(id: String, value: String) = Control.setKillMode(id, value)
 
-    override fun setDnsMode(id: String, value: String) = viewModel.setDnsMode(id, value)
+    override fun setDnsMode(id: String, value: String) = Control.setDnsMode(id, value)
 
-    override fun setOrder(id: String, value: String) = viewModel.setOrder(id, value)
+    override fun setOrder(id: String, value: String) = Control.setOrder(id, value)
 
-    override fun setPinned(id: String, pinned: Boolean) = viewModel.setPinned(id, pinned)
-    override fun setLook(id: String, icon: String?, colour: Int?) = viewModel.setLook(id, icon, colour)
+    override fun setPinned(id: String, pinned: Boolean) = Control.setPinned(id, pinned)
+    override fun setLook(id: String, icon: String?, colour: Int?) = Control.setLook(id, icon, colour)
 
-    override fun setStartup(id: String?) = viewModel.setStartup(id)
+    override fun setStartup(id: String?) = Control.setStartup(id)
 
-    override fun duplicate(id: String): String? = viewModel.duplicate(id)?.id
+    override fun duplicate(id: String): String? = Control.duplicate(id)?.id
 
-    override fun delete(id: String) = viewModel.delete(id)
+    override fun delete(id: String) = Control.delete(id)
 
     // Many TVs have no file picker. Android's own answer is a vague toast, so look first. Android TV
     // answers with a stub that only says no app can do this; that is no picker.
@@ -315,13 +321,13 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override fun saveReview(): String? = viewModel.saveReview()
 
-    override fun rawConfig(serverId: String): String = viewModel.rawConfig(serverId)
+    override fun rawConfig(serverId: String): String = Control.rawConfig(serverId)
 
-    override fun changeSettings(change: (AppSettings) -> AppSettings) = viewModel.changeSettings(change)
+    override fun changeSettings(change: (AppSettings) -> AppSettings) = Control.changeSettings(change)
 
-    override fun clearLog() = viewModel.clearLog()
+    override fun clearLog() = Control.clearLog()
 
-    override fun resetAll() = viewModel.resetAll()
+    override fun resetAll() = Control.resetAll()
 
     override fun receive(name: String, bytes: ByteArray, username: String, password: String): String? =
         viewModel.receive(name, bytes, username, password)
@@ -332,29 +338,29 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override suspend fun restore(passphrase: String, replace: Boolean): Backup.Restored = viewModel.restore(passphrase, replace)
 
-    override suspend fun restore(bytes: ByteArray, passphrase: String, replace: Boolean): Backup.Restored = viewModel.restore(bytes, passphrase, replace)
+    override suspend fun restore(bytes: ByteArray, passphrase: String, replace: Boolean): Backup.Restored = Control.restore(bytes, passphrase, replace)
 
-    override fun backupDownloaded() = viewModel.backupDownloaded()
+    override fun backupDownloaded() = Control.backupDownloaded()
 
     override fun inspect(name: String, bytes: ByteArray): Inspected = viewModel.inspect(name, bytes)
 
     override fun openReview(review: ImportReview) = viewModel.openReview(review)
 
-    override fun setBackupPassphrase(passphrase: String?) = viewModel.setBackupPassphrase(passphrase)
+    override fun setBackupPassphrase(passphrase: String?) = Control.setBackupPassphrase(passphrase)
 
-    override fun checkBackupPassphrase(passphrase: String): Boolean = viewModel.checkBackupPassphrase(passphrase)
+    override fun checkBackupPassphrase(passphrase: String): Boolean = Control.checkBackupPassphrase(passphrase)
 
-    override suspend fun backupFile(): ByteArray? = viewModel.backupFile()
+    override suspend fun backupFile(): ByteArray? = Control.backupFile()
 
-    override fun profileFile(id: String): ByteArray? = viewModel.profileFile(id)
+    override fun profileFile(id: String): ByteArray? = Control.profileFile(id)
 
     override fun logText(): String = viewModel.logText()
 
     override val log get() = viewModel.log
 
-    override fun setPin(pin: String?) = viewModel.setPin(pin)
+    override fun setPin(pin: String?) = Control.setPin(pin)
 
-    override fun checkPin(pin: String): Boolean = viewModel.checkPin(pin)
+    override fun checkPin(pin: String): Boolean = Control.checkPin(pin)
 
     override suspend fun checkP12(password: String): String? = viewModel.checkP12(password)
 
@@ -364,13 +370,13 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override suspend fun keepP12(password: String): String? = viewModel.keepP12(password)
 
-    override suspend fun checkP12(bytes: ByteArray, password: String): String? = viewModel.checkP12(bytes, password)
+    override suspend fun checkP12(bytes: ByteArray, password: String): String? = Control.checkP12(bytes, password)
 
-    override suspend fun attachP12(bytes: ByteArray, password: String, id: String): String? = viewModel.attachP12(bytes, password, id)
+    override suspend fun attachP12(bytes: ByteArray, password: String, id: String): String? = Control.attachP12(bytes, password, id)
 
-    override suspend fun keepP12(bytes: ByteArray, password: String): String? = viewModel.keepP12(bytes, password)
+    override suspend fun keepP12(bytes: ByteArray, password: String): String? = Control.keepP12(bytes, password)
 
-    override fun setKeyAlias(id: String, alias: String?) = viewModel.setKeyAlias(id, alias)
+    override fun setKeyAlias(id: String, alias: String?) = Control.setKeyAlias(id, alias)
 
     override fun chooseKeyAlias(chosen: (String?) -> Unit) {
         try {
