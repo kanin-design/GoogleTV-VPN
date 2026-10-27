@@ -30,12 +30,15 @@ base="$name-${tag#v}"
 
 ./gradlew -q assembleRelease
 # The WireGuard library also has tools for rooted devices, which are GPL; the build leaves them out.
+# Each listing is read whole first: grep -q stops early, and under pipefail the writer's broken
+# pipe would fail the check at random.
 for apk in app/build/outputs/apk/release/app-*-release.apk; do
-  if unzip -l "$apk" | grep -E -q '/(libwg|libwg-quick)\.so$'; then
+  files=$(unzip -l "$apk")
+  if grep -E -q '/(libwg|libwg-quick)\.so$' <<< "$files"; then
     echo "$apk carries WireGuard's GPL tools (libwg.so, libwg-quick.so). Published builds must not." >&2
     exit 1
   fi
-  if ! unzip -l "$apk" | grep -q '/libwg-go\.so$'; then
+  if ! grep -q '/libwg-go\.so$' <<< "$files"; then
     echo "$apk is missing wireguard-go (libwg-go.so)." >&2
     exit 1
   fi
@@ -45,7 +48,8 @@ done
 cert=e5dd5da370db3301f9f7f5e80190d6b342500f20c5c404ef71588def6c0adba3
 apksigner=$(ls -d ${ANDROID_HOME:-$HOME/Library/Android/sdk}/build-tools/*/apksigner | tail -1)
 for apk in app/build/outputs/apk/release/app-*-release.apk; do
-  if ! $apksigner verify --print-certs "$apk" | grep -q "SHA-256 digest: $cert"; then
+  certs=$($apksigner verify --print-certs "$apk")
+  if ! grep -q "SHA-256 digest: $cert" <<< "$certs"; then
     echo "$apk is not signed with the key the published builds use. Build on the Mac that has it." >&2
     exit 1
   fi
