@@ -29,6 +29,8 @@ import dev.shieldvpn.MainActivity
 import dev.shieldvpn.R
 import dev.shieldvpn.remote.Devices
 import dev.shieldvpn.remote.RemoteService
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Owns the tunnel. The OpenVPN 3 core runs on its own thread; this class
@@ -147,6 +149,7 @@ class ShieldVpnService : VpnService() {
             ACTION_DISCONNECT -> disconnect()
             ACTION_PAUSE -> pause(intent.getLongExtra(EXTRA_UNTIL, System.currentTimeMillis() + 15 * 60_000L))
             ACTION_SIMULATE_DROP -> if (isDebuggable()) simulateDrop()
+            ACTION_SIMULATE_RECONNECT -> if (isDebuggable()) synchronized(engineLock) { engine?.networkChanged() }
             ACTION_REMOTE -> if (worker != null || holding || blackhole != null) checkRemote() else if (engine == null) stopSelf(startId)
             SERVICE_INTERFACE -> alwaysOn()
         }
@@ -198,7 +201,19 @@ class ShieldVpnService : VpnService() {
 
         worker = Thread({
             val result = runCatching { e.run() }.getOrElse { "The tunnel stopped: ${it.message}" }
-            handler.post { finish(outcome(id, result)) }
+            // finish() puts the kill switch's block up while the engine's interface is still open,
+            // so nothing slips out in between. Then the engine is freed here, on the thread that ran
+            // it: OpenVPN's OpenSSL keeps state for each thread (OpenVpnTunnel).
+            val finished = CountDownLatch(1)
+            handler.post {
+                try {
+                    finish(outcome(id, result), closeEngine = false)
+                } finally {
+                    finished.countDown()
+                }
+            }
+            finished.await(10, TimeUnit.SECONDS)
+            e.close()
         }, "tunnel").also { it.start() }
     }
 
@@ -307,12 +322,13 @@ class ShieldVpnService : VpnService() {
         }
     }
 
-    private fun finish(status: VpnStatus) {
+    /** [closeEngine]: false when the worker frees the engine itself, once this has run. */
+    private fun finish(status: VpnStatus, closeEngine: Boolean = true) {
         VpnController.stats = null
         stopWatching()
         releaseWake()
         synchronized(engineLock) {
-            engine?.close()
+            if (closeEngine) engine?.close()
             engine = null
         }
         worker = null
@@ -815,6 +831,9 @@ class ShieldVpnService : VpnService() {
         const val ACTION_PAUSE = "dev.shieldvpn.action.PAUSE"
         const val ACTION_SIMULATE_DROP = "dev.shieldvpn.action.SIMULATE_DROP"
 
+        /** Debug builds only: the core reconnects, as after a timeout or a new network. */
+        const val ACTION_SIMULATE_RECONNECT = "dev.shieldvpn.action.SIMULATE_RECONNECT"
+
         /** Phone access or the paired phones changed: the service binds or lets go of the panel's server. */
         const val ACTION_REMOTE = "dev.shieldvpn.action.REMOTE"
 
@@ -853,5 +872,8 @@ class ShieldVpnService : VpnService() {
 
         fun simulateDropIntent(context: Context): Intent =
             Intent(context, ShieldVpnService::class.java).setAction(ACTION_SIMULATE_DROP)
+
+        fun simulateReconnectIntent(context: Context): Intent =
+            Intent(context, ShieldVpnService::class.java).setAction(ACTION_SIMULATE_RECONNECT)
     }
 }

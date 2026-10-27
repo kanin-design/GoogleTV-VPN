@@ -27,10 +27,10 @@ interface TunnelEngine {
 /**
  * OpenVPN 3, as before: the core calls back through [callbacks] for the interface and its events.
  *
- * The worker frees the core itself when [run] returns. The core's OpenSSL keeps state for each
- * thread that used the tunnel; freed from another thread, the worker's state outlived the tunnel,
- * and the worker crashed on its way out (OpenSSL's thread clean-up). [lock] keeps the other threads'
- * calls off the handle while it goes.
+ * The worker frees the core itself ([close]), once the service has dealt with the end. The core's
+ * OpenSSL keeps state for each thread that used the tunnel; freed from another thread, the
+ * worker's state outlived the tunnel, and the worker crashed on its way out (OpenSSL's thread
+ * clean-up). [lock] keeps the other threads' calls off the handle while it goes.
  */
 class OpenVpnTunnel(private val callbacks: NativeCallbacks) : TunnelEngine {
     @Volatile private var handle = 0L
@@ -47,11 +47,7 @@ class OpenVpnTunnel(private val callbacks: NativeCallbacks) : TunnelEngine {
         return null
     }
 
-    override fun run(): String {
-        val result = OpenVpnEngine.connect(handle)
-        close()
-        return result
-    }
+    override fun run(): String = OpenVpnEngine.connect(handle)
 
     override fun stop() {
         synchronized(lock) { handle.takeIf { it != 0L }?.let(OpenVpnEngine::stop) }

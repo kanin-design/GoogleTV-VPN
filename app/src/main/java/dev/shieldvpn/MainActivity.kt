@@ -158,6 +158,11 @@ class MainActivity : ComponentActivity(), TunnelActions {
             if (intent.getBooleanExtra(EXTRA_AUTOCONNECT, false)) {
                 window.decorView.post { viewModel.state.value.activeId?.let { connect(it) } }
             }
+            // The core reconnects at once, as after a timeout or a new network: for the kill switch's tests.
+            if (intent.getBooleanExtra("simulatereconnect", false)) {
+                startService(ShieldVpnService.simulateReconnectIntent(this))
+                intent.removeExtra("simulatereconnect")
+            }
             if (intent.getBooleanExtra(EXTRA_SIMULATE_DROP, false)) {
                 window.decorView.postDelayed({ startService(ShieldVpnService.simulateDropIntent(this)) }, 12_000)
             }

@@ -244,7 +244,8 @@ class ShieldClient : public ovpn::OpenVPNClient {
         return threw(env) ? -1 : static_cast<int>(fd);
     }
 
-    bool tun_builder_persist() override { return false; }
+    // The interface may outlive a session: the core keeps it while it reconnects (tunPersist).
+    bool tun_builder_persist() override { return true; }
 
     void tun_builder_teardown(bool disconnect) override {
         JNIEnv *env = currentEnv();
@@ -361,6 +362,11 @@ Java_dev_shieldvpn_vpn_OpenVpnEngine_evaluate(JNIEnv *env, jclass /*cls*/, jlong
     cfg.compressionMode = compress.empty() ? "asym" : compress;
     // Give up on a server that never answers, instead of retrying forever.
     cfg.connTimeout = number(option(o, "timeout"), 30);
+    // Keep the VPN interface while the core reconnects (a timeout, the server restarting, a new
+    // network). Closed in between, Android sends every app's traffic outside the tunnel until the
+    // new session is up, kill switch or not; kept, it waits in the tunnel instead. A session that
+    // needs other addresses or routes gets a new interface, which takes over before the old closes.
+    cfg.tunPersist = true;
     cfg.protoOverride = option(o, "proto");
     cfg.tlsVersionMinOverride = option(o, "tlsMin");
     cfg.enableLegacyAlgorithms = option(o, "legacy") == "1";
