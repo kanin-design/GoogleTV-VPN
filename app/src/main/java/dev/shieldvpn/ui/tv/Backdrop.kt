@@ -22,9 +22,12 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
@@ -112,11 +115,7 @@ fun TunnelBackdrop(mode: Mode, modifier: Modifier = Modifier, covered: Boolean =
     // Its own layer, so a new frame redraws only the background, not the screens over it.
     Canvas(modifier.graphicsLayer()) {
         frame
-        val s = scene
-        if (s == null) {
-            drawRect(Base)
-            return@Canvas
-        }
+        val s = scene ?: return@Canvas
         // Behind a panel or a sheet the names would read through it, out of place: they show on Connect.
         s.named = !hidden
         val unit = size.width / 1280f
@@ -127,8 +126,11 @@ fun TunnelBackdrop(mode: Mode, modifier: Modifier = Modifier, covered: Boolean =
 /** The mesh's hops lie a little off their curves; false is the backup, with them exactly on. */
 private const val LOOSE_PATH = true
 
-/** The background's own colour, under everything else. */
-private val Base = Color(0xFF030508)
+/**
+ * The background's own colour, under everything else. The window is painted in it (MainActivity),
+ * so the background doesn't paint the whole screen a second time on every frame.
+ */
+internal val BackdropBase = Color(0xFF030508)
 
 /**
  * The status light: its colour, brightness and energy (how fast and how busy it moves), eased
@@ -419,14 +421,13 @@ private class BackdropScene(private val measurer: TextMeasurer, private val mesh
 
     fun draw(scope: DrawScope) = with(scope) {
         brushes()
-        drawRect(Base)
         drawCircle(field, radius = 480f, center = FieldAt)
         mesh.draw(this, f)
         drawWays()
         mesh.drawOver(this, f)
         drawStops()
         drawRect(vignette)
-        if (appear < 1f) drawRect(Base, alpha = 1 - appear)
+        if (appear < 1f) drawRect(BackdropBase, alpha = 1 - appear)
     }
 
     private fun DrawScope.drawWays() {
@@ -471,7 +472,7 @@ private class BackdropScene(private val measurer: TextMeasurer, private val mesh
                 strokeWay(way, tv, (at - 28f).coerceAtLeast(0f), (at + 28f).coerceAtMost(tv.length), light.core(0.7f * l, 0.7f), Glow4)
             }
             val lenVpn = tv.length
-            packets(l, lenVpn + tn.length, onTravel, 4, 1f) { d -> if (d <= lenVpn) tv.at(d) else tn.at(d - lenVpn) }
+            packets(l, lenVpn + tn.length, onTravel, PACKETS, 1f) { d -> if (d <= lenVpn) tv.at(d) else tn.at(d - lenVpn) }
         }
         if (f.directTo > 0.5f) {
             val open = f.directLit
@@ -484,23 +485,55 @@ private class BackdropScene(private val measurer: TextMeasurer, private val mesh
 
     /**
      * [n] packets evenly spaced along a way [total] long, let out one at a time from its start
-     * ([travel] counts up from below zero when the way opens), only on its drawn part.
+     * ([travel] counts up from below zero when the way opens), only on its drawn part. Each is a
+     * glow, a hot core and a short tail; each of those is one draw call for all the packets.
      */
     private inline fun DrawScope.packets(a: Float, total: Float, travel: Float, n: Int, drawnPart: Float, at: (Float) -> Offset) {
         if (total < 1f) return
         val gap = total / n
+        var m = 0
+        tailCount.fill(0)
         for (i in 0 until n) {
             val d0 = travel - i * gap
             if (d0 < 0f) continue
             val d = d0 % total
             if (d > total * drawnPart) continue
-            for (s in 3 downTo 1) {
-                if (d - s * 7f > 0f) drawCircle(light.core(0.4f * a / (s + 1), 0.5f), radius = 3f - s * 0.5f, center = at(d - s * 7f), blendMode = BlendMode.Plus)
+            val p = at(d)
+            heads[m++] = p.x
+            heads[m++] = p.y
+            // The tail: three dots 7 px apart behind it, smaller and fainter the further back, as
+            // much of it as has left the way's start.
+            for (s in 1..3) {
+                if (d - s * 7f <= 0f) break
+                val q = at(d - s * 7f)
+                val tail = tails[s - 1]
+                tail[tailCount[s - 1]++] = q.x
+                tail[tailCount[s - 1]++] = q.y
             }
-            drawCircle(light.tone(0.22f * a), radius = 12f, center = at(d), blendMode = BlendMode.Plus)
-            drawCircle(light.core(0.95f * a, 0.7f), radius = 3.2f, center = at(d), blendMode = BlendMode.Plus)
+        }
+        if (m == 0) return
+        drawIntoCanvas { c ->
+            val canvas = c.nativeCanvas
+            for (s in 1..3) {
+                if (tailCount[s - 1] == 0) continue
+                dots.strokeWidth = 6f - s
+                dots.color = light.core(0.4f * a / (s + 1), 0.5f).toArgb()
+                canvas.drawPoints(tails[s - 1], 0, tailCount[s - 1], dots)
+            }
+            dots.strokeWidth = 24f
+            dots.color = light.tone(0.22f * a).toArgb()
+            canvas.drawPoints(heads, 0, m, dots)
+            dots.strokeWidth = 6.4f
+            dots.color = light.core(0.95f * a, 0.7f).toArgb()
+            canvas.drawPoints(heads, 0, m, dots)
         }
     }
+
+    // The packets' places for one batch of them, and the light they're drawn in.
+    private val heads = FloatArray(PACKETS * 2)
+    private val tails = Array(3) { FloatArray(PACKETS * 2) }
+    private val tailCount = IntArray(3)
+    private val dots = addPaint()
 
     private fun DrawScope.drawStops() {
         val l = f.l
@@ -559,6 +592,7 @@ private class BackdropScene(private val measurer: TextMeasurer, private val mesh
     private companion object {
         const val ON_SPEED = 260f
         const val OFF_SPEED = 190f
+        const val PACKETS = 4
         val IconStroke = Stroke(width = 2.1f, cap = StrokeCap.Round, join = StrokeJoin.Round)
 
         /** The centre of the faint field of the state's colour behind the mesh. */

@@ -443,7 +443,7 @@ On the Shield almost all of the CPU is drawing (the render thread about 18 %, th
 
 ### The background's mesh (2026-10-27, emulator, release build)
 
-The network behind the screens was rebuilt in the animation lab and the loose-curve version chosen. Each node wanders on its own, and each is linked to its natural neighbours: two nodes are linked when no third lies in the circle between them, so links never cross and nothing links across the map. The links are made once and stretch with the nodes, instead of popping in and out with distance. The device, the VPN and the internet are nodes of the mesh, and so are the hops of each way. The hops rest a little off a gentle curve: up and over to the VPN, down to the internet, and under the VPN when off. While a way is lit, its hops stay close to their curve, so traffic no longer takes a random zigzag. The backup, with the hops exactly on their curves, is one switch: `LOOSE_PATH = false` in `Backdrop.kt`. Each change of state plays its own beat. Connecting runs a head to the VPN, which answers with a ring. Connected opens the way on to the internet. Off pulls the tunnel back to a faint ghost. Connecting never looks like connected.
+The network behind the screens was rebuilt in the animation lab and the loose-curve version chosen. Each node wanders on its own, and each is linked to its natural neighbours: two nodes are linked when no third lies in the circle between them, so links never cross and nothing links across the map. The links are made once and stretch with the nodes, instead of popping in and out with distance. The device, the VPN and the internet are nodes of the mesh, and so are the hops of each way. The hops rest a little off a gentle curve: up and over to the VPN, down to the internet, and under the VPN when off. While a way is lit, its hops stay close to their curve, so traffic no longer takes a random zigzag. The backup, with the hops exactly on their curves, is one switch: `LOOSE_PATH = false` in `Backdrop.kt`. Each change of state plays its own beat. Connecting runs a head to the VPN, which answers with a ring. Connected opens the way on to the internet. Off pulls the tunnel back to a faint ghost. Connecting never looks like connected. Distances along a way are measured once, where its hops rest, so a packet keeps one speed while the hops under it drift. Build 124 (0.2.1) measured the moving way on every frame, and its packets sped up, slowed down and ran backwards.
 
 On Connect, off, with both builds at a full 30 frames a second:
 
@@ -453,7 +453,21 @@ On Connect, off, with both builds at a full 30 frames a second:
 | UI thread | 3.6 % | 1.7 % |
 | Memory (PSS) | 35 MB | 35 MB |
 
-The emulator's frame rate varies from run to run; these are the two runs that both held 30 frames a second. It costs less on the UI thread because the old network compared every pair of nodes on every frame to find its links. Laying the mesh out (40,000 tries to spread 118 nodes evenly, then the links) takes 0.1 to 0.25 s. It runs once a process on a background thread, and the background fades in about half a second after the first screen. On the main thread in a debug build it had taken 0.37 s before the screen could draw. Its random numbers come from a class rather than a lambda, which would box each of some 120,000 floats, and its neighbour searches go through a grid of 32 px squares. A frame allocates next to nothing: the mesh's lines and dots go into a few batches by brightness, at most 18 draw calls for all of it, and its strokes, paths and arrays are made once.
+The emulator's frame rate varies from run to run; these are the two runs that both held 30 frames a second. It costs less on the UI thread because the old network compared every pair of nodes on every frame to find its links. Laying the mesh out (40,000 tries to spread 118 nodes evenly, then the links) takes 0.1 to 0.25 s. It runs once a process on a background thread, and the background fades in about half a second after the first screen. On the main thread in a debug build it had taken 0.37 s before the screen could draw. Its random numbers come from a class rather than a lambda, which would box each of some 120,000 floats, and its neighbour searches go through a grid of 32 px squares. A frame allocates next to nothing: the mesh's lines and dots go into a few batches by brightness, at most 18 draw calls for all of it, and its strokes, paths and arrays are made once. The packets and the hops on a lit way are batched the same way, five draw calls and two instead of a circle each. The window itself carries the background's colour, so the background no longer paints the whole screen over the window's own on every frame. None of these cuts shows on the emulator, which draws 10 to 15 frames a second either way, held back by its own graphics.
+
+### The VPN's process on the Shield (2026-10-27, build 124, WireGuard up, read-only)
+
+| | |
+|---|---|
+| Memory (PSS) | 54 MB (64 MB before Android's next garbage collection) |
+| Java heap | 4.7 MB |
+| Native heap | 4.1 MB |
+| Code | 10.9 MB |
+| Unnamed memory | 30 MB |
+| CPU | 0.1 % of a core |
+| Threads | 27 |
+
+The 30 MB is most likely wireguard-go's packet buffers: the official library's Android build sizes each for 64 KB batches, which Android's tun can't use, and keeps up to 4,096 per pool. It is built in, so its sizes can't change without building wireguard-go here. Go's memory limit or a tighter garbage collector, set before the library loads, would hold it down at some cost in speed, which 0.2.0 turned down. It is to be measured on the Shield before it is decided. Each engine's library loads only when that engine connects.
 
 ### GPU buffers left behind (2026-10-24, emulator, release build)
 

@@ -382,9 +382,9 @@ internal class Mesh(private val layout: MeshLayout) {
     val net get() = layout.net
 
     /** The way from the device to the VPN, from the VPN on to the internet, and from the device around the VPN. */
-    val toVpn = Way()
-    val toNet = Way()
-    val direct = Way()
+    val toVpn = Way(layout.bx, layout.by, layout.tunnel)
+    val toNet = Way(layout.bx, layout.by, layout.onward)
+    val direct = Way(layout.bx, layout.by, layout.around)
 
     private val n = layout.n
     private val bx = layout.bx
@@ -400,9 +400,6 @@ internal class Mesh(private val layout: MeshLayout) {
     private val rest = layout.rest
     private val deg = layout.deg
     private val hops = layout.hops
-    private val tunnel = layout.tunnel
-    private val onward = layout.onward
-    private val around = layout.around
     private val loose = layout.loose
 
     // Where each node is now.
@@ -417,6 +414,13 @@ internal class Mesh(private val layout: MeshLayout) {
     private val middle = DotBatch(n)
     private val large = DotBatch(n)
     private val paint = addPaint()
+    private val hopDots = FloatArray(n * 2)
+    private val shade = Paint().apply {
+        isAntiAlias = true
+        strokeCap = Paint.Cap.ROUND
+        strokeWidth = 9.2f
+        color = 0xFF05080C.toInt()
+    }
 
     /** Moves the mesh by [dt] seconds (only while [moving]) and lays the ways through it. */
     fun update(f: MeshFrame, dt: Float, moving: Boolean) {
@@ -440,14 +444,9 @@ internal class Mesh(private val layout: MeshLayout) {
             x[i] = bx[i] + wx * keep
             y[i] = by[i] + wy * keep
         }
-        lay(toVpn, tunnel)
-        lay(toNet, onward)
-        lay(direct, around)
-    }
-
-    private fun lay(way: Way, idx: IntArray) {
-        way.clear()
-        for (i in idx) way.add(x[i], y[i])
+        toVpn.follow(x, y)
+        toNet.follow(x, y)
+        direct.follow(x, y)
     }
 
     /** The mesh, under the ways and the stops. */
@@ -494,23 +493,31 @@ internal class Mesh(private val layout: MeshLayout) {
     }
 
     /** The hops of a lit way show as nodes on it, so it reads as running from node to node. */
-    fun drawOver(scope: DrawScope, f: MeshFrame) = with(scope) {
-        hopsOn(tunnel, f.tunnelTo, max(f.tunnelLit, if (f.head >= 0f) 1f else 0f), f, f.head)
-        hopsOn(onward, f.netTo, f.netLit, f, -1f)
-        hopsOn(around, f.directTo, 0.35f + 0.65f * f.directLit, f, -1f)
+    fun drawOver(scope: DrawScope, f: MeshFrame) {
+        hopsOn(scope, toVpn, f.tunnelTo, max(f.tunnelLit, if (f.head >= 0f) 1f else 0f), f, f.head)
+        hopsOn(scope, toNet, f.netTo, f.netLit, f, -1f)
+        hopsOn(scope, direct, f.directTo, 0.35f + 0.65f * f.directLit, f, -1f)
     }
 
-    /** The hops of [idx] up to [upTo] along it (or up to the head at [head], while connecting). */
-    private fun DrawScope.hopsOn(idx: IntArray, upTo: Float, lit: Float, f: MeshFrame, head: Float) {
+    /**
+     * The hops of [way] up to [upTo] along it (or up to the head at [head], while connecting): a dark
+     * disc that cuts the way, and a lit dot in it, two draw calls for all of them.
+     */
+    private fun hopsOn(scope: DrawScope, way: Way, upTo: Float, lit: Float, f: MeshFrame, head: Float) {
         val reach = if (head >= 0f) head else upTo
         if (reach <= 0.5f || lit <= 0f) return
-        var d = 0f
-        for (k in 1 until idx.size - 1) {
-            d += dist(x[idx[k - 1]], y[idx[k - 1]], x[idx[k]], y[idx[k]])
-            if (d > reach) break
-            val c = Offset(x[idx[k]], y[idx[k]])
-            drawCircle(Color(0xFF05080C), radius = 4.6f, center = c)
-            drawCircle(f.light.core(0.85f * lit * f.l, 0.5f), radius = 2.9f, center = c, blendMode = BlendMode.Plus)
+        var m = 0
+        for (k in 1 until way.size - 1) {
+            if (way.hopAt(k) > reach) break
+            hopDots[m++] = way.hopX(k)
+            hopDots[m++] = way.hopY(k)
+        }
+        if (m == 0) return
+        scope.drawIntoCanvas { c ->
+            c.nativeCanvas.drawPoints(hopDots, 0, m, shade)
+            paint.strokeWidth = 5.8f
+            paint.color = f.light.core(0.85f * lit * f.l, 0.5f).toArgb()
+            c.nativeCanvas.drawPoints(hopDots, 0, m, paint)
         }
     }
 
@@ -522,29 +529,37 @@ internal class Mesh(private val layout: MeshLayout) {
 
 // ---- Drawing tools ------------------------------------------------------------------------------
 
-/** A way as a line of points, with the distance to each from its start. */
-internal class Way(cap: Int = 200) {
-    private val px = FloatArray(cap)
-    private val py = FloatArray(cap)
-    private val cum = FloatArray(cap)
-    var size = 0
-        private set
-    val length: Float get() = if (size > 0) cum[size - 1] else 0f
+/**
+ * A way through the mesh: the hops [idx] of ([xs], [ys]) from end to end. Distances along it are
+ * measured once, where the hops rest, and everything that runs along it goes by that measure: as
+ * the hops drift the way bends with them, but a packet keeps one steady speed and never jumps.
+ */
+internal class Way(xs: FloatArray, ys: FloatArray, private val idx: IntArray) {
+    private val px = FloatArray(idx.size) { xs[idx[it]] }
+    private val py = FloatArray(idx.size) { ys[idx[it]] }
+    private val cum = FloatArray(idx.size)
+    val size get() = idx.size
+    val length: Float
 
-    fun clear() {
-        size = 0
+    init {
+        for (k in 1 until idx.size) cum[k] = cum[k - 1] + dist(px[k], py[k], px[k - 1], py[k - 1])
+        length = cum[idx.size - 1]
     }
 
-    fun add(x: Float, y: Float) {
-        if (size == px.size) return
-        px[size] = x
-        py[size] = y
-        cum[size] = if (size == 0) 0f else cum[size - 1] + dist(x, y, px[size - 1], py[size - 1])
-        size++
+    /** Moves the way onto where its hops are now. */
+    fun follow(xs: FloatArray, ys: FloatArray) {
+        for (k in idx.indices) {
+            px[k] = xs[idx[k]]
+            py[k] = ys[idx[k]]
+        }
     }
+
+    /** How far along the way hop [k] is, and where it is now. */
+    fun hopAt(k: Int) = cum[k]
+    fun hopX(k: Int) = px[k]
+    fun hopY(k: Int) = py[k]
 
     fun at(d: Float): Offset {
-        if (size == 0) return Offset.Zero
         if (size == 1 || d <= 0f) return Offset(px[0], py[0])
         var lo = 0
         var hi = size - 1
@@ -650,7 +665,7 @@ private class DotBatch(cap: Int, private val steps: Int = 4, private val top: Fl
 }
 
 /** Light that adds to what is under it, with round ends: lines and dots that glow where they cross. */
-private fun addPaint() = Paint().apply {
+internal fun addPaint() = Paint().apply {
     isAntiAlias = true
     strokeCap = Paint.Cap.ROUND
     xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD)

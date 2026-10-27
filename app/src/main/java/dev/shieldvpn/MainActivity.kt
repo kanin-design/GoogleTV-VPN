@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.graphics.drawable.ColorDrawable
 import android.net.VpnService
 import android.os.Bundle
 import android.os.Handler
@@ -21,9 +22,11 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.drawable.toBitmap
 import dev.shieldvpn.control.Control
 import dev.shieldvpn.remote.RemoteApi
+import dev.shieldvpn.ui.tv.BackdropBase
 import dev.shieldvpn.ui.tv.LauncherApp
 import dev.shieldvpn.ui.tv.TunnelActions
 import dev.shieldvpn.ui.tv.TunnelApp
@@ -89,6 +92,9 @@ class MainActivity : ComponentActivity(), TunnelActions {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         screens++
+        // The window is the background's colour, so the background needn't paint the whole screen
+        // over the window's own on every frame.
+        window.setBackgroundDrawable(ColorDrawable(BackdropBase.toArgb()))
         setContent {
             val state by viewModel.state.collectAsState()
             TunnelApp(state = state, actions = this)
