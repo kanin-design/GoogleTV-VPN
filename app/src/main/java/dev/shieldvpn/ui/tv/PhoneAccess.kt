@@ -75,11 +75,11 @@ fun PairSheet(nav: Nav, req: Requesters, o: Overlay.PairPhone, close: () -> Unit
             titleSize = 32f,
         )
         Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(30.dp), verticalAlignment = Alignment.CenterVertically) {
-            val qrShadow = Modifier.shadow(10.dp, RoundedCornerShape(14.dp), ambientColor = Color.Black, spotColor = Color.Black)
+            val qrShadow = Modifier.shadow(10.dp, RoundedCornerShape(TvRadius.Medium.dp), ambientColor = Color.Black, spotColor = Color.Black)
             if (current != null && address != null && left > 0 && done == null) {
                 QrCode(Pairing.link(address, current), 210f, qrShadow)
             } else {
-                Box(Modifier.size(210.dp).clip(RoundedCornerShape(14.dp)).background(Tv.white(0.06f)), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(210.dp).clip(RoundedCornerShape(TvRadius.Medium.dp)).background(Tv.white(0.06f)), contentAlignment = Alignment.Center) {
                     Text(if (address == null) "No home network" else "Code ended", style = TvType.ui(16f, color = Tv.soft(0.6f)))
                 }
             }
@@ -91,7 +91,7 @@ fun PairSheet(nav: Nav, req: Requesters, o: Overlay.PairPhone, close: () -> Unit
                 ).forEachIndexed { i, step ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.white(0.12f)), contentAlignment = Alignment.Center) {
-                            Text("${i + 1}", style = TvType.ui(14f, FontWeight.ExtraBold))
+                            Text("${i + 1}", style = TvType.ui(14f, FontWeight.SemiBold))
                         }
                         Text(step, style = TvType.ui(17f, color = Tv.soft(0.86f)), modifier = Modifier.widthIn(max = 380.dp))
                     }
@@ -125,7 +125,7 @@ fun PairSheet(nav: Nav, req: Requesters, o: Overlay.PairPhone, close: () -> Unit
 fun AskSheet(req: Requesters, o: Overlay.Ask, answer: (Boolean) -> Unit) {
     val a = o.ask
     Sheet(720f) {
-        PanelHeading(a.eyebrow, a.title, a.text, titleSize = 30f)
+        PanelHeading(a.eyebrow, a.title, a.text)
         Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (a.danger) {
                 TvButton(a.no, { answer(false) }, focusRequester = req["ov-first"])

@@ -166,7 +166,7 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
         Glass(Modifier.placed({ 64.dp }, 124.dp, { navWidth }).height(560.dp)) {
             Column(Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 22.dp, bottom = 16.dp)) {
                 val labelAlpha by animateFloatAsState(if (picking) 0f else 1f, tween(200), label = "labels")
-                Text("Settings", style = TvType.display(30f), maxLines = 1, modifier = Modifier.padding(start = 8.dp, bottom = 8.dp).fade { labelAlpha })
+                Text("Settings", style = TvType.display(32f), maxLines = 1, modifier = Modifier.padding(start = 16.dp, bottom = 8.dp).fade { labelAlpha })
                 Column(modifier = Modifier.enterAt { req["cat-${nav.settingsCat.name}"] }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     val shown = Category.entries.filter { !it.advanced || state.settings.advanced }
                     shown.forEachIndexed { i, cat ->
@@ -269,7 +269,7 @@ private fun CategoryRow(cat: Category, selected: Boolean, labelAlpha: Float, foc
                 scaleY = scale
             }
             .height(36.dp)
-            .clip(RoundedCornerShape(15.dp))
+            .clip(RoundedCornerShape(TvRadius.Medium.dp))
             .background(
                 when {
                     f.focused -> Tv.Focus
@@ -290,7 +290,7 @@ private fun CategoryRow(cat: Category, selected: Boolean, labelAlpha: Float, foc
         TvIcon(cat.icon, 20f, c)
         Text(
             cat.label,
-            style = TvType.ui(17f, if (selected || f.focused) FontWeight.ExtraBold else FontWeight.SemiBold, c),
+            style = TvType.ui(17f, FontWeight.SemiBold, c),
             maxLines = 1,
             modifier = Modifier.weight(1f).fade { labelAlpha },
         )
@@ -414,7 +414,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
     if (later && state.status.let { it is VpnStatus.Connected || it is VpnStatus.Connecting }) {
         // The kill switch is the one that changes at once.
         val note = if (cat == Category.Protection) "The kill switch changes at once. The rest apply the next time you connect." else "Changes here apply the next time you connect."
-        Text(note, style = TvType.ui(15f, FontWeight.SemiBold, Tv.Amber), modifier = Modifier.padding(top = 10.dp))
+        Text(note, style = TvType.ui(15f, FontWeight.Medium, Tv.soft(0.62f)), modifier = Modifier.padding(top = 12.dp))
     }
     // The category's phone page, with its code under the rows.
     val phone = when (cat) {
@@ -439,7 +439,8 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
     val showPhone = phone != null && cat != Category.Diagnostics
     LazyColumn(
         state = list,
-        modifier = Modifier.padding(top = 18.dp).weight(1f, fill = false).bleed(12.dp).scrollFade(list),
+        // Rows reach past the heading by their own padding, so their words start where its words do.
+        modifier = Modifier.padding(top = 16.dp).weight(1f, fill = false).bleed(28.dp).scrollFade(list),
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -768,10 +769,10 @@ fun dnsProblem(text: String): String? = Validate.dnsProblem(text)
 private fun AppIcon(app: LauncherApp) {
     val icon = app.icon
     if (icon != null) {
-        Image(icon, contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)))
+        Image(icon, contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(TvRadius.Small.dp)))
     } else {
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(Tv.white(0.1f)), contentAlignment = Alignment.Center) {
-            Text(app.label.take(2).uppercase(), style = TvType.ui(13f, FontWeight.ExtraBold))
+        Box(Modifier.size(40.dp).clip(RoundedCornerShape(TvRadius.Small.dp)).background(Tv.white(0.1f)), contentAlignment = Alignment.Center) {
+            Text(app.label.take(2).uppercase(), style = TvType.ui(13f, FontWeight.SemiBold))
         }
     }
 }
@@ -856,9 +857,9 @@ private fun ColumnScope.LogPanel(state: VpnUiState, nav: Nav, actions: TunnelAct
             .padding(top = 16.dp)
             .fillMaxWidth()
             .weight(1f)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(TvRadius.Medium.dp))
             .background(Color.Black.copy(alpha = 0.4f))
-            .border(2.dp, if (f.focused) Tv.Focus else Color.Transparent, RoundedCornerShape(16.dp))
+            .border(2.dp, if (f.focused) Tv.Focus else Color.Transparent, RoundedCornerShape(TvRadius.Medium.dp))
             .onKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when {
@@ -882,15 +883,15 @@ private fun ColumnScope.LogPanel(state: VpnUiState, nav: Nav, actions: TunnelAct
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // Log detail › quiet keeps only errors and connection changes.
-            if (lines.isEmpty()) item { Text("The log is empty.", style = TvType.mono(14.5f, color = Tv.soft(0.82f))) }
+            if (lines.isEmpty()) item { Text("The log is empty.", style = TvType.mono(14f, color = Tv.soft(0.82f))) }
             items(lines.size) { i ->
                 val line = lines[i]
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text(line.time, style = TvType.mono(14.5f, color = Tv.soft(0.4f)))
+                    Text(line.time, style = TvType.mono(14f, color = Tv.soft(0.4f)))
                     Text(
                         line.text,
                         style = TvType.mono(
-                            14.5f,
+                            14f,
                             color = when (line.kind) {
                                 LogKind.Ok -> Tv.Mint
                                 LogKind.Err -> Tv.Red
@@ -1014,7 +1015,7 @@ private fun ColumnScope.TestPanel(state: VpnUiState, nav: Nav, actions: TunnelAc
     Column(Modifier.padding(top = 16.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         checks.forEach { c ->
             Row(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Tv.white(0.05f)).padding(horizontal = 18.dp, vertical = 14.dp),
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(TvRadius.Medium.dp)).background(Tv.white(0.05f)).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
@@ -1076,7 +1077,7 @@ private fun ValuePick(state: VpnUiState, nav: Nav, actions: TunnelActions, req: 
     PickHeading(v.eyebrow, v.title, v.sub)
     val current = v.get(state.settings)
     val list = rememberLazyListState()
-    LazyColumn(state = list, modifier = Modifier.bleed(12.dp).scrollFade(list), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
+    LazyColumn(state = list, modifier = Modifier.bleed(28.dp).scrollFade(list), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
         items(v.options.size) { i ->
             val option = v.options[i]
             ListRow(
@@ -1119,7 +1120,7 @@ private fun StartupPick(state: VpnUiState, nav: Nav, actions: TunnelActions, req
     val current = if (state.settings.boot) state.settings.startupId else null
     // Opens scrolled to the chosen profile, with one row above it, so focus coming in lands on it.
     val list = rememberLazyListState(initialFirstVisibleItemIndex = state.connections.indexOfFirst { it.id == current }.coerceAtLeast(0))
-    LazyColumn(state = list, modifier = Modifier.bleed(12.dp).scrollFade(list), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
+    LazyColumn(state = list, modifier = Modifier.bleed(28.dp).scrollFade(list), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
         item {
             ListRow(
                 "Don’t connect at startup", {

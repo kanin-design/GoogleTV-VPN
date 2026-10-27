@@ -200,7 +200,7 @@ internal class StatusLight {
  * one value between two looks, so connecting never shows what connected looks like.
  */
 private class BackdropScene(private val measurer: TextMeasurer, private val mesh: Mesh) {
-    /** The stops are named (THIS DEVICE, VPN SERVER, INTERNET) only while the drawing is uncovered. */
+    /** The stops are named (This device, VPN server, Internet) only while the drawing is uncovered. */
     var named = true
     private val light = StatusLight()
     private val f = MeshFrame(light)
@@ -385,8 +385,8 @@ private class BackdropScene(private val measurer: TextMeasurer, private val mesh
     private var labels: List<TextLayoutResult>? = null
 
     private fun labels(): List<TextLayoutResult> = labels ?: run {
-        val style = TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.14.em, color = Color.White)
-        listOf("THIS DEVICE", "VPN SERVER", "INTERNET").map { measurer.measure(it, style, density = Density(1f)) }.also { labels = it }
+        val style = TextStyle(fontFamily = TvType.Ui, fontSize = 14.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.01.em, color = Color.White)
+        listOf("This device", "VPN server", "Internet").map { measurer.measure(it, style, density = Density(1f)) }.also { labels = it }
     }
 
     private val deviceIcon = icon(Ic.Apps)

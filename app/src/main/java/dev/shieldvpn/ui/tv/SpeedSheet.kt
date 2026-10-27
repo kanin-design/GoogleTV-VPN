@@ -155,8 +155,8 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
 
     Sheet(820f) {
         // Where it was opened, as every other sheet's eyebrow says.
-        Text("${o.eyebrow} › Speed test".uppercase(), style = TvType.eyebrow(13.5f, 0.55f))
-        Text(if (direct) "Without the VPN" else c.name, style = TvType.display(34f), modifier = Modifier.padding(top = 6.dp))
+        Text("${o.eyebrow} › Speed test", style = TvType.eyebrow(14f, 0.55f))
+        Text(if (direct) "Without the VPN" else c.name, style = TvType.display(32f), modifier = Modifier.padding(top = 4.dp))
         Text(sub, style = TvType.ui(17f, color = Tv.soft(0.62f)), maxLines = 1, modifier = Modifier.padding(top = 6.dp))
         Row(Modifier.padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(34.dp)) {
             val tone = if (phase == SpeedTest.Phase.Up) Tv.Blue else Tv.Mint
@@ -168,9 +168,9 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
             Gauge(value, tone) {
                 when {
                     stage == Stage.Connecting || (stage == Stage.Testing && phase == null) -> Spinner(size = 34f)
-                    phase == SpeedTest.Phase.Ping -> GaugeReadout("PING", ping?.toString() ?: "…", "ms")
-                    phase != null -> GaugeReadout(if (phase == SpeedTest.Phase.Down) "DOWNLOAD" else "UPLOAD", fmtMbps(live), "Mbps")
-                    stage == Stage.Done -> GaugeReadout("DOWNLOAD", fmtMbps(down ?: 0.0), "Mbps")
+                    phase == SpeedTest.Phase.Ping -> GaugeReadout("Ping", ping?.toString() ?: "…", "ms")
+                    phase != null -> GaugeReadout(if (phase == SpeedTest.Phase.Down) "Download" else "Upload", fmtMbps(live), "Mbps")
+                    stage == Stage.Done -> GaugeReadout("Download", fmtMbps(down ?: 0.0), "Mbps")
                     else -> GaugeReadout("", "—", "Mbps")
                 }
             }
@@ -222,7 +222,7 @@ private fun Gauge(mbps: Double, tone: Color, centre: @Composable () -> Unit) {
     val shown by animateFloatAsState(target, tween(if (target == 0f) 420 else 240, easing = LinearEasing), label = "gauge")
     val measurer = rememberTextMeasurer()
     val labels = remember(measurer) {
-        val style = TextStyle(fontFamily = TvType.Ui, fontSize = TvType.ui(12f).fontSize, fontWeight = FontWeight.Bold, color = Tv.soft(0.42f))
+        val style = TextStyle(fontFamily = TvType.Ui, fontSize = TvType.ui(13f).fontSize, fontWeight = FontWeight.Medium, color = Tv.soft(0.42f))
         Scale.map { measurer.measure(if (it >= 500) "500+" else it.toInt().toString(), style) }
     }
     Box(Modifier.size(300.dp, 262.dp), contentAlignment = Alignment.Center) {
@@ -255,7 +255,7 @@ private fun Gauge(mbps: Double, tone: Color, centre: @Composable () -> Unit) {
 @Composable
 private fun GaugeReadout(label: String, value: String, unit: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, style = TvType.eyebrow(12.5f, 0.55f))
+        Text(label, style = TvType.eyebrow(14f, 0.55f))
         Text(value, style = TvType.display(58f), modifier = Modifier.padding(top = 2.dp))
         Text(unit, style = TvType.ui(16f, FontWeight.SemiBold, Tv.soft(0.55f)))
     }
@@ -266,7 +266,7 @@ private fun Stat(label: String, value: String?, running: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(TvRadius.Medium.dp))
             .background(Tv.white(if (running) 0.09f else 0.05f))
             .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -275,7 +275,7 @@ private fun Stat(label: String, value: String?, running: Boolean) {
         if (running && value == null) {
             Spinner(size = 18f)
         } else {
-            Text(value ?: "—", style = TvType.ui(20f, FontWeight.Bold, if (value != null) Tv.Ink else Tv.soft(0.35f)))
+            Text(value ?: "—", style = TvType.ui(20f, FontWeight.SemiBold, if (value != null) Tv.Ink else Tv.soft(0.35f)))
         }
     }
 }
@@ -302,7 +302,7 @@ private fun Verdict(stage: Stage, down: Double?, up: Double?, error: String?, ba
             .fillMaxWidth()
             // Two lines tall from the start, so the sheet does not grow when the result arrives.
             .heightIn(min = 70.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(TvRadius.Medium.dp))
             .background(if (title != null) tone.copy(alpha = 0.1f) else Tv.white(0.04f))
             .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -314,7 +314,7 @@ private fun Verdict(stage: Stage, down: Double?, up: Double?, error: String?, ba
             }
         }
         Column(Modifier.weight(1f)) {
-            if (title != null) Text(title, style = TvType.ui(18f, FontWeight.Bold))
+            if (title != null) Text(title, style = TvType.ui(17f, FontWeight.SemiBold))
             Text(detail, style = TvType.ui(15f, color = Tv.soft(0.62f)), maxLines = 2)
         }
     }

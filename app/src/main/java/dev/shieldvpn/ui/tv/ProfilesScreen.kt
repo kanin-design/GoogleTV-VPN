@@ -283,9 +283,9 @@ private fun SlidingColumn(role: Role, list: Boolean, focus: Modifier, shown: () 
 @Composable
 private fun ColumnHead(eyebrow: String, title: String, sub: String?, mini: Boolean, count: Int? = null, extra: (@Composable () -> Unit)? = null) {
     val fold by animateFloatAsState(if (mini) 0f else 1f, tween(250), label = "headFold")
-    Column(Modifier.padding(start = 26.dp, end = 26.dp, top = 22.dp, bottom = 10.dp)) {
-        if (fold > 0.01f) Text(eyebrow.uppercase(), style = TvType.eyebrow(13f, 0.55f, 0.12f), maxLines = 1, modifier = Modifier.fade { fold })
-        Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 6.dp)) {
+    Column(Modifier.padding(start = 30.dp, end = 30.dp, top = 22.dp, bottom = 10.dp)) {
+        if (fold > 0.01f) Text(eyebrow, style = TvType.eyebrow(14f, 0.55f), maxLines = 1, modifier = Modifier.fade { fold })
+        Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 4.dp)) {
             Text(title, style = TvType.display(if (mini) 24f else 32f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             if (count != null && !mini) Text("$count", style = TvType.ui(16f, FontWeight.SemiBold, Tv.soft(0.55f)), modifier = Modifier.padding(start = 10.dp, bottom = 5.dp))
         }
@@ -367,7 +367,7 @@ private fun ProfileHero(state: VpnUiState, c: Connection) {
     )
     Column(horizontalAlignment = Alignment.Start) {
         Text(c.name, style = TvType.title(92f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 18.dp))
-        MetaLine(listOfNotNull(server?.let { Words.serverLine(it.host, it.port, it.protocol, state.infoOf(c)?.cipher) }))
+        MetaLine(listOf(listOfNotNull(Words.kind(server?.kind ?: VpnKind.OpenVpn), server?.let { Words.serverLine(it.host, it.port, it.protocol, state.infoOf(c)?.cipher) }).joinToString(" · ")))
         MetaLine(facts)
         Row(Modifier.padding(top = 22.dp), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
             // One key, two ways to press it.
@@ -400,7 +400,7 @@ private fun Hint(key: String, text: String) {
                 .clip(CircleShape)
                 .border(2.dp, Tv.white(0.3f), CircleShape),
             contentAlignment = Alignment.Center,
-        ) { Text(key, style = TvType.ui(12f, FontWeight.ExtraBold, Color.White)) }
+        ) { Text(key, style = TvType.ui(13f, FontWeight.SemiBold, Color.White)) }
         Text(text, style = TvType.ui(16f, FontWeight.SemiBold, Tv.soft(0.7f)))
     }
 }
@@ -452,7 +452,7 @@ private fun ProfileColumn(
     val startup = state.settings.boot && state.settings.startupId == c.id
 
     Column(Modifier.fillMaxSize()) {
-        ColumnHead(nav.copyOf[c.id]?.let { "Copy of $it" } ?: "Profiles", c.name, server?.let { Words.serverLine(it.host, it.port, it.protocol, info?.cipher) }, mini, extra = {
+        ColumnHead(nav.copyOf[c.id]?.let { "Copy of $it" } ?: "Profiles", c.name, listOfNotNull(Words.kind(server?.kind ?: VpnKind.OpenVpn), server?.let { Words.serverLine(it.host, it.port, it.protocol, info?.cipher) }).joinToString(" · "), mini, extra = {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 val connecting = (state.status as? VpnStatus.Connecting)?.connectionId == c.id
                 TvButton(
@@ -1248,7 +1248,7 @@ private fun LookBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: R
         Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(30.dp)) {
             LookCard(look.colours, look.icon.path, 34f, c.name, state.serverOf(c)?.host.orEmpty(), Modifier.width(290.dp))
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Icon", style = TvType.ui(15f, FontWeight.Bold, Tv.soft(0.7f)))
+                Text("Icon", style = TvType.ui(15f, FontWeight.Medium, Tv.soft(0.7f)))
                 Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     LookIcon.entries.chunked(6).forEach { line ->
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1267,7 +1267,7 @@ private fun LookBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: R
                         }
                     }
                 }
-                Text("Colour", style = TvType.ui(15f, FontWeight.Bold, Tv.soft(0.7f)))
+                Text("Colour", style = TvType.ui(15f, FontWeight.Medium, Tv.soft(0.7f)))
                 Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     Swatches.forEachIndexed { i, colours ->
                         LookSwatch(colours, selected = i == look.colour, focusRequester = req["lc-$i"]) {
@@ -1298,7 +1298,7 @@ private fun LookBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: R
 private fun LookTile(selected: Boolean, colours: Pair<Color, Color>, focusRequester: FocusRequester, onClick: () -> Unit, content: @Composable () -> Unit) {
     val f = rememberFocusState()
     val scale by animateFloatAsState(if (f.focused) 1.12f else 1f, tween(180, easing = FocusEase), label = "tile")
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(TvRadius.Medium.dp)
     Box(
         modifier = Modifier
             .size(62.dp)
@@ -1346,7 +1346,7 @@ fun DetailGrid(rows: List<Pair<String, String>>, columns: Int = 2) {
                     Column(Modifier.weight(1f)) {
                         Text(k, style = TvType.ui(14f, FontWeight.SemiBold, Tv.soft(0.55f)))
                         // Two lines, so a long server name and its address both show.
-                        Text(v, style = TvType.mono(16.5f), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                        Text(v, style = TvType.mono(16f), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
                     }
                 }
                 repeat(columns - line.size) { Spacer(Modifier.weight(1f)) }
@@ -1370,9 +1370,9 @@ fun RawConfig(text: String, maxHeight: Float, plain: Boolean = false, focusWhenL
             .fillMaxWidth()
             .then(if (focusWhenLong != null) Modifier.focusRequester(focusWhenLong) else Modifier)
             .heightIn(max = maxHeight.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(TvRadius.Medium.dp))
             .background(Color.Black.copy(alpha = 0.35f))
-            .border(2.dp, if (f.focused) Tv.Focus else Color.Transparent, RoundedCornerShape(14.dp))
+            .border(2.dp, if (f.focused) Tv.Focus else Color.Transparent, RoundedCornerShape(TvRadius.Medium.dp))
             .onKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when (e.key) {
