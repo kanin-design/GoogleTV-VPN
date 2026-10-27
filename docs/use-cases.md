@@ -622,3 +622,22 @@ Checked on the emulator (2026-10-27, debug builds 52 to 57, the panel in a phone
 
 Measured on the emulator, release build, connected to WG test, the TV app closed and the panel open on a phone: the app's process holding only the panel's server, 11.7 MB PSS (the target was 30 MB); the VPN's process, 21.2 MB; both at 0 % CPU between requests. On a debug build the same process was 31.8 MB. Before the process was made to restart without the screens, it kept about 60 MB for as long as the VPN was on. The release APK is 11.8 MB for arm64 (7.9 MB at 0.1.2): WireGuard's library is most of that, the panel about 90 KB.
 
+
+## Passwords on the network and in files (2026-10-28)
+
+The aim: a saved VPN password, a backup passphrase or a profile's keys can't be read on their way across the home network, or sent somewhere by someone who only has a phone on it. Nothing extra is asked of anyone for this; the one choice is whether backups use a password.
+
+- The phone pages (the six-digit code on Import, Sign-in, Backup and the other sheets) are sealed. When a page loads it agrees a key with the TV by X25519 (WireGuard's Curve25519 on the TV, a small TweetNaCl-style one in the page, both checked against RFC 7748's vectors), and every request and answer after that is ChaCha20-Poly1305 with keys from HKDF-SHA256, as the panel's are: `POST /api/hello`, then `POST /api/x?h=<page>&n=<counter>` with the sealed body. The code goes inside the seal, and the QR code's link carries it in the fragment (`/#c=123456`), which the browser never sends, so someone listening learns neither the code nor what is typed. The old plain endpoints are gone.
+- A saved password goes only to the servers its profile's file trusts. A new file put in place of a profile's (an update, from the TV or a phone, or a certificate that brings its own CA) whose CA, peer fingerprint or checks on the server's certificate differ takes the saved password off, unless the same change types a new one; the TV and the phone say so. A new server address alone keeps it, as the CA still has to vouch for the server.
+- Backups have Settings › Backup › Use a password, on by default. On, a backup is encrypted with the backup passphrase (PBKDF2-SHA256, now 600,000 rounds for new backups, then AES-256-GCM); older backups keep the count they were made with. Off, the file is plain JSON under `"contents"`, and the TV, the phone pages and the panel say so before it is downloaded and restore it without asking for a passphrase. Turning it off from a phone needs an OK on the TV.
+
+What it does not stop: the pages themselves come over plain HTTP, as a TV can't have a certificate for a home address. Someone who can change traffic on the home network, not only listen, could change the page before it runs.
+
+Checked on the emulator (debug build, the phone page in the browser pane through the emulator's port redirect):
+
+| Area | Result |
+|---|---|
+| QR link | The page agreed a key, drew Import, took a pasted test profile and its login ("Username + password · sealtest, from your phone"). No request body held the password, the username or the code in readable form. |
+| Typed code | A wrong code was refused ("That code isn’t on the TV now"), the right one drew the page over a new key. |
+| Plain backup | With Use a password off, the TV's sheet and the page said the file is not encrypted; the download (sealed, as JSON) was `format`, `version`, `contents`. Restoring it asked no passphrase: "All 7 profiles were here already." |
+| Encrypted backup | With it on, a first passphrase was chosen on the page and the backup followed: `pbkdf2-sha256`, 600,000 rounds. Restoring it asked for the passphrase and took 1.3 s from the press to the answer. |

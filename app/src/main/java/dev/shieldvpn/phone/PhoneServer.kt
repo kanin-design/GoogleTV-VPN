@@ -6,8 +6,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.wireguard.crypto.Curve25519
 import dev.shieldvpn.http.HttpServer
 import dev.shieldvpn.http.Request
+import dev.shieldvpn.remote.Seal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -27,8 +29,13 @@ import java.util.concurrent.ConcurrentHashMap
  * empty page is served to anyone, as it holds nothing; every other request needs a live code.
  * Wrong codes are counted per phone in a ten-minute window that a right code does not reset, and
  * many wrong codes from anywhere give every idle screen a new code.
+ *
+ * What a page sends and gets is private on a shared Wi-Fi, as passwords and keys go this way: the
+ * page and the TV agree a key with X25519 when it loads ([hello]), and each request and answer is
+ * sealed with it as the panel's are ([Seal]). The code travels only inside the seal, and the QR
+ * code's link carries it in the fragment, which the browser never sends.
  */
-class PhoneServer : HttpServer.Route {
+class PhoneServer(private val noble: () -> String) : HttpServer.Route {
     /** "192.168.1.20:8080" while the server runs, or null without a home network. */
     val address: String? get() = HttpServer.address
 
@@ -39,6 +46,14 @@ class PhoneServer : HttpServer.Route {
 
     /** Codes of sessions that are over, so a phone still holding one is told so instead of "wrong code". */
     private val ended = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+
+    /** A page's key, from its [hello]: the two directions' keys and the counters it has used. */
+    private class Channel(val keys: Seal.Keys) {
+        val window = Seal.Window(0)
+        @Volatile var used = System.currentTimeMillis()
+    }
+
+    private val channels = LinkedHashMap<String, Channel>()
 
     /** Wrong codes by phone, and from anywhere, in the last ten minutes. */
     private val wrong = HashMap<String, Tries>()
@@ -124,7 +139,7 @@ class PhoneServer : HttpServer.Route {
     }
 
     /** The address to open on a phone for [s], with its code; null without a home network. */
-    fun url(s: PhoneSession): String? = address?.let { "http://$it/?c=${s.code}" }
+    fun url(s: PhoneSession): String? = address?.let { "http://$it/#c=${s.code}" }
 
     /** Ends sessions no screen has shown for two minutes. */
     private fun sweep() {
@@ -150,52 +165,107 @@ class PhoneServer : HttpServer.Route {
     override fun handle(r: Request) {
         // Hidden screens: no answer, as before the server was shared.
         if (!inFront) return
-        val method = r.method
         val path = r.path
-        val query = r.query
-        val from = r.from
-        if ((method == "GET" || r.head) && path == "/") {
-            return r.send(200, "text/html; charset=utf-8", PhonePage.shell.toByteArray(), "Content-Security-Policy" to CSP, head = r.head)
+        if ((r.method == "GET" || r.head) && path == "/") {
+            return r.send(200, "text/html; charset=utf-8", PhonePage.shell(noble).toByteArray(), "Content-Security-Policy" to CSP, head = r.head)
         }
-        if (method == "POST" && !r.fromPage) {
+        if (r.method != "POST" || path != "/api/hello" && path != "/api/x") {
+            r.skipBody()
+            return r.text(404, "Not found.", r.head)
+        }
+        if (!r.fromPage) {
             r.skipBody()
             return r.json(403, JSONObject().put("error", "origin").put("text", "Open the address shown on the TV."))
         }
-        tooMany(from)?.let {
+        tooMany(r.from)?.let {
             r.skipBody()
             return r.json(429, JSONObject().put("error", "wait").put("text", it))
         }
-        val code = query["c"].orEmpty().filter(Char::isDigit)
+        if (path == "/api/hello") hello(r) else sealed(r)
+    }
+
+    /** A page that has just loaded sends its X25519 public key; the TV answers with its own, and both make the page's keys. */
+    private fun hello(r: Request) {
+        if (r.length !in 1..1024) {
+            r.skipBody()
+            return r.json(413, JSONObject().put("error", "size"))
+        }
+        val phone = r.body(1024)?.let { runCatching { JSONObject(String(it)) }.getOrNull() }?.optString("p")?.let(Seal::unb64)?.takeIf { it.size == 32 }
+            ?: return r.json(400, JSONObject().put("error", "json").put("text", "The TV could not read that."))
+        val secret = Seal.randomBytes(32).also {
+            it[0] = (it[0].toInt() and 248).toByte()
+            it[31] = (it[31].toInt() and 127 or 64).toByte()
+        }
+        val tv = ByteArray(32).also { Curve25519.eval(it, 0, secret, null) }
+        val shared = ByteArray(32).also { Curve25519.eval(it, 0, secret, phone) }
+        // A key of a small order makes the shared key known to anyone: no page sends one.
+        if (shared.all { it == 0.toByte() }) return r.json(400, JSONObject().put("error", "json").put("text", "The TV could not read that."))
+        val id = Seal.b64url(Seal.randomBytes(9))
+        val channel = Channel(Seal.Keys.of(shared + phone + tv, "phone"))
+        synchronized(channels) {
+            channels[id] = channel
+            while (channels.size > MAX_CHANNELS) channels.remove(channels.minBy { it.value.used }.key)
+        }
+        r.json(200, JSONObject().put("h", id).put("t", Seal.b64(tv)))
+    }
+
+    /** A sealed request: opened with its page's keys, answered by [answer], and the answer sealed back. */
+    private fun sealed(r: Request) {
+        val channel = synchronized(channels) { channels[r.query["h"].orEmpty()] }
+        if (channel == null) {
+            r.skipBody()
+            return r.json(401, JSONObject().put("error", "hello"))
+        }
+        val n = r.query["n"]?.toLongOrNull() ?: 0L
+        if (r.length !in 17..MAX_SEALED) {
+            r.skipBody()
+            return r.json(413, JSONObject().put("error", "size").put("text", "That file is too large. A profile, backup or certificate is much smaller."))
+        }
+        val body = r.body(MAX_SEALED) ?: return
+        val plain = synchronized(channel) {
+            if (!channel.window.fresh(n)) return r.json(401, JSONObject().put("error", "counter").put("next", channel.window.top + 1))
+            Seal.open(channel.keys.up, Seal.UP, n, AAD, body)?.also {
+                channel.window.mark(n)
+                channel.used = System.currentTimeMillis()
+            }
+        }
+        if (plain == null) {
+            countWrong(r.from)
+            return r.json(401, JSONObject().put("error", "seal"))
+        }
+        val req = runCatching { JSONObject(String(plain)) }.getOrNull()
+        val (status, answer) = if (req == null) 400 to JSONObject().put("error", "json").put("text", "The TV could not read that.") else answer(r, req)
+        val out = Seal.seal(channel.keys.down, Seal.DOWN, n, AAD, JSONObject().put("s", status).put("j", answer).toString().toByteArray())
+        r.send(200, "application/octet-stream", out, "Cache-Control" to "no-store")
+    }
+
+    /** What the page asked for in [req], {"c": code, "op": …}, as a status and its JSON. */
+    private fun answer(r: Request, req: JSONObject): Pair<Int, JSONObject> {
+        val from = r.from
+        val code = req.optString("c").filter(Char::isDigit)
         val session = sessions.values.firstOrNull { it.code == code }
         if (session == null) {
-            r.skipBody()
-            if (code in ended) return r.json(410, JSONObject().put("error", "ended").put("text", "This code has ended. Scan the new one on the TV."))
+            if (code in ended) return 410 to JSONObject().put("error", "ended").put("text", "This code has ended. Scan the new one on the TV.")
             countWrong(from)
-            return r.json(403, JSONObject().put("error", "code").put("text", "That code isn’t on the TV now. Check the code on the TV."))
+            return 403 to JSONObject().put("error", "code").put("text", "That code isn’t on the TV now. Check the code on the TV.")
         }
         session.seen()
         r.waitUpTo(15_000)
-
-        when {
-            method == "GET" && path == "/api/state" -> {
-                val seen = query["rev"]?.toIntOrNull()
+        val moved = JSONObject().put("ok", false).put("moved", true)
+        return when (req.optString("op")) {
+            "state" -> {
+                val seen = if (req.has("rev")) req.optInt("rev") else null
                 if (seen != null && seen == session.revision) {
                     r.waitUpTo(WAIT_MS.toInt() + 10_000)
                     session.await(seen, WAIT_MS) { !inFront || !HttpServer.running }
                 }
-                r.json(200, session.stateJson())
+                200 to session.stateJson()
             }
-            method == "POST" && path == "/api/act" -> {
-                if (r.length !in 1..MAX_JSON) {
-                    r.skipBody()
-                    return r.json(413, JSONObject().put("error", "size").put("text", "That is too much text."))
-                }
-                val body = runCatching { JSONObject(String(r.body(MAX_JSON) ?: return)) }.getOrNull()
-                    ?: return r.json(400, JSONObject().put("error", "json").put("text", "The TV could not read that."))
-                if (session.moved) return r.json(200, JSONObject().put("ok", false).put("moved", true).put("rev", session.revision))
-                val action = body.optString("action")
-                val sent = body.optJSONObject("values")?.let { v -> v.keys().asSequence().associateWith { v.optString(it) } } ?: emptyMap()
-                val section = body.optString("section").ifEmpty { null }
+            "act" -> {
+                if (session.moved) return 200 to moved.put("rev", session.revision)
+                val action = req.optString("action")
+                val sent = req.optJSONObject("values")?.let { v -> v.keys().asSequence().associateWith { v.optString(it) } } ?: emptyMap()
+                val section = req.optString("section").ifEmpty { null }
                 val reply = onMain(session) {
                     // Only the fields this page has, each no longer than the page allows.
                     val values = session.clean(sent)
@@ -208,49 +278,38 @@ class PhoneServer : HttpServer.Route {
                         session.phoneAction(section, reply)
                     }
                 } ?: PhoneReply.error(null, "The TV took too long to answer. Try again.")
-                r.json(200, session.applyReply(reply, section))
+                200 to session.applyReply(reply, section)
             }
-            method == "POST" && path == "/api/file" -> {
-                val field = query["field"].orEmpty()
-                if (r.length > MAX_FILE) {
-                    r.skipBody()
-                    return r.json(200, PhoneReply.error(field, "That file is too large. A profile, backup or certificate is much smaller.").toJson(session.revision))
-                }
-                val bytes = r.body(MAX_FILE) ?: return
-                if (session.moved) return r.json(200, JSONObject().put("ok", false).put("moved", true).put("rev", session.revision))
-                val name = query["name"].orEmpty().take(120)
+            "file" -> {
+                val field = req.optString("field")
+                val bytes = Seal.unb64(req.optString("data")) ?: return 400 to JSONObject().put("error", "json").put("text", "The TV could not read that file.")
+                if (bytes.size > MAX_FILE) return 200 to PhoneReply.error(field, "That file is too large. A profile, backup or certificate is much smaller.").toJson(session.revision)
+                if (session.moved) return 200 to moved.put("rev", session.revision)
+                val name = req.optString("name").take(120)
                 val reply = onMain(session) {
                     session.onUpload(session, field, name, bytes).also { if (it.holdMs > 0) session.holdFor(it.holdMs) }
                 } ?: PhoneReply.error(field, "The TV took too long to answer. Try again.")
-                r.json(200, session.applyReply(reply, query["section"]))
+                200 to session.applyReply(reply, req.optString("section").ifEmpty { null })
             }
-            method == "POST" && path == "/api/input" -> {
-                if (r.length !in 1..MAX_JSON) {
-                    r.skipBody()
-                    return r.json(413, JSONObject().put("error", "size").put("text", "That is too much text."))
-                }
-                val body = runCatching { JSONObject(String(r.body(MAX_JSON) ?: return)) }.getOrNull()
-                if (body != null && !session.moved) {
-                    val field = body.optString("field")
-                    val value = body.optString("value")
+            "input" -> {
+                if (!session.moved) {
+                    val field = req.optString("field")
+                    val value = req.optString("value").take(MAX_INPUT)
                     main.post { session.typed(field, value) }
                 }
-                r.json(200, JSONObject().put("ok", true))
+                200 to JSONObject().put("ok", true)
             }
-            method == "GET" && path == "/api/download" -> {
-                val id = query["id"].orEmpty()
+            "download" -> {
+                val id = req.optString("id")
                 val file = onMain(session) { session.download(session, id) }
-                    ?: return r.json(404, JSONObject().put("error", "file").put("text", "That file isn’t on the TV now."))
-                file.refusal?.let { return r.json(403, JSONObject().put("error", "refused").put("text", it)) }
-                r.send(200, file.mime, file.bytes, "Content-Disposition" to disposition(file.name))
+                    ?: return 404 to JSONObject().put("error", "file").put("text", "That file isn’t on the TV now.")
+                file.refusal?.let { return 403 to JSONObject().put("error", "refused").put("text", it) }
                 // Kept by the session, so the line stays when the page is drawn again.
-                session.say(PhoneStatus(PhoneStatus.Kind.Done, "Downloaded ${file.name}. Look in Files › Downloads on your phone.", query["section"]))
+                session.say(PhoneStatus(PhoneStatus.Kind.Done, "Downloaded ${file.name}. Look in Files › Downloads on your phone.", req.optString("section").ifEmpty { null }))
                 main.post { session.onDownloaded(session, id, file.name) }
+                200 to JSONObject().put("name", file.name).put("mime", file.mime).put("data", Seal.b64(file.bytes))
             }
-            else -> {
-                r.skipBody()
-                r.text(404, "Not found.", r.head)
-            }
+            else -> 404 to JSONObject().put("error", "op").put("text", "Not found.")
         }
     }
 
@@ -302,17 +361,14 @@ class PhoneServer : HttpServer.Route {
         return if (System.currentTimeMillis() < until) "Too many wrong codes. Wait a while, then try again with the code on the TV." else null
     }
 
-    /** The download's name, kept with its letters for phones that read it, and plain for those that don't. */
-    private fun disposition(name: String): String {
-        val plain = name.map { if (it.code in 32..126 && it != '"' && it != '\\') it else '_' }.joinToString("")
-        val encoded = java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
-        return "attachment; filename=\"$plain\"; filename*=UTF-8''$encoded"
-    }
-
     companion object {
         private const val HOLDER = "phone pages"
         private const val MAX_FILE = 512 * 1024
-        private const val MAX_JSON = 256 * 1024
+        // A file goes as base64 in its request, and sealed.
+        private const val MAX_SEALED = MAX_FILE * 4 / 3 + 64 * 1024
+        private const val MAX_INPUT = 4096
+        private const val MAX_CHANNELS = 64
+        private val AAD = "POST /api/x".toByteArray()
         private const val WAIT_MS = 25_000L
         private const val ANSWER_MS = 45_000L
         private const val WINDOW_MS = 10 * 60_000L

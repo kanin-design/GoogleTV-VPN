@@ -51,6 +51,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -518,7 +519,7 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
     }
     // A backup picked on the TV asks for its passphrase, and a certificate for its password.
     LaunchedEffect(state.pendingRestore) {
-        if (state.pendingRestore != null) nav.overlay = Overlay.Form(restoreSpec(nav, actions))
+        if (state.pendingRestore != null) nav.overlay = Overlay.Form(restoreSpec(nav, actions, Backup.encrypted(state.pendingRestore)))
     }
     LaunchedEffect(state.pendingP12) {
         if (state.pendingP12 != null) nav.overlay = Overlay.Form(p12PasswordSpec(nav, actions))
@@ -568,7 +569,8 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
     }
 
     // One server for every phone page, while the screens are in front.
-    val server = remember { PhoneServer() }
+    val assets = LocalContext.current.applicationContext.assets
+    val server = remember { PhoneServer { assets.open("panel/noble.js").use { String(it.readBytes()) } } }
 
     BackHandler { if (!back(nav, state, actions, server)) actions.exit() }
     LaunchedEffect(nav.refocusTarget) {

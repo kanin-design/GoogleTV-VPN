@@ -17,7 +17,8 @@ import javax.crypto.spec.SecretKeySpec
 /**
  * A .openvpnclientbackup file: every profile with its file and login, and the settings, encrypted
  * with a passphrase (PBKDF2-SHA256, then AES-256-GCM). Only someone with the passphrase can
- * read it, so it is safe to keep on a phone.
+ * read it, so it is safe to keep on a phone. With Settings › Backup › Use a password off, the same
+ * contents go in plain, under "contents", and restore without a passphrase.
  *
  * WireGuard profiles go in an array of their own, "wireguard", so older builds, which read only
  * "profiles", restore the rest and skip them. "position" keeps the order across both.
@@ -28,10 +29,11 @@ object Backup {
 
     // What a backup is known by. It never changes with the app's name, so older backups still restore.
     private const val FORMAT = "tunnel-backup"
-    private const val ITERATIONS = 120_000
+    // For new backups, as OWASP advises for PBKDF2-SHA256; a backup keeps the count it was made with.
+    private const val ITERATIONS = 600_000
 
-    /** The encrypted backup, or null without a passphrase. */
-    fun create(context: Context, passphrase: String): ByteArray {
+    /** The backup, encrypted with [passphrase], or plain without one. */
+    fun create(context: Context, passphrase: String?): ByteArray {
         val s = SettingsStore.load(context)
         val profiles = JSONArray()
         val wireguard = JSONArray()
@@ -81,11 +83,13 @@ object Backup {
             .put("advanced", s.advanced)
             .put("automation", s.automation)
             .put("autoUpdate", s.autoUpdate)
-        val plain = JSONObject().put("format", FORMAT).put("version", 1).put("created", System.currentTimeMillis())
+        val contents = JSONObject().put("format", FORMAT).put("version", 1).put("created", System.currentTimeMillis())
             .put("profiles", profiles).put("settings", settings)
             .apply { if (wireguard.length() > 0) put("wireguard", wireguard) }
-            .toString().toByteArray()
-
+        if (passphrase.isNullOrEmpty()) {
+            return JSONObject().put("format", FORMAT).put("version", 1).put("contents", contents).toString(2).toByteArray()
+        }
+        val plain = contents.toString().toByteArray()
         val salt = random(16)
         val iv = random(12)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key(passphrase, salt), GCMParameterSpec(128, iv)) }
@@ -97,6 +101,9 @@ object Backup {
 
     /** True when [bytes] look like a backup file, before the passphrase is known. */
     fun isBackup(bytes: ByteArray): Boolean = runCatching { JSONObject(String(bytes)).getString("format") == FORMAT }.getOrDefault(false)
+
+    /** True unless [bytes] are a backup made without a password, which restores without one. */
+    fun encrypted(bytes: ByteArray?): Boolean = bytes == null || runCatching { !JSONObject(String(bytes)).has("contents") }.getOrDefault(true)
 
     sealed interface Restored {
         /**
@@ -116,10 +123,10 @@ object Backup {
     private fun open(bytes: ByteArray, passphrase: String): Opened {
         val outer = runCatching { JSONObject(String(bytes)) }.getOrNull()?.takeIf { it.optString("format") == FORMAT }
             ?: return Opened.Problem("This isn’t a ${APP_NAME} backup.")
-        // The file picks its own count; a huge one would keep the TV busy for hours.
-        val iterations = outer.optInt("iterations", ITERATIONS)
+        // The file picks its own count (120 000 in older backups); a huge one would keep the TV busy for hours.
+        val iterations = outer.optInt("iterations", 120_000)
         if (iterations !in 10_000..2_000_000) return Opened.Problem("This backup can’t be read.")
-        val plain = runCatching {
+        val plain = outer.optJSONObject("contents") ?: runCatching {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(
                 Cipher.DECRYPT_MODE,

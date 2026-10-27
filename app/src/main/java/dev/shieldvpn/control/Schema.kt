@@ -186,6 +186,12 @@ object Schema {
             advanced = true,
         ),
         Group(
+            "backup", "Backup", "",
+            listOf(
+                Item("settings.backupPassword", Item.Type.Switch, "Use a password", "Backups are encrypted with the backup passphrase", askTv = { if (it == false) "make backups without a password" else null }),
+            ),
+        ),
+        Group(
             "general", "General", "",
             listOf(
                 Item("settings.advanced", Item.Type.Switch, "Advanced", "OpenVPN, DNS, automation"),
@@ -270,6 +276,7 @@ object Schema {
             "settings.phoneReach" -> st.phoneReach
             "settings.advanced" -> st.advanced
             "settings.autoUpdate" -> st.autoUpdate
+            "settings.backupPassword" -> st.backupPassword
             else -> null
         }
     }

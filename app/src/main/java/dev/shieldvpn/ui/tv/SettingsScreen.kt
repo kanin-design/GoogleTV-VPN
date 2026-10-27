@@ -558,21 +558,28 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                 val last = Words.lastBackup(state.lastBackup)
                 action(scope, "s-bk", Ic.Archive, "Back up to your phone", last) {
                     // Without a passphrase, it is chosen first and the backup follows straight on.
-                    nav.overlay = if (state.hasBackupPassphrase) backupSheet() else Overlay.Form(passphraseSpec(state, nav, actions, thenBackup = true))
+                    nav.overlay = if (state.hasBackupPassphrase || !s.backupPassword) backupSheet(s.backupPassword) else Overlay.Form(passphraseSpec(state, nav, actions, thenBackup = true))
                 }
                 action(scope, "s-rs", Ic.Phone, "Restore a backup", "Send the backup file from your phone") {
                     nav.overlay = Overlay.Phone(
                         "backup", "Settings › Backup", "Restore a backup",
-                        "Scan the code, choose the backup file and type its passphrase there. Its profiles are added to this device; ones here already, exactly the same, are left alone.",
+                        "Scan the code, choose the backup file and type its passphrase there, if it has one. Its profiles are added to this device; ones here already, exactly the same, are left alone.",
                         section = "restore",
                         extra = if (actions.hasFilePicker) "Pick it on a USB drive" to { nav.overlay = null; actions.pickFile() } else null,
                     )
                 }
-                action(scope, "s-bkpass", Ic.Lock, if (state.hasBackupPassphrase) "Change the backup passphrase" else "Choose a backup passphrase", "Backups are encrypted with it; restoring needs it") {
-                    nav.overlay = Overlay.Form(passphraseSpec(state, nav, actions))
+                toggle(
+                    scope, "s-bkpw", "Use a password",
+                    if (s.backupPassword) "Backups are encrypted with the backup passphrase" else "Backups are plain files: anyone with one can read its passwords and keys",
+                    s.backupPassword,
+                ) { actions.changeSettings { it.copy(backupPassword = !it.backupPassword) } }
+                if (s.backupPassword) {
+                    action(scope, "s-bkpass", Ic.Lock, if (state.hasBackupPassphrase) "Change the backup passphrase" else "Choose a backup passphrase", "Backups are encrypted with it; restoring needs it") {
+                        nav.overlay = Overlay.Form(passphraseSpec(state, nav, actions))
+                    }
                 }
                 // Its own row, so the passphrase sheet keeps to three buttons.
-                if (state.hasBackupPassphrase && nav.confirmRemovePass) {
+                if (s.backupPassword && state.hasBackupPassphrase && nav.confirmRemovePass) {
                     item {
                         ConfirmBar(
                             "Remove the backup passphrase? Backups made with it still need it.", "Remove", req["s-bkrm-no"],
@@ -588,7 +595,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                             },
                         )
                     }
-                } else if (state.hasBackupPassphrase) {
+                } else if (s.backupPassword && state.hasBackupPassphrase) {
                     item {
                         ListRow(
                             "Remove the backup passphrase", { nav.confirmRemovePass = true },
@@ -1328,8 +1335,11 @@ private fun backupPhone(state: VpnUiState, nav: Nav, actions: TunnelActions): de
 
 private fun backupForm(state: VpnUiState, nav: Nav, name: String, focus: String?): PhoneForm {
     val staged = nav.staged["backup"]
+    val password = state.settings.backupPassword
+    // A backup made without a password restores without one.
+    val locked = staged != null && Backup.encrypted(staged.bytes)
     val sections = buildList {
-        if (!state.hasBackupPassphrase) {
+        if (password && !state.hasBackupPassphrase) {
             add(
                 if (focus == "pass") {
                     PhoneSection(
@@ -1350,13 +1360,13 @@ private fun backupForm(state: VpnUiState, nav: Nav, name: String, focus: String?
                     PhoneSection(
                         "download", "Back up the TV",
                         note = state.lastBackup?.let { (at, n) -> "The last backup was ${ago(at)}, with $n profile${if (n == 1) "" else "s"}." } ?: "There is no backup yet.",
-                        fields = listOf(PhoneField.Download("backup", name, 0, note = "Encrypted with your passphrase: every profile, saved password and setting.", label = "Download the backup")),
+                        fields = listOf(PhoneField.Download("backup", name, 0, note = if (password) "Encrypted with your passphrase: every profile, saved password and setting." else "Every profile, saved password and setting, not encrypted: keep the file somewhere safe.", label = "Download the backup")),
                     )
                 } else {
                     PhoneSection("download", "Back up the TV", note = "The backup holds every key and password, so it is only sent after you press Back up to your phone on the TV.")
                 },
             )
-            add(
+            if (password) add(
                 PhoneSection(
                     "change", "Change the passphrase", folded = true,
                     fields = listOf(
@@ -1373,14 +1383,14 @@ private fun backupForm(state: VpnUiState, nav: Nav, name: String, focus: String?
                 "restore", "Restore a backup", note = "From this TV or another one. Its profiles are added; ones here already, exactly the same, are left alone.",
                 fields = listOfNotNull(
                     PhoneField.Upload("restorefile", "Choose the backup file", "The .${Backup.EXTENSION} file", ".${Backup.EXTENSION},application/octet-stream,application/json", staged?.let { Staged(it.name, it.bytes.size, "Backup") }),
-                    if (staged != null) PhoneField.Text("rpass", "Its passphrase", secret = true, required = true) else null,
+                    if (locked) PhoneField.Text("rpass", "Its passphrase", secret = true, required = true) else null,
                     if (staged != null) PhoneField.Choice("same", "When a profile with the same name is on the TV", listOf("both" to "Keep both", "replace" to "Replace it"), "both") else null,
                 ),
-                actions = if (staged != null) listOf(PhoneAction("restore", "Restore on the TV", primary = true, needs = listOf("rpass"))) else emptyList(),
+                actions = if (staged != null) listOf(PhoneAction("restore", "Restore on the TV", primary = true, needs = if (locked) listOf("rpass") else emptyList())) else emptyList(),
             ),
         )
     }
-    return PhoneForm("Settings › Backup", "Back up the TV", "Download an encrypted backup of every profile and setting, or restore one.", sections)
+    return PhoneForm("Settings › Backup", "Back up the TV", "Download a backup of every profile and setting${if (password) ", encrypted," else ","} or restore one.", sections)
 }
 
 /** A reason short enough for a check's line. */

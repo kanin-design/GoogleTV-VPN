@@ -596,7 +596,7 @@ object RemoteApi : HttpServer.Route {
             val out = JSONObject().put("ok", true).put("file", u.id).put("name", name)
             when (val w = u.what) {
                 is Inspected.Problem -> out.put("ok", false).put("what", "problem").put("text", w.message)
-                Inspected.Backup -> out.put("what", "backup")
+                Inspected.Backup -> out.put("what", "backup").put("encrypted", dev.shieldvpn.vpn.Backup.encrypted(bytes))
                 Inspected.Pkcs12 -> out.put("what", "p12").put("targets", JSONArray(Control.state.value.let { s ->
                     s.connections.filter { s.servers[it.serverId]?.kind != VpnKind.WireGuard }.map { JSONObject().put("id", it.id).put("name", it.name) }
                 }))
@@ -647,8 +647,9 @@ object RemoteApi : HttpServer.Route {
         pinProblem(req)?.let { return fail(it) }
         val (question, file) = when (what) {
             "backup" -> {
-                if (!Control.state.value.hasBackupPassphrase) return fail("Choose a backup passphrase first, in Settings › Backup.")
-                "download a backup of every profile and saved password" to suspend {
+                val s = Control.state.value
+                if (s.settings.backupPassword && !s.hasBackupPassphrase) return fail("Choose a backup passphrase first, in Settings › Backup.")
+                "download a backup of every profile and saved password${if (s.settings.backupPassword) "" else ", not encrypted"}" to suspend {
                     Control.backupFile()?.let { "$APP_FILE_NAME-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date())}.${dev.shieldvpn.vpn.Backup.EXTENSION}" to it }
                 }
             }

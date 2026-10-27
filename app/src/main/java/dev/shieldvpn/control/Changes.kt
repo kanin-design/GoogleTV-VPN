@@ -124,6 +124,8 @@ object Changes {
         val touched = LinkedHashSet<String>()
         var allTunnels = false
         var allOpenVpn = false
+        // Profiles whose new file takes their saved password off (Control.dropsPassword).
+        val drops = LinkedHashSet<Connection>()
         if (list.length() > MAX_OPS) problems[""] = "That is too many changes at once."
         for (i in 0 until minOf(list.length(), MAX_OPS)) {
             val o = list.optJSONObject(i) ?: continue
@@ -221,6 +223,7 @@ object Changes {
                         continue
                     }
                     lines += Line(op.path, "${c.name} › ${Words.fileTitle(s.servers[c.serverId]?.kind).removePrefix("The ")}", "This one", "From ${u!!.name}")
+                    if (review.username.isEmpty() && Control.dropsPassword(c.id, review.text)) drops += c
                     touched += c.id
                 }
                 "restore" -> {
@@ -284,6 +287,7 @@ object Changes {
                     }
                     op.o.put("path", "profiles.${c.id}")
                     lines += Line("profiles.${c.id}", "${c.name} › Certificate", "The file’s", if (o.optString("keep") == "keystore") "In Android’s keystore" else "From ${u.name}")
+                    if (o.optString("keep") != "keystore" && Control.attachDropsPassword(u.bytes, password, c.id)) drops += c
                     touched += c.id
                 }
                 else -> problem("The TV doesn’t know that change.")
@@ -296,6 +300,9 @@ object Changes {
             ask += merged
         }
         crossChecks(s, ops, problems)
+        for (c in drops) if (ops.none { it.op == "set" && it.path == "profiles.${c.id}.password" && it.value != null }) {
+            notes += "The new file for ${c.name} trusts other servers than its old one, so its saved password is removed. Type it again to connect."
+        }
         // As the TV says before taking the startup slot: the profile that holds it loses it.
         val holder = s.connections.firstOrNull { s.settings.boot && it.id == s.settings.startupId }
         val takesStartup = ops.firstOrNull { op ->
@@ -445,10 +452,12 @@ object Changes {
             val port = list.firstOrNull { it.path.endsWith(".port") }?.value?.toString()?.toIntOrNull() ?: s.servers[c.serverId]?.port ?: continue
             Control.setServer(c.id, host, port)
         }
+        // A password typed along with a new file is saved after it: a file that trusts other servers takes the saved one off.
+        val passwords = p.ops.filter { it.op == "set" && it.path.startsWith("profiles.") && it.path.endsWith(".password") }
         for (op in p.ops) {
             val o = op.o
             when (op.op) {
-                "set" -> if (!op.path.endsWith(".host") && !op.path.endsWith(".port")) set(op.path, op.value)
+                "set" -> if (!op.path.endsWith(".host") && !op.path.endsWith(".port") && op !in passwords) set(op.path, op.value)
                 "delete" -> profileOf(Control.state.value, op.path)?.let { Control.delete(it.id) }
                 "import" -> {
                     val review = (uploads[o.optString("file")]?.what as? Inspected.Profile)?.review ?: return added to "The file is gone. Send it again."
@@ -482,6 +491,7 @@ object Changes {
                 }
             }
         }
+        passwords.forEach { set(it.path, it.value) }
         return added to null
     }
 
@@ -531,6 +541,7 @@ object Changes {
                     "settings.phoneReach" -> st.copy(phoneReach = value as String)
                     "settings.advanced" -> st.copy(advanced = value as Boolean)
                     "settings.autoUpdate" -> st.copy(autoUpdate = value as Boolean)
+                    "settings.backupPassword" -> st.copy(backupPassword = value as Boolean)
                     else -> st
                 }
             }

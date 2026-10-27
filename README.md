@@ -10,14 +10,14 @@ An OpenVPN and WireGuard client for Android TV and Google TV, made for the remot
 
 - **Connects with one press.** Connect shows the current profile, large, with the button you most likely want already focused. Quick connect cards below switch profiles. The background shows where your traffic goes: green from this device through your VPN to the internet while connected, yellow while it connects, and red straight to the internet when off.
 - **OpenVPN and WireGuard, side by side.** A profile is either, by what its file says, and Connect shows which above its name. The kill switch, leak blocking, per-app routing, pause and reconnect work the same for both.
-- **Imports profiles without typing.** Scan a QR code with your phone and pick or paste the `.ovpn` or `.conf` file there (a profile that asks for a username and password asks for them on the phone too, and they arrive with it), send a photo of a WireGuard QR code or a `.zip`, or use a USB drive, Downloads or an HTTPS link. The app works out what arrived: a profile, a backup or a certificate, and which profile a certificate belongs to. A file for a server that is here already offers to update that profile. Every file is checked before it is saved, and a login or key inside it is moved out and encrypted.
+- **Imports profiles without typing.** Scan a QR code with your phone and pick or paste the `.ovpn` or `.conf` file there (a profile that asks for a username and password asks for them on the phone too, and they arrive with it), send a photo of a WireGuard QR code or a `.zip`, or use a USB drive, Downloads or an HTTPS link. The app works out what arrived: a profile, a backup or a certificate, and which profile a certificate belongs to. A file for a server that is here already offers to update that profile. Every file is checked before it is saved, and a login or key inside it is moved out and encrypted. What the phone's page sends and gets is encrypted between it and the TV.
 - **Client certificates.** A `.p12` or `.pfx` file goes into the profile, or into Android's keystore, where the key can sign in but can't be copied off the device. A certificate already installed on the device works too.
 - **Protection.** A kill switch, IPv6 and DNS leak blocking, and the choice to keep casting and devices at home reachable.
 - **Per-app routing.** Let streaming services that block VPNs skip it, or send only the apps you choose through it.
 - **Speed test.** Ping, download and upload through the VPN, on a speedometer, with whether it is fast enough for 4K or HD and how much of your plain connection the VPN keeps.
 - **Everyday controls.** Pause for 15 minutes, connect when the device starts, and reconnect by itself after Wi-Fi changes. There are a connection test, a connection log and connection details.
 - **A control panel on your phone.** Pair a phone once from a QR code, and its browser shows the whole app: status and Connect, every profile and setting, import, backup and the log, also while you watch TV with the VPN on. Every change is previewed first, a tunnel setting can be applied and tested and is put back if the test fails, and anything risky waits for an OK on the remote. Requests are encrypted end to end with a key only the TV and that phone hold.
-- **Backups.** One encrypted file (PBKDF2 and AES-GCM) moves every profile, saved password and setting to a new device through your phone. A restore shows what it adds and changes before it does.
+- **Backups.** One file moves every profile, saved password and setting to a new device through your phone, encrypted with your backup passphrase (PBKDF2 and AES-GCM), or, with Settings › Backup › Use a password off, as a plain file. A restore shows what it adds and changes before it does.
 - **Updates.** Each time it opens, it looks on GitHub for a newer build, by build number, so a build republished under the same version counts too. Settings › About downloads the APK for the device, checks its SHA-256 and installs it; Android asks you to confirm. If the VPN was on, it connects again once the new build is in.
 - **PIN lock** for settings or the whole app, and **automation intents** for home automation apps and ADB.
 - **Remote, keyboard or mouse.** Everything works with the remote; a keyboard types into fields (Enter moves on, as Done does), and a mouse can click anything.
@@ -95,12 +95,12 @@ python3 tools/banner.py Archivo-ExpandedBlack.ttf
 
 ## Privacy
 
-What stays on the device: your profiles and settings, in the app's private storage. Saved passwords and the backup passphrase are encrypted with a key in the device's keystore, and the PIN is kept as a salted hash.
+What stays on the device: your profiles and settings, in the app's private storage. Saved passwords and the backup passphrase are encrypted with a key in the device's keystore, and the PIN is kept as a salted hash. A saved password is only sent to the servers its profile's file trusts: a new file that trusts others (another CA) takes it off, and it is typed again.
 
 What leaves the device:
 - the VPN traffic itself, to the servers named in your profiles;
 - while connected, one request through the tunnel to api.ipify.org (or icanhazip.com), to show the address sites see;
-- files you send to or from your phone, and what a paired phone's panel sends and receives, which stay on your home network (the panel's requests are encrypted with a key only the TV and that phone hold);
+- files you send to or from your phone, and what a paired phone's panel sends and receives, which stay on your home network, encrypted: the panel's with a key only the TV and that phone hold, the code pages' with a key the page and the TV agree when it opens. The pages themselves come over plain HTTP, as a TV can't have a certificate for a home address, so someone who can change traffic on your network (not only listen) could change a page;
 - a speed test, only when you start one: data to and from speed.cloudflare.com;
 - each time the app opens, unless you turn it off in Settings › About: a look at this app's releases on GitHub (api.github.com) for a newer build, and the build itself when you choose to install it.
 

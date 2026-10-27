@@ -1,5 +1,6 @@
 package dev.shieldvpn.remote
 
+import com.wireguard.crypto.Curve25519
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,6 +13,17 @@ class SealTest {
     private fun hex(s: String): ByteArray = s.replace(" ", "").chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 
     private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it) }
+
+    /** The phone pages agree their key with WireGuard's X25519 on the TV and the page's own in JavaScript; both are RFC 7748's. */
+    @Test
+    fun x25519MatchesRfc7748() {
+        val alice = hex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")
+        val bobPublic = hex("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f")
+        val pub = ByteArray(32).also { Curve25519.eval(it, 0, alice, null) }
+        assertEquals("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a", pub.hex())
+        val shared = ByteArray(32).also { Curve25519.eval(it, 0, alice, bobPublic) }
+        assertEquals("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742", shared.hex())
+    }
 
     @Test
     fun aeadMatchesRfc8439() {

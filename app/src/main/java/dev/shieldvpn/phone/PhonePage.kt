@@ -4,14 +4,21 @@ import dev.shieldvpn.APP_NAME
 
 /**
  * The page a phone opens from the TV's QR code: one file, no outside resources, in the app's look.
- * It is the same for every screen. Opened from the QR code, the link carries the code, and the
- * page shows it for the person to check against the TV; typed in by hand, it asks for it. Then it
- * asks the TV for the screen's form, draws it, and draws it again whenever the TV changes it.
+ * It is the same for every screen. Opened from the QR code, the link carries the code in its
+ * fragment, and the page shows it for the person to check against the TV; typed in by hand, it
+ * asks for it. Then it asks the TV for the screen's form, draws it, and draws it again whenever the
+ * TV changes it. Every request after the first is sealed (PhoneServer's [PhoneServer.handle]).
  */
 object PhonePage {
+    @Volatile private var page: String? = null
 
-    /** The page. Nothing about a session is in it: that comes from the TV once the code checks out. */
-    val shell: String by lazy {
+    /**
+     * The page, with [noble] (the panel's noble.js, for HKDF and ChaCha20-Poly1305) inside it.
+     * Nothing about a session is in it: that comes from the TV once the code checks out.
+     */
+    fun shell(noble: () -> String): String = page ?: build(noble()).also { page = it }
+
+    private fun build(noble: String): String =
         """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -26,14 +33,14 @@ $WEB
   <p class="lede" id="lede">Looking for the TV…</p>
   <section class="card" id="codecard"></section>
   <div id="view"></div>
-  <p class="foot">It stays on your home network. This page works while the TV shows its code.</p>
+  <p class="foot">It stays on your home network, encrypted between this page and the TV. This page works while the TV shows its code.</p>
 </main>
+<script>${noble.replace("</", "<\\/")}</script>
 <script>
 const APP = ${org.json.JSONObject.quote(APP_NAME).replace("</", "<\\/")};
 $SCRIPT
 </script>
 </body></html>"""
-    }
 
     private fun esc(s: String): String = s
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
@@ -174,19 +181,167 @@ const size = (n) => n < 1024 ? n + ' bytes' : n < 1048576 ? (n / 1024).toFixed(1
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const json = async (r) => { try { return await r.json(); } catch (e) { return null; } };
 
+// ---- Sealing ------------------------------------------------------------------------------
+// Passwords and keys go this way, so what the page sends and gets is sealed: the page and the TV
+// agree a key with X25519 when it loads, then each request and answer is ChaCha20-Poly1305 with
+// keys from HKDF, as the panel's are (PhoneServer.kt does the other half). The code goes inside.
+// X25519 (RFC 7748), after TweetNaCl's crypto_scalarmult (public domain): numbers mod 2^255-19 as 16 limbs of 16 bits.
+const x25519 = (() => {
+  const gf = (init) => { const r = new Float64Array(16); if (init) r.set(init); return r; };
+  const A121665 = gf([0xdb41, 1]);
+  function car(o) {
+    let c = 1;
+    for (let i = 0; i < 16; i++) {
+      const v = o[i] + c + 65535;
+      c = Math.floor(v / 65536);
+      o[i] = v - c * 65536;
+    }
+    o[0] += c - 1 + 37 * (c - 1);
+  }
+  function swap(p, q, b) {
+    const c = ~(b - 1);
+    for (let i = 0; i < 16; i++) { const t = c & (p[i] ^ q[i]); p[i] ^= t; q[i] ^= t; }
+  }
+  function pack(o, n) {
+    const m = gf(), t = gf(n);
+    car(t); car(t); car(t);
+    for (let j = 0; j < 2; j++) {
+      m[0] = t[0] - 0xffed;
+      for (let i = 1; i < 15; i++) { m[i] = t[i] - 0xffff - ((m[i - 1] >> 16) & 1); m[i - 1] &= 0xffff; }
+      m[15] = t[15] - 0x7fff - ((m[14] >> 16) & 1);
+      const b = (m[15] >> 16) & 1;
+      m[14] &= 0xffff;
+      swap(t, m, 1 - b);
+    }
+    for (let i = 0; i < 16; i++) { o[2 * i] = t[i] & 0xff; o[2 * i + 1] = t[i] >> 8; }
+  }
+  function unpack(o, n) {
+    for (let i = 0; i < 16; i++) o[i] = n[2 * i] + (n[2 * i + 1] << 8);
+    o[15] &= 0x7fff;
+  }
+  const add = (o, a, b) => { for (let i = 0; i < 16; i++) o[i] = a[i] + b[i]; };
+  const sub = (o, a, b) => { for (let i = 0; i < 16; i++) o[i] = a[i] - b[i]; };
+  function mul(o, a, b) {
+    const t = new Float64Array(31);
+    for (let i = 0; i < 16; i++) for (let j = 0; j < 16; j++) t[i + j] += a[i] * b[j];
+    for (let i = 0; i < 15; i++) t[i] += 38 * t[i + 16];
+    for (let i = 0; i < 16; i++) o[i] = t[i];
+    car(o); car(o);
+  }
+  const sq = (o, a) => mul(o, a, a);
+  function inv(o, i) {
+    const c = gf(i);
+    for (let a = 253; a >= 0; a--) { sq(c, c); if (a !== 2 && a !== 4) mul(c, c, i); }
+    o.set(c);
+  }
+  /** The X25519 function: scalar [n] times the point [p], both 32 bytes. */
+  function scalarMult(n, p) {
+    const z = Uint8Array.from(n);
+    z[31] = (z[31] & 127) | 64;
+    z[0] &= 248;
+    const x = gf(), a = gf(), b = gf(), c = gf(), d = gf(), e = gf(), f = gf();
+    unpack(x, p);
+    b.set(x);
+    a[0] = d[0] = 1;
+    for (let i = 254; i >= 0; --i) {
+      const r = (z[i >>> 3] >>> (i & 7)) & 1;
+      swap(a, b, r); swap(c, d, r);
+      add(e, a, c); sub(a, a, c); add(c, b, d); sub(b, b, d);
+      sq(d, e); sq(f, a); mul(a, c, a); mul(c, b, e);
+      add(e, a, c); sub(a, a, c); sq(b, a); sub(c, d, f);
+      mul(a, c, A121665); add(a, a, d); mul(c, c, a); mul(a, d, f); mul(d, b, x); sq(b, e);
+      swap(a, b, r); swap(c, d, r);
+    }
+    inv(c, c);
+    mul(a, a, c);
+    const q = new Uint8Array(32);
+    pack(q, a);
+    return q;
+  }
+  const BASE = new Uint8Array(32); BASE[0] = 9;
+  return { scalarMult, publicKey: (k) => scalarMult(k, BASE) };
+})();
+const enc = new TextEncoder(), dec = new TextDecoder();
+function b64(u8) {
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+const hk = (secret, info) => noble.hkdf(noble.sha256, secret, undefined, enc.encode(info), 32);
+function nonce(dir, n) {
+  const b = new Uint8Array(12);
+  b[0] = dir;
+  const v = new DataView(b.buffer);
+  v.setUint32(4, Math.floor(n / 4294967296));
+  v.setUint32(8, n >>> 0);
+  return b;
+}
+const AAD = enc.encode('POST /api/x');
+let chan = null, agreeing = null, counter = 0;
+
+/** Agrees this page's keys with the TV. Resolves to nothing, or to the TV's refusal as an answer. */
+function agree() {
+  if (!agreeing) {
+    agreeing = (async () => {
+      const secret = crypto.getRandomValues(new Uint8Array(32));
+      const mine = x25519.publicKey(secret);
+      const r = await fetch('/api/hello', post(JSON.stringify({ p: b64(mine) }), 'application/json'));
+      const j = await json(r);
+      if (!r.ok || !j) return { status: r.status, ok: false, j: j };
+      const theirs = unb64(j.t);
+      const ikm = new Uint8Array(96);
+      ikm.set(x25519.scalarMult(secret, theirs));
+      ikm.set(mine, 32);
+      ikm.set(theirs, 64);
+      chan = { h: j.h, up: hk(ikm, 'ovpnc phone up v1'), down: hk(ikm, 'ovpnc phone down v1') };
+      counter = 0;
+    })().finally(() => { agreeing = null; });
+  }
+  return agreeing;
+}
+
 /**
- * Every request to the TV goes through here, so each answer the TV can give is handled once:
- * a wrong or ended code, too many tries, or a refusal said in words.
+ * One sealed request to the TV: [op] and its [fields], with the code. Resolves to the TV's answer
+ * as { status, ok, j }; throws, as fetch does, when the TV can't be reached.
  */
-async function call(url, opts, where) {
+async function request(op, fields, signal, retried) {
+  if (!chan) {
+    const refused = await agree();
+    if (refused) return refused;
+  }
+  const c = chan, n = ++counter;
+  const sealed = noble.chacha20poly1305(c.up, nonce(0, n), AAD).encrypt(enc.encode(JSON.stringify(Object.assign({ c: code, op: op }, fields || {}))));
+  const r = await fetch('/api/x?h=' + c.h + '&n=' + n, { method: 'POST', headers: { 'X-Phone': '1', 'Content-Type': 'application/octet-stream' }, body: sealed, signal: signal, cache: 'no-store' });
+  if (r.status === 401 && !retried) {
+    const j = await json(r);
+    // The TV forgot this page's key (it started again, or many pages came since): agree a new one.
+    if (j && j.error === 'counter') counter = Math.max(counter, j.next - 1);
+    else if (chan === c) chan = null;
+    return request(op, fields, signal, true);
+  }
+  if (r.status !== 200 || (r.headers.get('content-type') || '').indexOf('octet-stream') < 0) return { status: r.status, ok: false, j: await json(r) };
+  try {
+    const a = JSON.parse(dec.decode(noble.chacha20poly1305(c.down, nonce(1, n), AAD).decrypt(new Uint8Array(await r.arrayBuffer()))));
+    return { status: a.s, ok: a.s >= 200 && a.s < 300, j: a.j };
+  } catch (e) {
+    return { status: 502, ok: false, j: null };
+  }
+}
+
+/**
+ * Every request to the TV but the page's own waiting goes through here, so each answer the TV can
+ * give is handled once: a wrong or ended code, too many tries, or a refusal said in words.
+ */
+async function call(op, fields, where) {
   let r;
   try {
-    r = await fetch(url, opts);
+    r = await request(op, fields);
   } catch (e) {
     showStatus(where, { kind: 'error', text: OFFLINE });
     return null;
   }
-  const j = (r.headers.get('content-type') || '').startsWith('application/json') ? await json(r) : null;
+  const j = r.j;
   if (r.status === 403 && j && j.error === 'code') { wrongCode(j.text); return null; }
   if (r.status === 410) { pollId++; stateView('ended'); return null; }
   if (r.status === 429) { stateView('wait', j && j.text); return null; }
@@ -198,7 +353,7 @@ async function call(url, opts, where) {
 const post = (body, type) => ({ method: 'POST', headers: Object.assign({ 'X-Phone': '1' }, type ? { 'Content-Type': type } : {}), body: body });
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
-const fromLink = (new URLSearchParams(location.search).get('c') || '').replace(/\D/g, '').slice(0, 6);
+const fromLink = (new URLSearchParams(location.hash.slice(1)).get('c') || '').replace(/\D/g, '').slice(0, 6);
 let code = fromLink;
 let rev = 0, form = null, pollId = 0, sending = null, lastFocus = null, statusNow = null, view = 'none';
 // What the person typed, by field, and whether it differs from what the TV last said.
@@ -256,7 +411,7 @@ async function poll() {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 30000);
     try {
-      r = await fetch('/api/state?c=' + code + '&rev=' + rev, { cache: 'no-store', signal: ctl.signal });
+      r = await request('state', { rev: rev }, ctl.signal);
     } catch (e) {
       clearTimeout(timer);
       await failed(ctl.signal.aborted);
@@ -265,11 +420,11 @@ async function poll() {
     clearTimeout(timer);
     if (me !== pollId) return;
     if (r.ok) failSince = 0;
-    if (r.status === 403) { const j = await json(r); pollId++; return wrongCode(j && j.text); }
+    if (r.status === 403) { pollId++; return wrongCode(r.j && r.j.text); }
     if (r.status === 410) { pollId++; return stateView('ended'); }
-    if (r.status === 429) { const j = await json(r); stateView('wait', j && j.text); rev = 0; await sleep(60000); continue; }
+    if (r.status === 429) { stateView('wait', r.j && r.j.text); rev = 0; await sleep(60000); continue; }
     if (!r.ok) { await failed(); continue; }
-    const s = await json(r);
+    const s = r.j;
     if (!s) { await sleep(1000); continue; }
     apply(s);
   }
@@ -425,7 +580,7 @@ function edit(f, value) {
   if (f.mirror) {
     clearTimeout(mirrorTimers[f.id]);
     mirrorTimers[f.id] = setTimeout(() => {
-      fetch('/api/input?c=' + code, post(JSON.stringify({ field: f.id, value: value }), 'application/json')).catch(() => {});
+      request('input', { field: f.id, value: value }).catch(() => {});
     }, 200);
   }
 }
@@ -729,7 +884,7 @@ async function act(a, sec) {
   readiness();
   lock(true);
   showStatus(sec.id, { kind: 'busy', text: 'Sending…' });
-  const got = await call('/api/act?c=' + code, post(JSON.stringify({ action: a.id, section: sec.id, values: values() }), 'application/json'), sec.id);
+  const got = await call('act', { action: a.id, section: sec.id, values: values() }, sec.id);
   if (got) settle(got.j, sec.id);
   sending = null;
   lock(false);
@@ -753,8 +908,9 @@ async function shrink(file) {
 async function upload(f, sec, blob, name) {
   showStatus(sec.id, { kind: 'busy', text: 'Sending ' + name + '…' });
   blob = await shrink(blob);
-  const url = '/api/file?c=' + code + '&field=' + encodeURIComponent(f.id) + '&section=' + encodeURIComponent(sec.id) + '&name=' + encodeURIComponent(name);
-  const got = await call(url, post(blob), sec.id);
+  if (blob.size > 512 * 1024) return showStatus(sec.id, { kind: 'error', text: 'That file is too large. A profile, backup or certificate is much smaller.' });
+  const data = b64(new Uint8Array(await blob.arrayBuffer()));
+  const got = await call('file', { field: f.id, section: sec.id, name: name, data: data }, sec.id);
   if (!got) return;
   if (got.j && got.j.ok && f.type === 'paste') dirty[f.id] = false;
   settle(got.j, sec.id);
@@ -764,9 +920,9 @@ async function upload(f, sec, blob, name) {
 async function download(id, name, where, b) {
   if (b) b.disabled = true;
   showStatus(where, { kind: 'busy', text: 'Downloading…' });
-  const got = await call('/api/download?c=' + code + '&id=' + encodeURIComponent(id) + '&section=' + encodeURIComponent(where), { cache: 'no-store' }, where);
+  const got = await call('download', { id: id, section: where }, where);
   if (got) {
-    const url = URL.createObjectURL(await got.r.blob());
+    const url = URL.createObjectURL(new Blob([unb64(got.j.data)], { type: got.j.mime }));
     const a = document.createElement('a');
     a.href = url;
     a.download = name;

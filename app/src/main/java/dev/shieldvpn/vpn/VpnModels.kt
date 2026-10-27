@@ -209,6 +209,8 @@ data class AppSettings(
     val automation: Boolean = false,
     /** Look for a newer build on GitHub each time the app opens. */
     val autoUpdate: Boolean = true,
+    /** Backups are encrypted with the backup passphrase; off, they are plain files. Not in backups. */
+    val backupPassword: Boolean = true,
     /** When paired phones can reach the TV: [REACH_OPEN] or [REACH_VPN]. Not in backups. */
     val phoneReach: String = REACH_VPN,
 ) {

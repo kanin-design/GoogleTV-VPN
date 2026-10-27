@@ -268,7 +268,7 @@ private fun ColumnScope.PhonePanel(nav: Nav, actions: TunnelActions, req: Reques
             Text(
                 when (item) {
                     is ImportItem.Profile -> "${item.review.name} is on your phone’s page: name it and send it there, or check it here."
-                    is ImportItem.Backup -> "A backup is on your phone’s page: type its passphrase there, or here."
+                    is ImportItem.Backup -> if (Backup.encrypted(item.bytes)) "A backup is on your phone’s page: type its passphrase there, or here." else "A backup is on your phone’s page: restore it there, or here."
                     is ImportItem.Pkcs12 -> "A certificate is on your phone’s page: type its password there, or here."
                 },
                 style = TvType.ui(15.5f, FontWeight.SemiBold),
@@ -437,14 +437,16 @@ fun dropReview(nav: Nav, actions: TunnelActions, session: PhoneSession?) {
 /** Puts the file under review in place of [into]'s, which keeps its name and settings. */
 fun updateImport(nav: Nav, actions: TunnelActions, session: PhoneSession?, into: Connection): Boolean {
     val review = actions.stateNow().review ?: return false
+    val drops = review.username.isEmpty() && Control.dropsPassword(into.id, review.text)
     if (!Control.updateProfile(into.id, review)) return false
     actions.cancelReview()
     nav.importItem = null
     session?.tvLine = "Updated ${into.name}"
     session?.holdFor(PhoneServer.KEEP_MS)
-    session?.say(PhoneStatus.done("${into.name} is updated on the TV with the new file."))
+    val dropped = if (drops) " The new file trusts other servers than the old one, so its saved password is removed. Type it again to connect." else ""
+    session?.say(PhoneStatus.done("${into.name} is updated on the TV with the new file.$dropped"))
     session?.rebuild?.invoke()
-    nav.toast("Updated ${into.name}")
+    nav.toast(if (drops) "Updated ${into.name}. Type its password again: the new file trusts other servers." else "Updated ${into.name}")
     nav.go(Screen.Profiles, focusContent = false)
     nav.profFocus = into.id
     nav.moveStackFocus("pl-${into.id}")
@@ -666,14 +668,18 @@ fun importForm(state: VpnUiState, nav: Nav): PhoneForm {
                 actions = listOf(PhoneAction("send", "Send to the TV", primary = true, needs = listOf("name"))),
             )
         }
-        is ImportItem.Backup -> sections += PhoneSection(
-            "backup", "Restore this backup", note = "It holds the profiles, saved passwords and settings of the device it came from.",
-            fields = listOf(
-                PhoneField.Text("passphrase", "Its passphrase", secret = true, required = true),
-                PhoneField.Choice("same", "When a profile with the same name is on the TV", listOf("both" to "Keep both", "replace" to "Replace it"), "both"),
-            ),
-            actions = listOf(PhoneAction("restore", "Restore on the TV", primary = true, needs = listOf("passphrase"))),
-        )
+        is ImportItem.Backup -> {
+            // A backup made without a password restores without one.
+            val locked = Backup.encrypted(item.bytes)
+            sections += PhoneSection(
+                "backup", "Restore this backup", note = "It holds the profiles, saved passwords and settings of the device it came from.",
+                fields = listOfNotNull(
+                    if (locked) PhoneField.Text("passphrase", "Its passphrase", secret = true, required = true) else null,
+                    PhoneField.Choice("same", "When a profile with the same name is on the TV", listOf("both" to "Keep both", "replace" to "Replace it"), "both"),
+                ),
+                actions = listOf(PhoneAction("restore", "Restore on the TV", primary = true, needs = if (locked) listOf("passphrase") else emptyList())),
+            )
+        }
         is ImportItem.Pkcs12 -> sections += if (state.connections.isEmpty()) {
             PhoneSection("p12", "Add this certificate", fields = listOf(PhoneField.Info("none", text = "There is no profile on the TV yet. Add the profile first, then its certificate.", tone = "warn")))
         } else {

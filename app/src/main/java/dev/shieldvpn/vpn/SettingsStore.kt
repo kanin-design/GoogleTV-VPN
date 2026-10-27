@@ -40,6 +40,7 @@ object SettingsStore {
             searchDomains = p.getString("searchDomains", "")?.split(' ')?.filter { it.isNotBlank() } ?: emptyList(),
             automation = p.getBoolean("automation", d.automation),
             autoUpdate = p.getBoolean("autoUpdate", d.autoUpdate),
+            backupPassword = p.getBoolean("backupPassword", d.backupPassword),
             phoneReach = p.getString("phoneReach", d.phoneReach) ?: d.phoneReach,
         )
     }
@@ -72,6 +73,7 @@ object SettingsStore {
             .putString("searchDomains", s.searchDomains.joinToString(" "))
             .putBoolean("automation", s.automation)
             .putBoolean("autoUpdate", s.autoUpdate)
+            .putBoolean("backupPassword", s.backupPassword)
             .putString("phoneReach", s.phoneReach)
             .apply()
         syncReach(context, s.phoneReach)

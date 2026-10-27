@@ -35,6 +35,8 @@ object ServerStore {
     private val INLINE_LOGIN = Regex("<auth-user-pass>([\\s\\S]*?)</auth-user-pass>")
     private val SECRET_BLOCK = Regex("<(key|tls-auth|tls-crypt|tls-crypt-v2|secret|pkcs12)>[\\s\\S]*?</\\1>")
     private val CERT_BLOCK = Regex("<cert>([\\s\\S]*?)</cert>")
+    private val TRUST_BLOCK = Regex("<(ca|pkcs12|peer-fingerprint)>([\\s\\S]*?)</\\1>")
+    private val TRUST_LINES = setOf("ca", "pkcs12", "peer-fingerprint", "verify-x509-name", "remote-cert-tls", "remote-cert-ku", "remote-cert-eku", "ns-cert-type", "tls-verify", "verify-hash")
 
     // A valid key, all zeros, put in a stored WireGuard file only to read the rest of it.
     private const val PLACEHOLDER_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -166,6 +168,17 @@ object ServerStore {
 
     fun hasCertificate(config: String): Boolean =
         "<ca>" in config || "<pkcs12>" in config || config.lineSequence().any { it.trim().startsWith("ca ") }
+
+    /**
+     * What decides which servers an OpenVPN file believes: its CA (inline, or in a pkcs12), a peer
+     * fingerprint, and the checks on the server's certificate. A saved password is only sent to a
+     * server these vouch for, so two files with different ones send it to different servers.
+     */
+    fun trust(config: String): String {
+        val blocks = TRUST_BLOCK.findAll(config).map { "${it.groupValues[1]} ${it.groupValues[2].filterNot(Char::isWhitespace)}" }
+        val lines = config.lineSequence().map { it.trim().split(WHITESPACE).joinToString(" ") }.filter { it.substringBefore(' ') in TRUST_LINES }
+        return (blocks + lines).sorted().joinToString("\n")
+    }
 
     /** The file carries its own client certificate, inline or as a cert or pkcs12 line. */
     fun hasClientCertificate(config: String): Boolean =

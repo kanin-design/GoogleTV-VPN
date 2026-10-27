@@ -799,7 +799,8 @@
     }
     const advanced = valueOf('settings.advanced') === true;
     SCHEMA.groups.forEach((g) => {
-      if (g.advanced && !advanced) return;
+      // Backup's switch goes in its own card, below.
+      if (g.advanced && !advanced || g.id === 'backup') return;
       const items = g.items.filter((i) => advanced || !i.advanced);
       if (!items.length) return;
       main.append(el('div', 'section', g.label === 'General' ? 'General' : g.label));
@@ -846,7 +847,19 @@
 
   function backupCard() {
     const card = el('section', 'card');
-    card.append(el('p', 'lede', S.backup.last + '. Backups are encrypted with your passphrase and hold every profile, saved password and setting.'));
+    // As the TV has it now: a switch changed here applies with the review.
+    const password = settingValue('settings.backupPassword') !== false;
+    const item = schemaItem('settings.backupPassword');
+    card.append(el('p', 'lede', S.backup.last + (password
+      ? '. Backups are encrypted with your passphrase and hold every profile, saved password and setting.'
+      : '. Backups hold every profile, saved password and setting, not encrypted: anyone with the file can read them.')));
+    if (item) card.append(field(item.path, item));
+    if (!password) {
+      add(card, add(el('div', 'actions'),
+        button('Download a backup', '', () => download({ what: 'backup' })),
+        button('Restore a backup', 'ghost', () => { location.hash = '#/add/restore'; })));
+      return card;
+    }
     const pass = keepTyped(el('input', 'input'), 'backup:new');
     pass.type = 'password';
     pass.autocomplete = 'new-password';
@@ -992,10 +1005,13 @@
       return card;
     }
     if (a.what === 'backup') {
-      add(card, el('h2', null, 'A backup: ' + a.name), el('p', 'lede', 'Type its passphrase. You see what it adds and changes before anything happens.'));
+      // A backup made without a password restores without one.
+      const locked = a.encrypted !== false;
+      add(card, el('h2', null, 'A backup: ' + a.name), el('p', 'lede', (locked ? 'Type its passphrase. ' : '') + 'You see what it adds and changes before anything happens.'));
       const pass = keepTyped(el('input', 'input'), k + 'pass');
       pass.type = 'password';
       pass.placeholder = 'The backup’s passphrase';
+      pass.hidden = !locked;
       // The narrower choice first: settings come along only when asked for.
       const what = segmented([['profiles', 'Profiles only'], ['all', 'Profiles and settings']], 'profiles', k + 'what');
       const sameName = segmented([['both', 'Keep both'], ['replace', 'Replace it']], 'both', k + 'same');

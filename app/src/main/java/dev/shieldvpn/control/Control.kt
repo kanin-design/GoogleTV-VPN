@@ -272,10 +272,33 @@ object Control {
     }
 
     fun forgetPassword(id: String) {
+        dropPassword(id)
+        refresh()
+    }
+
+    private fun dropPassword(id: String) {
         CredentialStore.save(app, id, CredentialStore.username(app, id), "")
         // It can't connect by itself without it.
         if (_state.value.settings.startupId == id) dropStartup(id)
-        refresh()
+    }
+
+    /**
+     * Whether [text] in place of profile [id]'s file drops its saved password: the new file trusts
+     * other servers (another CA, or weaker checks on the server's certificate), which the password
+     * would go to. Whoever changes the file, a phone or a file on a USB drive, has to type it again.
+     */
+    fun dropsPassword(id: String, text: String): Boolean {
+        val c = connection(id) ?: return false
+        if (!CredentialStore.hasPassword(app, id) || _state.value.servers[c.serverId]?.kind == VpnKind.WireGuard) return false
+        val raw = ServerStore.rawConfig(app, c.serverId) ?: return false
+        return ServerStore.trust(raw) != ServerStore.trust(text)
+    }
+
+    /** Whether attaching the .p12 in [bytes] to profile [id] drops its saved password, as [dropsPassword] says. */
+    suspend fun attachDropsPassword(bytes: ByteArray, password: String, id: String): Boolean {
+        val bundle = (withContext(Dispatchers.Default) { Certificates.readPkcs12(bytes, password) } as? Certificates.Read.Done)?.bundle ?: return false
+        val raw = connection(id)?.let { ServerStore.rawConfig(app, it.serverId) } ?: return false
+        return dropsPassword(id, Certificates.attach(raw, bundle))
     }
 
     fun setServer(id: String, host: String, port: Int) {
@@ -444,7 +467,10 @@ object Control {
         val c = connection(id) ?: return "That profile is gone."
         val server = ownServer(id) ?: return "The profile's file is missing."
         val config = ServerStore.rawConfig(app, server.id) ?: return "The profile's file is missing."
-        ServerStore.replaceConfig(app, server.id, Certificates.attach(config, bundle))
+        val text = Certificates.attach(config, bundle)
+        val drop = dropsPassword(id, text)
+        ServerStore.replaceConfig(app, server.id, text)
+        if (drop) dropPassword(id)
         // The file's own certificate is used again.
         val before = c.keyAlias
         ConnectionStore.update(app, id) { it.copy(keyAlias = null) }
@@ -517,14 +543,17 @@ object Control {
     /**
      * Puts [review]'s file in place of profile [id]'s, keeping its name, look and settings; a login or
      * key in the review replaces the saved one. Advanced's server change goes back to the file's.
+     * A saved password stays only when the new file believes the same servers ([dropsPassword]).
      */
     fun updateProfile(id: String, review: ImportReview): Boolean {
         val c = connection(id) ?: return false
         val server = ownServer(id) ?: return false
         if (review.problem != null) return false
+        val drop = dropsPassword(id, review.text)
         ServerStore.replaceConfig(app, server.id, review.text)
         ServerStore.resetToFile(app, server.id)
         if (review.username.isNotEmpty()) CredentialStore.save(app, c.id, review.username, review.password)
+        else if (drop) dropPassword(id)
         review.wgSecrets?.let { CredentialStore.saveWireGuard(app, c.id, it) }
         publicKeys.remove(id)
         ConnectionStore.update(app, id) { it.copy(lastError = null) }
@@ -565,9 +594,12 @@ object Control {
         refresh()
     }
 
-    /** The encrypted backup to send to a phone, or null until a passphrase is set. */
+    /**
+     * The backup to send to a phone: encrypted with the backup passphrase, or plain with Use a
+     * password off. Null while a password is used and none is chosen yet.
+     */
     suspend fun backupFile(): ByteArray? {
-        val passphrase = CredentialStore.secret(app, BACKUP_SECRET) ?: return null
+        val passphrase = if (!_state.value.settings.backupPassword) null else CredentialStore.secret(app, BACKUP_SECRET) ?: return null
         return withContext(Dispatchers.Default) { Backup.create(app, passphrase) }
     }
 

@@ -320,12 +320,16 @@ fun passphraseSpec(state: VpnUiState, nav: Nav, actions: TunnelActions, thenBack
     ) { v, _ -> next(setPassphrase(state, actions, nav, v["pass1"].orEmpty(), v["pass2"].orEmpty())) }
 }
 
-/** The Backup screen's phone code, pointing at the download. */
-fun backupSheet(): Overlay.Phone = Overlay.Phone(
+/** The Backup screen's phone code, pointing at the download; [encrypted] unless Use a password is off. */
+fun backupSheet(encrypted: Boolean = true): Overlay.Phone = Overlay.Phone(
     key = "backup",
     eyebrow = "Settings › Backup",
     title = "Back up to your phone",
-    lede = "Scan the code and press Download. Your phone gets one encrypted file with every profile and setting; restoring it needs the backup passphrase.",
+    lede = if (encrypted) {
+        "Scan the code and press Download. Your phone gets one encrypted file with every profile and setting; restoring it needs the backup passphrase."
+    } else {
+        "Scan the code and press Download. Your phone gets one file with every profile and setting, not encrypted: anyone with it can read its passwords and keys."
+    },
     section = "download",
 )
 
@@ -346,12 +350,12 @@ fun restoredText(r: Backup.Restored.Done): String {
     return parts.joinToString(", ")
 }
 
-/** A backup picked on the TV: its passphrase. */
-fun restoreSpec(nav: Nav, actions: TunnelActions): FormSpec = FormSpec(
+/** A backup picked on the TV: its passphrase, when it was made with one ([encrypted]). */
+fun restoreSpec(nav: Nav, actions: TunnelActions, encrypted: Boolean = true): FormSpec = FormSpec(
     eyebrow = "Import › Restore",
     title = "Restore a backup",
-    sub = "Type the passphrase it was made with. Its profiles are added to this device; ones already here, exactly the same, are left alone.",
-    fields = listOf(FormField("passphrase", "Passphrase", secret = true)),
+    sub = (if (encrypted) "Type the passphrase it was made with. " else "") + "Its profiles are added to this device; ones already here, exactly the same, are left alone.",
+    fields = if (encrypted) listOf(FormField("passphrase", "Passphrase", secret = true)) else emptyList(),
     primary = "Restore",
     busyLabel = "Restoring…",
     toggle = FormToggle("Replace", "Profiles with the same name", false),
