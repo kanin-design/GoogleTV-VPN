@@ -41,7 +41,7 @@ The screenshots use demo profiles on the Android TV emulator. The speed test is 
 Download the APK from [Releases](https://github.com/kanin-design/GoogleTV-VPN/releases) and sideload it: with `adb install`, or with a downloader app on the device.
 
 ```
-adb install opentvpn-0.2.1-alpha-arm64.apk
+adb install opentvpn-0.2.2-alpha-arm64.apk
 ```
 
 It needs Android TV or Google TV on Android 9 or newer, on ARM. There is one APK for each kind of chip: `arm64` for 64-bit Android, such as the NVIDIA Shield, and `armv7` for 32-bit Android, which some Google TV devices run, the Chromecast with Google TV among them. If you are not sure, `adb shell getprop ro.product.cpu.abi` says which: `arm64-v8a` or `armeabi-v7a`.
