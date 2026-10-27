@@ -427,11 +427,24 @@
   window.addEventListener('hashchange', () => { window.scrollTo(0, 0); draw(true); });
   document.querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => { location.hash = '#/' + b.dataset.tab; }; });
 
-  function tag(kind, label) { return el('span', 'tag ' + (kind === 'wireguard' ? 'wg' : 'ovpn'), label); }
   function stateChip(tone, word) {
     const s = el('span', 'state ' + ({ on: 'on', busy: 'busy', bad: 'bad' }[tone] || ''));
     s.append(el('i'), document.createTextNode(word));
     return s;
+  }
+  /** The state under a name, said once; a tunnel that is up counts its time after it. */
+  function stateLine(tone, word, since) {
+    const line = add(el('p', 'state-line'), stateChip(tone, word));
+    if (since) {
+      const s = el('span', 'since', ' · ' + hms(Date.now() - since));
+      s.id = 'since';
+      line.append(s);
+    }
+    return line;
+  }
+  /** A list row's second line: the state while it matters, else when it was last used. */
+  function rowStatus(p) {
+    return p.status.tone === 'off' ? el('small', null, p.status.line) : stateChip(p.status.tone, p.status.word);
   }
   function button(text, cls, onclick, icon) {
     const b = el('button', 'btn ' + (cls || ''));
@@ -456,9 +469,9 @@
   // ---- Status --------------------------------------------------------------------------------
   function heroWords(t, p) {
     switch (t.status) {
-      case 'connected': return ['on', 'Connected', 'Connected · ' + hms(Date.now() - t.since)];
+      case 'connected': return ['on', 'Connected', ''];
       case 'connecting': return ['busy', 'Connecting…', p && p.server ? 'Reaching ' + p.server.split(' · ')[0] : 'Reaching the server'];
-      case 'paused': return ['busy', 'Paused', 'Paused until ' + clock(t.pausedUntil) + '. Traffic goes directly to the internet until then.'];
+      case 'paused': return ['busy', 'Paused', 'Until ' + clock(t.pausedUntil) + '. Traffic goes directly to the internet until then.'];
       case 'blocked': return ['bad', 'Blocking traffic', 'The tunnel dropped. The kill switch holds traffic back until it is back.'];
       case 'failed': return ['bad', 'Couldn’t connect', [t.error, t.advice && !(t.error || '').includes(t.advice) ? t.advice + '.' : ''].filter(Boolean).join(' ')];
       default: return ['', 'Not connected', p ? p.status.line : ''];
@@ -470,29 +483,27 @@
     const p = profile(t.profile) || profile(S.active);
     if (!p) {
       add(main, el('h1', null, 'No profiles yet'), el('p', 'lede', 'Add one from this phone: a .ovpn or WireGuard .conf file, a QR code picture, or pasted text.'));
-      main.append(add(el('div', 'actions'), button('Add a profile', 'mint', () => { location.hash = '#/add'; }, ICON.plus)));
+      main.append(add(el('div', 'actions'), button('Add a profile', '', () => { location.hash = '#/add'; }, ICON.plus)));
       return;
     }
     const [tone, word, why] = heroWords(t, p);
     const live = t.status === 'connected' || t.status === 'connecting' || t.status === 'blocked';
-    const hero = add(el('section', 'card hero'),
-      add(el('div', 'row1'), tag(p.kind, p.kindLabel), stateChip(tone, word)),
-      el('h1', null, p.name));
-    const w = el('p', 'why' + (tone === 'bad' ? ' bad' : ''), why);
-    w.id = 'why';
-    hero.append(w);
+    const hero = add(el('section', 'card hero'), el('h1', null, p.name), stateLine(tone, word, t.status === 'connected' ? t.since : 0));
+    if (why) hero.append(el('p', 'why' + (tone === 'bad' ? ' bad' : ''), why));
     const facts = el('dl', 'facts');
+    // The kind of VPN goes with its server, the one place it says something.
+    const server = p.kindLabel + ' server';
     if (t.status === 'connected') {
       add(facts, fact('VPN IP', t.ip || 'Looking it up…'), fact('Tunnel IP', t.address || '–'),
-        fact('Server', p.server || '–', true), fact('Traffic', '–', true, 'bytes'));
+        fact(server, p.server || '–', true), fact('Traffic', '–', true, 'bytes'));
     } else {
-      add(facts, fact('Server', p.server || '–', true), fact('Sign-in', p.signIn.summary, true, null, true));
+      add(facts, fact(server, p.server || '–', true), fact('Sign-in', p.signIn.summary, true, null, true));
     }
     hero.append(facts);
     const actions = el('div', 'actions');
     // The TV's buttons for each state, in its words.
     if (t.status === 'paused') {
-      add(actions, button('Resume now', 'mint', () => act('resume'), ICON.power),
+      add(actions, button('Resume now', '', () => act('resume'), ICON.power),
         add(el('div', 'pair'), button('15 more minutes', 'ghost', () => act('pauseMore')), button('Disconnect', 'ghost', () => act('disconnect'))));
     } else if (t.status === 'connecting') {
       add(actions, button('Cancel', '', () => act('disconnect'), ICON.power));
@@ -500,7 +511,7 @@
       add(actions, button('Disconnect', '', () => act('disconnect'), ICON.power),
         add(el('div', 'pair'), button('Pause 15 minutes', 'ghost', () => act('pause')), button('Test', 'ghost', runTest)));
     } else {
-      add(actions, button(t.status === 'failed' ? 'Try again' : 'Connect', 'mint', () => connect(p.id), ICON.power));
+      add(actions, button(t.status === 'failed' ? 'Try again' : 'Connect', '', () => connect(p.id), ICON.power));
     }
     hero.append(actions);
     main.append(hero);
@@ -513,7 +524,7 @@
       const rows = el('div', 'rows');
       others.forEach((o) => {
         const r = el('div', 'row');
-        const txt = add(el('div', 'txt'), add(el('div', 'meta'), tag(o.kind, o.kindLabel)), el('b', null, o.name), el('small', null, o.status.line));
+        const txt = add(el('div', 'txt'), el('b', null, o.name), el('small', null, o.status.line));
         r.append(txt);
         r.append(button('Connect', 'ghost small', () => connect(o.id)));
         txt.onclick = () => { location.hash = '#/p/' + o.id; };
@@ -533,8 +544,8 @@
     tick();
   }
   function tick() {
-    const w = $('why');
-    if (w && S && S.tunnel.status === 'connected' && route()[0] === 'status') w.textContent = 'Connected · ' + hms(Date.now() - S.tunnel.since);
+    const w = $('since');
+    if (w && S && S.tunnel.status === 'connected' && route()[0] === 'status') w.textContent = ' · ' + hms(Date.now() - S.tunnel.since);
   }
   setInterval(tick, 1000);
 
@@ -590,7 +601,7 @@
     keepRow.querySelector('input').style.display = 'block';
     if (S.lock.locks) keepRow.hidden = true;
     add(s, user, pw, keepRow, add(el('div', 'actions'),
-      button('Connect', 'mint', () => connect(id, { username: user.value, password: pw.value, remember: keep.checked }), ICON.power),
+      button('Connect', '', () => connect(id, { username: user.value, password: pw.value, remember: keep.checked }), ICON.power),
       button('Cancel', 'ghost', closeSheet)));
     user.focus();
   }
@@ -604,8 +615,7 @@
     S.profiles.forEach((p) => {
       const r = el('button', 'row' + ([...draft.keys()].some((k) => k.startsWith('profiles.' + p.id)) ? ' changed' : ''));
       r.type = 'button';
-      add(r, add(el('div', 'txt'), add(el('div', 'meta'), tag(p.kind, p.kindLabel), stateChip(p.status.tone, p.status.word)), el('b', null, p.name),
-        el('small', null, [p.server, p.signIn.summary].filter(Boolean).join(' · '))), el('span', 'chev'));
+      add(r, add(el('div', 'txt'), el('b', null, p.name), rowStatus(p), el('small', 'mono', [p.kindLabel, p.server].filter(Boolean).join(' · '))), el('span', 'chev'));
       r.onclick = () => { location.hash = '#/p/' + p.id; };
       rows.append(r);
     });
@@ -623,10 +633,11 @@
     }
     const t = S.tunnel;
     const mine = t.profile === p.id && t.status !== 'disconnected';
-    const head = add(el('section', 'card hero'), add(el('div', 'row1'), tag(p.kind, p.kindLabel), stateChip(p.status.tone, p.status.word)), el('h1', null, p.name),
-      el('p', 'why' + (p.status.tone === 'bad' ? ' bad' : ''), p.status.detail || p.server));
+    const head = add(el('section', 'card hero'), el('h1', null, p.name), stateLine(p.status.tone, p.status.word, 0),
+      p.status.detail ? el('p', 'why' + (p.status.tone === 'bad' ? ' bad' : ''), p.status.detail) : null,
+      el('p', 'meta-line', [p.kindLabel, p.server].filter(Boolean).join(' · ')));
     const live = mine && (t.status === 'connected' || t.status === 'connecting' || t.status === 'blocked');
-    head.append(add(el('div', 'actions'), live ? button('Disconnect', '', () => act('disconnect'), ICON.power) : button('Connect', 'mint', () => connect(p.id), ICON.power)));
+    head.append(add(el('div', 'actions'), live ? button('Disconnect', '', () => act('disconnect'), ICON.power) : button('Connect', '', () => connect(p.id), ICON.power)));
     main.append(head);
     main.append(el('div', 'section', 'Options'));
     const card = el('section', 'card tight');
@@ -950,7 +961,7 @@
     const finished = () => { arrived = null; forgetTyped('add:'); };
     if (a.what === 'profile') {
       const rv = a.review;
-      add(card, add(el('div', 'meta'), tag(rv.kind, rv.kindLabel)), el('h2', null, rv.name));
+      add(card, el('span', 'eyebrow', rv.kindLabel + ' profile'), el('h2', null, rv.name));
       // Named after its server, the name says the address already: the line under it adds the rest.
       const rest = rv.server.startsWith(rv.name + ':') ? 'Port ' + rv.server.slice(rv.name.length + 1) : rv.server;
       add(card, el('p', 'lede', rest), rv.note ? el('p', 'lede', rv.note) : null);
@@ -985,9 +996,9 @@
       const acts = el('div', 'actions');
       if (a.same) {
         card.append(el('p', 'info', a.same.name + ' is for the same server. Update it with this file, or add this as a new profile.'));
-        acts.append(button('Update ' + a.same.name, 'mint', () => review([{ op: 'update', file: a.file, path: 'profiles.' + a.same.id }], { done: finished })));
+        acts.append(button('Update ' + a.same.name, '', () => review([{ op: 'update', file: a.file, path: 'profiles.' + a.same.id }], { done: finished })));
       }
-      add(acts, button(a.same ? 'Add as a new profile' : 'Add it', a.same ? 'ghost' : 'mint', () => review(ops(), { title: 'Add ' + (name.value.trim() || rv.name) + '?', publicKey: rv.publicKey, done: () => { finished(); location.hash = '#/profiles'; } })));
+      add(acts, button(a.same ? 'Add as a new profile' : 'Add it', a.same ? 'ghost' : '', () => review(ops(), { title: 'Add ' + (name.value.trim() || rv.name) + '?', publicKey: rv.publicKey, done: () => { finished(); location.hash = '#/profiles'; } })));
       add(card, acts, again);
       return card;
     }
@@ -1000,7 +1011,7 @@
       const what = segmented([['profiles', 'Profiles only'], ['all', 'Profiles and settings']], 'profiles', k + 'what');
       const sameName = segmented([['both', 'Keep both'], ['replace', 'Replace it']], 'both', k + 'same');
       add(card, pass, el('span', 'help', 'What to restore'), what.el, el('span', 'help', 'When a profile with the same name is on the TV'), sameName.el,
-        add(el('div', 'actions'), button('Check the backup', 'mint', () => review([{ op: 'restore', file: a.file, passphrase: pass.value, settings: what.value() === 'all', replace: sameName.value() === 'replace' }], { title: 'Restore this backup?', done: () => { finished(); location.hash = '#/profiles'; } }))), again);
+        add(el('div', 'actions'), button('Check the backup', '', () => review([{ op: 'restore', file: a.file, passphrase: pass.value, settings: what.value() === 'all', replace: sameName.value() === 'replace' }], { title: 'Restore this backup?', done: () => { finished(); location.hash = '#/profiles'; } }))), again);
       card.querySelectorAll('.help').forEach((h) => { h.style.margin = '14px 0 8px'; h.style.display = 'block'; });
       return card;
     }
@@ -1013,7 +1024,7 @@
       [{ id: '', name: 'The profile it belongs to' }].concat(a.targets).forEach((t) => { const o = el('option', null, t.name); o.value = t.id; sel.append(o); });
       keepTyped(sel, k + 'profile');
       const keep = segmented([['file', 'In the profile'], ['keystore', 'In Android’s keystore']], 'file', k + 'keep');
-      add(card, pass, sel, el('span', 'help', 'Where the key is kept'), keep.el, add(el('div', 'actions'), button('Check it', 'mint', () => review([{ op: 'certificate', file: a.file, password: pass.value, path: sel.value ? 'profiles.' + sel.value : '', keep: keep.value() }], { done: () => { finished(); location.hash = '#/profiles'; } }))), again);
+      add(card, pass, sel, el('span', 'help', 'Where the key is kept'), keep.el, add(el('div', 'actions'), button('Check it', '', () => review([{ op: 'certificate', file: a.file, password: pass.value, path: sel.value ? 'profiles.' + sel.value : '', keep: keep.value() }], { done: () => { finished(); location.hash = '#/profiles'; } }))), again);
       return card;
     }
     add(card, el('p', 'info bad', a.text || 'The TV couldn’t read that.'), again);
@@ -1063,7 +1074,7 @@
       pin.inputMode = 'numeric';
       pin.maxLength = 8;
       pin.placeholder = 'The TV’s PIN';
-      add(s, pin, add(el('div', 'actions'), button('Go on', 'mint', () => { const v = pin.value; closeSheet(); done(v); }), button('Cancel', 'ghost', () => { closeSheet(); done(null); })));
+      add(s, pin, add(el('div', 'actions'), button('Go on', '', () => { const v = pin.value; closeSheet(); done(v); }), button('Cancel', 'ghost', () => { closeSheet(); done(null); })));
       pin.focus();
     });
   }
@@ -1201,7 +1212,7 @@
       const d = el('div', 'diff');
       p.conflicts.forEach((c) => d.append(add(el('div'), el('b', null, c.label), add(el('span'), el('s', null, c.phone), document.createTextNode('→ on the TV now:'), el('em', null, c.tv)))));
       s.append(d);
-      s.append(add(el('div', 'actions'), button('Use the TV’s, and check the rest', 'mint', () => {
+      s.append(add(el('div', 'actions'), button('Use the TV’s, and check the rest', '', () => {
         p.conflicts.forEach((c) => draft.delete(c.path));
         closeSheet();
         draw(true);
@@ -1272,8 +1283,8 @@
     const importing = ops.some((o) => o.op === 'import');
     // A setting for the tunnel that is up: Apply and test leads, as it puts the old one back if it fails.
     const testFirst = p.testable && !importing;
-    const apply = button(ops.some((o) => o.op === 'delete') ? 'Delete' : importing ? 'Save' : 'Apply', ops.some((o) => o.op === 'delete') ? 'danger' : testFirst ? 'ghost' : 'mint', () => go(false));
-    const test = p.testable ? button(testLabel, testFirst ? 'mint' : 'ghost', () => go(true)) : null;
+    const apply = button(ops.some((o) => o.op === 'delete') ? 'Delete' : importing ? 'Save' : 'Apply', ops.some((o) => o.op === 'delete') ? 'danger' : testFirst ? 'ghost' : '', () => go(false));
+    const test = p.testable ? button(testLabel, testFirst ? '' : 'ghost', () => go(true)) : null;
     [apply, test].forEach((b) => { if (b) b.dataset.go = '1'; });
     add(acts, testFirst ? test : apply, testFirst ? apply : test, button('Back', 'ghost', closeSheet));
     add(s, progress, acts);
@@ -1333,7 +1344,7 @@
         if (w.opts.done) w.opts.done();
         sheetWatch = null;
         end('ok', e.checks && e.checks.length ? 'Applied, and the test passed.' : 'Applied on the TV.');
-        w.acts.replaceChildren(button('Done', 'mint', () => { closeSheet(); draw(true); }));
+        w.acts.replaceChildren(button('Done', '', () => { closeSheet(); draw(true); }));
         if (!e.checks || !e.checks.length) setTimeout(() => { if (!sheetWatch) { closeSheet(); draw(true); } }, 1400);
         break;
       }
