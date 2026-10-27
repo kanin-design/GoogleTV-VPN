@@ -134,7 +134,7 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
     }
     Sheet(460f) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 8.dp)) {
-            Text(title, style = TvType.display(30f))
+            Text(title, style = TvType.display(32f))
             Text(
                 if (o.setting) "4 to 8 digits. Without it, Connect still works." else "Profiles and settings are locked on this device.",
                 style = TvType.ui(15f, color = Tv.soft(0.7f)).copy(textAlign = TextAlign.Center),

@@ -985,14 +985,14 @@ private fun TopBar(state: VpnUiState, nav: Nav) {
             Box(
                 modifier = Modifier
                     .size(42.dp)
-                    .clip(RoundedCornerShape(13.dp))
+                    .clip(RoundedCornerShape(TvRadius.Small.dp))
                     .background(Tv.white(0.08f))
-                    .border(1.dp, Tv.white(0.12f), RoundedCornerShape(13.dp)),
+                    .border(1.dp, Tv.white(0.12f), RoundedCornerShape(TvRadius.Small.dp)),
                 contentAlignment = Alignment.Center,
             ) { TvIcon(Ic.Logo, 24f, stroke = 2f) }
             Text(APP_NAME, style = TvType.display(25f, tracking = -0.02f))
         }
-        Spacer(Modifier.width(34.dp))
+        Spacer(Modifier.width(32.dp))
         Glass(deep = false, shape = CircleShape) {
             Row(
                 // Up from a screen lands on that screen's tab, not on whichever tab is nearest.
@@ -1032,7 +1032,7 @@ private fun TopBar(state: VpnUiState, nav: Nav) {
         val now = rememberMinute()
         Text(
             remember(now / 60_000) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(now)) },
-            style = TvType.ui(20f, FontWeight.SemiBold, Tv.soft(0.72f)),
+            style = TvType.ui(20f, FontWeight.Medium, Tv.soft(0.72f)),
         )
     }
 }
@@ -1068,15 +1068,12 @@ private fun TabItem(label: String, selected: Boolean, focusRequester: FocusReque
             .tvFocus(f, onEnter, focusRequester, onFocus)
             .padding(horizontal = 22.dp, vertical = 10.dp),
     ) {
+        // One weight in every state, so the tabs keep their width as focus moves along them.
         Text(
             label,
             style = TvType.ui(
                 17f,
-                when {
-                    f.focused -> FontWeight.ExtraBold
-                    selected -> FontWeight.Bold
-                    else -> FontWeight.SemiBold
-                },
+                FontWeight.SemiBold,
                 when {
                     f.focused -> Tv.OnFocus
                     selected -> Color.White

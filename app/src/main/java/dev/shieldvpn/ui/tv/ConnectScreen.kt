@@ -129,10 +129,9 @@ private fun Hero(
             }
         }
 
-        // Six rows, each one line high and always there, so nothing moves between states and every
-        // profile takes the same room: the kind, the name, the status, a live line, the server, the buttons.
+        // Five rows, each one line high and always there, so nothing moves between states and every
+        // profile takes the same room: the name, the status, a live line, the kind and server, the buttons.
         val kind = info?.kind ?: VpnKind.OpenVpn
-        TypeTag(Words.kind(kind))
         Title(c.name)
         val failure = (state.status as? VpnStatus.Failed)?.message
         when {
@@ -167,9 +166,10 @@ private fun Hero(
             }
             else -> Idle(state, c)
         }
-        // Connected, the cipher the server chose; otherwise what the file suggests.
+        // Connected, the cipher the server chose; otherwise what the file suggests. The kind of VPN
+        // leads the line, as the one place it is said.
         val cipher = state.tunnel?.cipher?.takeIf { current } ?: info?.cipher
-        Meta(listOfNotNull(server?.let { Words.serverLine(it.host, it.port, it.protocol, cipher) }).ifEmpty { listOf(" ") })
+        Meta(listOf(listOfNotNull(Words.kind(kind), server?.let { Words.serverLine(it.host, it.port, it.protocol, cipher) }).joinToString(" · ")))
         // The buttons change with the tunnel (Resume now goes, Pause comes), and the one pressed
         // goes with them: focus moves to the new first button instead of falling to the cards.
         var inActions by remember { mutableStateOf(false) }
@@ -282,17 +282,11 @@ private fun Idle(state: VpnUiState, c: Connection) {
     }
 }
 
-/** The kind of VPN, above the name. */
-@Composable
-private fun TypeTag(text: String) {
-    Text(text.uppercase(), style = TvType.eyebrow(14f, 0.62f), maxLines = 1, modifier = Modifier.height(17.dp))
-}
-
 /** The live line: what is happening now, in the same place in every state. */
 @Composable
 private fun Live(text: String) {
     // A fixed height: some glyphs (the traffic arrows) come from a fallback font with a taller line.
-    Text(text, style = TvType.ui(19f, color = Tv.soft(0.66f)), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp).height(25.dp).widthIn(max = 820.dp))
+    Text(text, style = TvType.ui(19f, color = Tv.soft(0.66f)), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp).height(25.dp).widthIn(max = 820.dp))
 }
 
 /** The address sites see and what went through, read every two seconds while it shows. */
@@ -329,21 +323,21 @@ private fun PausedFor(until: Long?) {
 private fun Lede(bold: String?, rest: String) {
     Text(
         buildAnnotatedString {
-            if (bold != null) withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color.White)) { append(bold) }
+            if (bold != null) withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = Color.White)) { append(bold) }
             append(rest)
         },
         style = TvType.ui(21f, color = Tv.soft(0.8f)).copy(lineHeight = 29.sp),
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.padding(top = 14.dp).height(26.dp).widthIn(max = 820.dp),
+        modifier = Modifier.padding(top = 16.dp).height(26.dp).widthIn(max = 820.dp),
     )
 }
 
-/** .meta: host, protocol and port, cipher, with dots between. */
+/** .meta: the kind of VPN, host, protocol and port, cipher, with dots between. */
 @Composable
 private fun Meta(parts: List<String>) {
     Row(
-        modifier = Modifier.padding(top = 10.dp).height(21.dp),
+        modifier = Modifier.padding(top = 12.dp).height(21.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -357,8 +351,8 @@ private fun Meta(parts: List<String>) {
 @Composable
 private fun Actions(focused: (Boolean) -> Unit = {}, content: @Composable () -> Unit) {
     Row(
-        modifier = Modifier.padding(top = 26.dp).onFocusChanged { focused(it.hasFocus) },
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = Modifier.padding(top = 24.dp).onFocusChanged { focused(it.hasFocus) },
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) { content() }
 }
@@ -383,8 +377,10 @@ private fun QuickRow(state: VpnUiState, nav: Nav, connect: (String) -> Unit, pri
             .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("QUICK CONNECT", style = TvType.eyebrow(15f, 0.62f))
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        Text("Quick connect", style = TvType.eyebrow(15f, 0.62f))
+        // The profile Connect shows says how its tunnel is doing in that state's colour.
+        val mode = modeOf(state)
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             quick.forEach { c ->
                 val current = c.id == state.activeId
                 val look = lookOf(c)
@@ -394,7 +390,7 @@ private fun QuickRow(state: VpnUiState, nav: Nav, connect: (String) -> Unit, pri
                     iconSize = 30f,
                     title = c.name,
                     subtitle = statusText(state, c),
-                    tag = Words.kind(state.infoOf(c)?.kind ?: VpnKind.OpenVpn),
+                    tone = if (current && mode != Mode.Off) Tv.tone(mode) else null,
                     onFocus = {
                         nav.preview = if (current) null else c.id
                         nav.focusedPid = c.id

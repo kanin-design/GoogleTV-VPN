@@ -218,7 +218,7 @@ private fun Modifier.tvFocusModifiers(
 fun Glass(
     modifier: Modifier = Modifier,
     deep: Boolean = true,
-    shape: Shape = RoundedCornerShape(26.dp),
+    shape: Shape = RoundedCornerShape(TvRadius.Large.dp),
     content: @Composable BoxScope.() -> Unit,
 ) {
     Box(
@@ -326,7 +326,7 @@ fun GlowDot(tone: Color, size: Float = 9f) {
     )
 }
 
-/** .btn: a pill button. Focused, it turns white with dark text and grows a little. */
+/** .btn: a pill button. Focused, it turns white with dark text and grows a little; its words stay as they are. */
 @Composable
 fun TvButton(
     text: String,
@@ -373,23 +373,19 @@ fun TvButton(
             .tvFocus(f, onClick, focusRequester, onFocus)
             .padding(horizontal = if (small) 20.dp else 28.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (small) 9.dp else 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (small) 8.dp else 12.dp),
     ) {
         icon?.let { TvIcon(it, if (small) 18f else 22f, fg) }
-        Text(
-            text,
-            style = TvType.ui(if (small) 16f else 19f, if (f.focused) FontWeight.ExtraBold else FontWeight.SemiBold, fg),
-            maxLines = 1,
-        )
+        Text(text, style = TvType.ui(if (small) 16f else 19f, FontWeight.SemiBold, fg), maxLines = 1)
     }
 }
 
 /** Row shapes from the design: .row, .prow (lists of profiles and pictures) and .mrow (import methods). */
 enum class RowKind(val minHeight: Float, val radius: Float, val scale: Float, val titleSize: Float) {
-    Row(60f, 16f, 1.02f, 17f),
-    Profile(72f, 16f, 1.02f, 18f),
-    Pick(76f, 18f, 1.03f, 18f),
-    Method(74f, 18f, 1.03f, 18f),
+    Row(60f, TvRadius.Medium, 1.02f, 17f),
+    Profile(72f, TvRadius.Medium, 1.02f, 17f),
+    Pick(76f, TvRadius.Medium, 1.03f, 17f),
+    Method(74f, TvRadius.Medium, 1.03f, 17f),
 }
 
 /**
@@ -455,9 +451,10 @@ fun ListRow(
             .background(bg)
             .then(if (ring) Modifier.border(1.dp, Tv.white(0.16f), shape) else Modifier)
             .then(if (enabled) Modifier.tvFocus(f, onClick, focusRequester, onFocus) else Modifier.fade { 0.42f })
-            .padding(horizontal = if (kind == RowKind.Row) 16.dp else 12.dp, vertical = 9.dp),
+            // The same inset in every kind, so a heading lines up with any list under it.
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (leading != null && foldAlpha > 0.01f) {
             Box(Modifier.fade { foldAlpha }) { leading(f.focused) }
@@ -465,7 +462,7 @@ fun ListRow(
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 title,
-                style = if (monoTitle) TvType.mono(kind.titleSize - 1, FontWeight.SemiBold, titleColor) else TvType.ui(kind.titleSize, FontWeight.Bold, titleColor),
+                style = if (monoTitle) TvType.mono(kind.titleSize - 1, FontWeight.SemiBold, titleColor) else TvType.ui(kind.titleSize, FontWeight.SemiBold, titleColor),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fade { titleAlpha },
@@ -507,10 +504,10 @@ fun SavedPill(visible: Boolean, modifier: Modifier = Modifier) {
                 .background(Tv.Mint.copy(alpha = 0.16f))
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             TvIcon(Ic.Check, 15f, Tv.Mint, stroke = 3f)
-            Text("Saved", style = TvType.ui(14f, FontWeight.ExtraBold, Tv.Mint))
+            Text("Saved", style = TvType.ui(14f, FontWeight.SemiBold, Tv.Mint))
         }
     }
 }
@@ -529,7 +526,7 @@ fun ValueChip(text: String, focused: Boolean, leading: (@Composable () -> Unit)?
     ) {
         val c = if (focused) Tv.OnFocus else Tv.soft(0.9f)
         leading?.invoke()
-        if (text.isNotEmpty()) Text(text, style = TvType.ui(15f, FontWeight.Bold, c), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        if (text.isNotEmpty()) Text(text, style = TvType.ui(15f, FontWeight.Medium, c), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         TvIcon(Ic.Chev, 16f, c, stroke = 2.4f)
     }
 }
@@ -581,7 +578,7 @@ fun CheckBadge(focused: Boolean) {
 
 /** The icon square at the start of an action row. */
 @Composable
-fun IconSquare(icon: Ic, focused: Boolean, size: Float = 40f, radius: Float = 12f) {
+fun IconSquare(icon: Ic, focused: Boolean, size: Float = 40f, radius: Float = TvRadius.Small) {
     Box(
         modifier = Modifier
             .size(size.dp)
@@ -595,21 +592,21 @@ fun IconSquare(icon: Ic, focused: Boolean, size: Float = 40f, radius: Float = 12
 @Composable
 fun AddSquare(focused: Boolean, icon: Ic = Ic.Plus) {
     // A row's icon like the others, filled, so the row doesn't read as a button inside a row.
-    IconSquare(icon, focused, size = 44f, radius = 13f)
+    IconSquare(icon, focused, size = 44f)
 }
 
-/** .sect: a small heading between rows. */
+/** .sect: a small heading between rows, on the same edge as the rows' words. */
 @Composable
 fun SectionLabel(text: String) {
-    Text(text.uppercase(), style = TvType.eyebrow(12.5f, 0.5f, 0.13f), modifier = Modifier.padding(start = 10.dp, top = 12.dp, bottom = 4.dp))
+    Text(text, style = TvType.eyebrow(14f, 0.5f), modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
 }
 
 /** .p-eyebrow, .p-title and .p-sub: the heading of a panel. */
 @Composable
-fun PanelHeading(eyebrow: String?, title: String, sub: String? = null, titleSize: Float = 34f) {
+fun PanelHeading(eyebrow: String?, title: String, sub: String? = null, titleSize: Float = 32f) {
     Column {
-        if (eyebrow != null) Text(eyebrow.uppercase(), style = TvType.eyebrow(13.5f, 0.55f))
-        Text(title, style = TvType.display(titleSize), modifier = Modifier.padding(top = if (eyebrow != null) 6.dp else 0.dp))
+        if (eyebrow != null) Text(eyebrow, style = TvType.eyebrow(14f, 0.55f))
+        Text(title, style = TvType.display(titleSize), modifier = Modifier.padding(top = if (eyebrow != null) 4.dp else 0.dp))
         if (sub != null) Text(sub, style = TvType.ui(17f, color = Tv.soft(0.7f)).copy(lineHeight = (17 * 1.45f).sp), modifier = Modifier.padding(top = 8.dp).widthIn(max = 600.dp))
     }
 }
@@ -658,11 +655,11 @@ private val Symbols: List<List<Pair<TvKey, Int>>> = listOf(
 fun Keyboard(onType: (Char) -> Unit, onDelete: () -> Unit, onDone: () -> Unit, compact: Boolean = false, entry: FocusRequester? = null) {
     var shift by remember { mutableStateOf(false) }
     var symbols by remember { mutableStateOf(false) }
-    val gap = if (compact) 6f else 7f
+    val gap = if (compact) 6f else 8f
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(TvRadius.Large.dp))
             .background(Color.Black.copy(alpha = 0.25f))
             .padding((if (compact) 12 else 14).dp),
         verticalArrangement = Arrangement.spacedBy(gap.dp),
@@ -727,9 +724,9 @@ private fun KeyCap(key: TvKey, shift: Boolean, symbols: Boolean, height: Float, 
                 scaleX = scale
                 scaleY = scale
             }
-            .shadow(if (f.focused) 10.dp else 0.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
+            .shadow(if (f.focused) 10.dp else 0.dp, RoundedCornerShape(TvRadius.Small.dp), ambientColor = Color.Black, spotColor = Color.Black)
             .height(height.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(TvRadius.Small.dp))
             .background(bg)
             .tvFocus(f, onClick, focusRequester),
         contentAlignment = Alignment.Center,
@@ -753,13 +750,13 @@ fun InputBox(
     error: String? = null,
 ) {
     val f = rememberFocusState()
-    val shape = RoundedCornerShape(15.dp)
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Text(label, style = TvType.ui(14f, FontWeight.Bold, Tv.soft(0.6f)))
+    val shape = RoundedCornerShape(TvRadius.Medium.dp)
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, style = TvType.ui(14f, FontWeight.Medium, Tv.soft(0.6f)))
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(if (f.focused) Modifier.border(5.dp, Tv.white(0.12f), RoundedCornerShape(19.dp)).padding(0.dp) else Modifier)
+                .then(if (f.focused) Modifier.border(5.dp, Tv.white(0.12f), RoundedCornerShape((TvRadius.Medium + 4).dp)).padding(0.dp) else Modifier)
                 .height(58.dp)
                 .clip(shape)
                 .background(if (f.focused) Tv.white(0.12f) else Tv.white(0.07f))
@@ -782,7 +779,7 @@ fun InputBox(
             }
             if (editing) Caret()
         }
-        if (error != null) Text(error, style = TvType.ui(14.5f, FontWeight.SemiBold, Tv.Red), maxLines = 2)
+        if (error != null) Text(error, style = TvType.ui(14f, FontWeight.Medium, Tv.Red), maxLines = 2)
     }
 }
 
@@ -821,7 +818,7 @@ fun BoxScope.TvToast(message: String?) {
                 .background(Color(0xFF111821))
                 .border(1.dp, Tv.GlassEdge, CircleShape),
         ) {
-            Text(last, style = TvType.ui(16f, FontWeight.Bold), maxLines = 1, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+            Text(last, style = TvType.ui(16f, FontWeight.SemiBold), maxLines = 1, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
         }
     }
 }
@@ -872,7 +869,7 @@ fun ConfirmBar(text: String, confirm: String, keep: FocusRequester, onConfirm: (
             .fillMaxWidth()
             // As tall as the row it takes the place of, so the sheet or list around it doesn't jump.
             .height(RowKind.Row.minHeight.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(TvRadius.Medium.dp))
             .background(Tv.Red.copy(alpha = 0.12f))
             .padding(start = 18.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically,

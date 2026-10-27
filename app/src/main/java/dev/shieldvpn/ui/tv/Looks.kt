@@ -25,7 +25,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
@@ -139,14 +138,16 @@ fun MsIcon(path: String, size: Float, color: Color = Color.White, modifier: Modi
 @Composable
 fun Avatar(look: ProfileLook, size: Float, modifier: Modifier = Modifier) {
     Box(
-        modifier = modifier.size(size.dp).clip(RoundedCornerShape(12.dp)).lookFill(look.colours),
+        modifier = modifier.size(size.dp).clip(RoundedCornerShape(TvRadius.Small.dp)).lookFill(look.colours),
         contentAlignment = Alignment.Center,
     ) { MsIcon(look.icon.path, size * 0.56f) }
 }
 
 /**
- * .card: a profile's colours with its icon and name. Focused, it grows and gets a white ring.
- * Without [onClick] it is a still preview.
+ * .card: a profile, as a quiet card with its icon on its colours, its name and how it is doing.
+ * The colours stay on the icon, so the background's green, amber or red is the only big colour
+ * on Connect. Focused, the card turns white and grows, like every other item. Without [onClick]
+ * it is a still preview.
  */
 @Composable
 fun LookCard(
@@ -160,12 +161,12 @@ fun LookCard(
     onFocus: () -> Unit = {},
     onBlur: () -> Unit = {},
     focusRequester: FocusRequester? = null,
-    /** A short label in the top-right corner: the kind of VPN. */
-    tag: String? = null,
+    /** The subtitle's colour when it says how a tunnel is doing; otherwise it is quiet. */
+    tone: Color? = null,
 ) {
     val f = rememberFocusState()
-    val scale by animateFloatAsState(if (f.focused) 1.09f else 1f, tween(200, easing = FocusEase), label = "card")
-    val shape = RoundedCornerShape(16.dp)
+    val scale by animateFloatAsState(if (f.focused) 1.06f else 1f, tween(200, easing = FocusEase), label = "card")
+    val shape = RoundedCornerShape(TvRadius.Medium.dp)
     Box(
         modifier = modifier
             .aspectRatio(16f / 9f)
@@ -173,47 +174,33 @@ fun LookCard(
                 scaleX = scale
                 scaleY = scale
             }
-            .shadow(if (f.focused) 27.dp else 15.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+            .shadow(if (f.focused) 24.dp else 0.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
             .clip(shape)
-            .drawBehind {
-                drawRect(gradient135(colours, size))
-                // .card::before: a soft light from the top-left (an ellipse 110% wide, 90% high)
-                // and a darker bottom for the name.
-                val ry = size.height * 0.9f
-                val sx = size.width * 1.1f / ry
-                scale(sx, 1f, pivot = Offset.Zero) {
-                    drawRect(
-                        Brush.radialGradient(0f to Color.White.copy(alpha = 0.2f), 0.55f to Color.White.copy(alpha = 0f), center = Offset.Zero, radius = ry),
-                        size = Size(size.width / sx, size.height),
-                    )
-                }
-                drawRect(Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.3f)))
-            }
-            .then(if (f.focused) Modifier.border(3.dp, Tv.Focus, shape) else Modifier)
+            .background(if (f.focused) Tv.Focus else Tv.Glass)
+            .border(1.dp, if (f.focused) Color.Transparent else Tv.GlassEdge, shape)
             .then(if (onClick != null) Modifier.onFocusChanged { if (!it.isFocused) onBlur() }.tvFocus(f, onClick, focusRequester, onFocus) else Modifier),
     ) {
-        MsIcon(iconPath, iconSize, modifier = Modifier.padding(14.dp))
-        if (tag != null) {
-            Text(
-                tag.uppercase(),
-                style = TvType.eyebrow(10.5f, 0.9f).copy(color = Color.White),
-                maxLines = 1,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(12.dp)
-                    .clip(RoundedCornerShape(5.dp))
-                    .background(Color.Black.copy(alpha = 0.28f))
-                    .padding(horizontal = 6.dp, vertical = 3.dp),
-            )
-        }
+        Box(
+            modifier = Modifier
+                .padding(16.dp)
+                .size(44.dp)
+                .clip(RoundedCornerShape(TvRadius.Small.dp))
+                .lookFill(colours),
+            contentAlignment = Alignment.Center,
+        ) { MsIcon(iconPath, iconSize * 0.8f) }
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 14.dp, top = 26.dp, bottom = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
         ) {
-            Text(title, style = TvType.ui(16f, FontWeight.Bold, Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, style = TvType.ui(13f, color = Color.White.copy(alpha = 0.74f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, style = TvType.ui(17f, FontWeight.SemiBold, if (f.focused) Tv.OnFocus else Tv.Ink), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                subtitle,
+                style = TvType.ui(14f, color = if (f.focused) Tv.dark(0.62f) else tone ?: Tv.soft(0.6f)),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

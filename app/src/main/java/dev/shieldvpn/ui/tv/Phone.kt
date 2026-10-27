@@ -133,17 +133,17 @@ fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier 
         1 -> "On ${paired.first().name}, the panel does this too."
         else -> "On a paired phone, the panel does this too."
     }
-    val qrShadow = Modifier.shadow(10.dp, RoundedCornerShape(14.dp), ambientColor = Color.Black, spotColor = Color.Black)
+    val qrShadow = Modifier.shadow(10.dp, RoundedCornerShape(TvRadius.Medium.dp), ambientColor = Color.Black, spotColor = Color.Black)
     when (size) {
         PhoneBlockSize.Panel -> Column(modifier, verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(30.dp), verticalAlignment = Alignment.CenterVertically) {
                 QrCode(url, 196f, qrShadow)
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (title != null) Text(title, style = TvType.ui(19f, FontWeight.Bold))
+                    if (title != null) Text(title, style = TvType.ui(19f, FontWeight.SemiBold))
                     steps.forEachIndexed { i, step ->
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.white(0.12f)), contentAlignment = Alignment.Center) {
-                                Text("${i + 1}", style = TvType.ui(14f, FontWeight.ExtraBold))
+                                Text("${i + 1}", style = TvType.ui(14f, FontWeight.SemiBold))
                             }
                             Text(step, style = TvType.ui(17f, color = Tv.soft(0.86f)), modifier = Modifier.widthIn(max = 360.dp))
                         }
@@ -161,11 +161,11 @@ fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier 
             }
         }
         PhoneBlockSize.Side -> Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title ?: "Or use your phone", style = TvType.ui(18f, FontWeight.Bold))
+            Text(title ?: "Or use your phone", style = TvType.ui(17f, FontWeight.SemiBold))
             QrCode(url, 180f)
             Text("No camera? Open http://$address and type $code.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
             if (panelLine != null) Text(panelLine, style = TvType.ui(14f, color = Tv.soft(0.7f)))
-            Text(SAME_WIFI, style = TvType.ui(13.5f, color = Tv.soft(0.5f)))
+            Text(SAME_WIFI, style = TvType.ui(13f, color = Tv.soft(0.5f)))
             PhoneStatusLine(session, small = true)
         }
         PhoneBlockSize.Wide -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(30.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -174,7 +174,7 @@ fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier 
                 steps.forEachIndexed { i, step ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(26.dp).clip(CircleShape).background(Tv.white(0.12f)), contentAlignment = Alignment.Center) {
-                            Text("${i + 1}", style = TvType.ui(13f, FontWeight.ExtraBold))
+                            Text("${i + 1}", style = TvType.ui(13f, FontWeight.SemiBold))
                         }
                         Text(step, style = TvType.ui(17f, color = Tv.soft(0.86f)))
                     }
@@ -190,9 +190,9 @@ fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier 
         PhoneBlockSize.Compact -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
             QrCode(url, 128f, qrShadow)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(title ?: "Or use your phone", style = TvType.ui(17f, FontWeight.Bold))
+                Text(title ?: "Or use your phone", style = TvType.ui(17f, FontWeight.SemiBold))
                 Text("No camera? Open http://$address and type $code.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
-                Text(SAME_WIFI, style = TvType.ui(13.5f, color = Tv.soft(0.5f)))
+                Text(SAME_WIFI, style = TvType.ui(13f, color = Tv.soft(0.5f)))
                 PhoneStatusLine(session, small = true)
             }
         }

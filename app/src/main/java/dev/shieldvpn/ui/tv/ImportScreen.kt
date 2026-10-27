@@ -98,7 +98,7 @@ fun ImportScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (
     Box(Modifier.fillMaxSize()) {
         Glass(Modifier.padding(start = 64.dp, top = 124.dp, bottom = 36.dp).width(400.dp)) {
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 22.dp)) {
-                Box(Modifier.padding(horizontal = 8.dp)) { PanelHeading("Import", "Add a profile", "A profile, a backup or a certificate.", titleSize = 30f) }
+                Box(Modifier.padding(horizontal = 16.dp)) { PanelHeading("Import", "Add a profile", "A profile, a backup or a certificate.") }
                 val list = rememberLazyListState()
                 LazyColumn(
                     state = list,
@@ -114,7 +114,7 @@ fun ImportScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (
                     ImportMethod.entries.forEach { m -> item(m.name) { MethodRow(m, state, nav, actions, req, session) } }
                 }
                 Spacer(Modifier.height(10.dp))
-                Text("Every file is checked before it is saved.", style = TvType.ui(14f, color = Tv.soft(0.55f)), modifier = Modifier.padding(horizontal = 8.dp))
+                Text("Every file is checked before it is saved.", style = TvType.ui(14f, color = Tv.soft(0.55f)), modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
         val review = state.review
@@ -189,7 +189,7 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
         ImportMethod.Phone -> PhonePanel(nav, actions, req, session)
         ImportMethod.Link -> LinkPanel(nav, actions, req, session)
         ImportMethod.Restore -> {
-            PanelHeading("Import › Restore a backup", "Restore a backup", "A backup holds every profile, saved password and setting, encrypted with the passphrase chosen when it was made.")
+            PanelHeading("Import", "Restore a backup", "A backup holds every profile, saved password and setting, encrypted with the passphrase chosen when it was made.")
             Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ListRow(
                     "Send it from your phone", fromPhone,
@@ -208,7 +208,7 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
             }
         }
         ImportMethod.Certs -> {
-            PanelHeading("Import › Certificates", "Certificates", "For profiles that keep the certificate and key outside the .ovpn file.")
+            PanelHeading("Import", "Certificates", "For profiles that keep the certificate and key outside the .ovpn file.")
             Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ListRow(
                     "Send the .p12 from your phone", fromPhone,
@@ -249,7 +249,7 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
 /** From your phone: the code is on screen and the TV listens while Import is open. */
 @Composable
 private fun ColumnScope.PhonePanel(nav: Nav, actions: TunnelActions, req: Requesters, session: PhoneSession?) {
-    PanelHeading("Import › From your phone", "Send it from your phone")
+    PanelHeading("Import", "Send it from your phone")
     PhoneBlock(
         session, PhoneBlockSize.Panel, Modifier.padding(top = 22.dp),
         steps = listOf("Scan the code with your phone’s camera", "Pick the file, paste its text or type a link", "Check it here before it is saved"),
@@ -261,7 +261,7 @@ private fun ColumnScope.PhonePanel(nav: Nav, actions: TunnelActions, req: Reques
     LaunchedEffect(item) { if (item != null && nav.overlay == null) req["im-entry"].focusWhenReady() }
     if (item != null) {
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Tv.white(0.05f)).padding(start = 18.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(TvRadius.Medium.dp)).background(Tv.white(0.05f)).padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -271,7 +271,7 @@ private fun ColumnScope.PhonePanel(nav: Nav, actions: TunnelActions, req: Reques
                     is ImportItem.Backup -> if (Backup.encrypted(item.bytes)) "A backup is on your phone’s page: type its passphrase there, or here." else "A backup is on your phone’s page: restore it there, or here."
                     is ImportItem.Pkcs12 -> "A certificate is on your phone’s page: type its password there, or here."
                 },
-                style = TvType.ui(15.5f, FontWeight.SemiBold),
+                style = TvType.ui(15f, FontWeight.SemiBold),
                 modifier = Modifier.weight(1f),
             )
             TvButton("Continue here", {
@@ -309,7 +309,7 @@ private fun cleanLink(url: String): String = url.trim().replace(Regex("^https://
 /** From a link, typed on the TV; the phone's page has a Link tab for typing it there. */
 @Composable
 private fun ColumnScope.LinkPanel(nav: Nav, actions: TunnelActions, req: Requesters, session: PhoneSession?) {
-    PanelHeading("Import › From a link", "Download from a link", "${APP_NAME} downloads the file and shows it to you before saving.")
+    PanelHeading("Import", "Download from a link", "${APP_NAME} downloads the file and shows it to you before saving.")
     InputBox(
         "Profile link", nav.linkUrl.ifEmpty { "https://" }, editing = false,
         onClick = { nav.overlay = Overlay.Form(linkSpec(nav, actions)) },
@@ -341,7 +341,7 @@ private fun Steps(steps: List<String>, modifier: Modifier = Modifier) {
         steps.forEachIndexed { i, s ->
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.white(0.12f)), contentAlignment = Alignment.Center) {
-                    Text("${i + 1}", style = TvType.ui(14f, FontWeight.ExtraBold))
+                    Text("${i + 1}", style = TvType.ui(14f, FontWeight.SemiBold))
                 }
                 Text(s, style = TvType.ui(17f, color = Tv.soft(0.86f)))
             }
@@ -360,14 +360,14 @@ fun Notice(icon: Ic, text: String, amber: Boolean = false, bad: Boolean = false,
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(TvRadius.Medium.dp))
             .background(tint.copy(alpha = 0.13f))
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TvIcon(icon, 20f, tint, stroke = 3f)
-        Text(text, style = TvType.ui(15.5f, FontWeight.SemiBold))
+        Text(text, style = TvType.ui(15f, FontWeight.Medium))
     }
 }
 

@@ -145,7 +145,7 @@ private fun Sheets(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Req
 @Composable
 fun Sheet(width: Float, content: @Composable () -> Unit) {
     // Opaque, unlike the panels: at 96 % a bright title or row behind still read through it.
-    val shape = RoundedCornerShape(30.dp)
+    val shape = RoundedCornerShape(TvRadius.Large.dp)
     Box(
         modifier = Modifier
             .shadow(40.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
@@ -261,7 +261,7 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
     }
     Box(Modifier.padding(top = 124.dp, end = 64.dp, bottom = 36.dp).width(540.dp)) {
         // Solid like the sheets, and as tall as its rows: on glass the cards and the drawing read through.
-        val shape = RoundedCornerShape(30.dp)
+        val shape = RoundedCornerShape(TvRadius.Large.dp)
         Box(Modifier.clip(shape).background(Color(0xFF0A0E15)).border(1.dp, Tv.GlassEdge, shape)) {
             Column(Modifier.padding(horizontal = 34.dp, vertical = 30.dp)) {
                 PanelHeading("Connect › ${c.name}", "Connection details")
@@ -297,8 +297,8 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
 @Composable
 private fun FileSheet(o: Overlay.File, req: Requesters, close: () -> Unit) {
     Sheet(760f) {
-        Text(o.eyebrow.uppercase(), style = TvType.eyebrow(13.5f, 0.55f), maxLines = 1)
-        Text(o.title, style = TvType.display(34f), modifier = Modifier.padding(top = 6.dp))
+        Text(o.eyebrow, style = TvType.eyebrow(14f, 0.55f), maxLines = 1)
+        Text(o.title, style = TvType.display(32f), modifier = Modifier.padding(top = 4.dp))
         Spacer(Modifier.height(16.dp))
         RawConfig(o.text, maxHeight = 340f, plain = o.plain, focusWhenLong = req["ov-text"])
         Row(Modifier.padding(top = 20.dp)) {

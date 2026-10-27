@@ -54,18 +54,29 @@ object Tv {
 
     fun white(a: Float) = Color.White.copy(alpha = a)
 
+    /** A state's colour, the background's: green through the VPN, amber on the way, red outside it. */
     fun tone(mode: Mode): Color = when (mode) {
         Mode.On -> Mint
-        Mode.Busy -> Blue
-        Mode.Off, Mode.Paused -> Amber
-        Mode.Error -> Red
+        Mode.Busy, Mode.Paused -> Amber
+        Mode.Off, Mode.Error -> Red
     }
 }
 
 /**
+ * Corners: [Small] for icons and keys, [Medium] for rows, cards and fields, [Large] for panels
+ * and sheets. Buttons, tabs and chips are pills.
+ */
+object TvRadius {
+    const val Small = 12f
+    const val Medium = 16f
+    const val Large = 24f
+}
+
+/**
  * Type from the design. Sizes are the design's pixels on its 1280 × 720 canvas; [TvStage]
- * scales them with everything else. The design's Bricolage Grotesque and Manrope are not
- * bundled yet, so the system sans stands in.
+ * scales them with everything else. Android's own sans (Roboto) and monospace, in three
+ * weights: Normal for reading, Medium for quiet labels and big names, SemiBold for what is
+ * pressed or titled. Focus never changes a weight, so nothing shifts as it moves.
  */
 object TvType {
     val Display: FontFamily = FontFamily.SansSerif
@@ -75,7 +86,7 @@ object TvType {
     fun ui(size: Float, weight: FontWeight = FontWeight.Normal, color: Color = Tv.Ink, tracking: Float = 0f) =
         TextStyle(fontFamily = Ui, fontSize = size.sp, fontWeight = weight, color = color, letterSpacing = tracking.em)
 
-    fun display(size: Float, weight: FontWeight = FontWeight.Bold, tracking: Float = -0.025f) =
+    fun display(size: Float, weight: FontWeight = FontWeight.SemiBold, tracking: Float = -0.02f) =
         TextStyle(fontFamily = Display, fontSize = size.sp, fontWeight = weight, color = Tv.Ink, letterSpacing = tracking.em, lineHeight = (size * 1.08f).sp)
 
     fun mono(size: Float, weight: FontWeight = FontWeight.Medium, color: Color = Tv.Ink) =
@@ -85,16 +96,16 @@ object TvType {
     fun title(size: Float) = TextStyle(
         fontFamily = Display,
         fontSize = size.sp,
-        fontWeight = FontWeight.Bold,
+        fontWeight = FontWeight.Medium,
         color = Tv.Ink,
-        letterSpacing = (-0.04f).em,
+        letterSpacing = (-0.035f).em,
         lineHeight = (size * 0.98f).sp,
         shadow = Shadow(Color.Black.copy(alpha = 0.35f), Offset(0f, 2f), 40f),
     )
 
-    /** Uppercase labels such as .label, .sect and .p-eyebrow. */
-    fun eyebrow(size: Float, alpha: Float, tracking: Float = 0.14f) =
-        TextStyle(fontFamily = Ui, fontSize = size.sp, fontWeight = FontWeight.ExtraBold, color = Tv.soft(alpha), letterSpacing = tracking.em)
+    /** Small labels over a group or a panel, such as "Quick connect": quiet, in sentence case. */
+    fun eyebrow(size: Float, alpha: Float, tracking: Float = 0.01f) =
+        TextStyle(fontFamily = Ui, fontSize = size.sp, fontWeight = FontWeight.Medium, color = Tv.soft(alpha), letterSpacing = tracking.em)
 }
 
 /**
