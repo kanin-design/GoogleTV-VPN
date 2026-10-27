@@ -99,6 +99,7 @@ class ShieldVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        alive++
         VpnController.watcher = link
         link.onKillSwitch = { on -> handler.post { killSwitchNow(on) } }
     }
@@ -272,6 +273,8 @@ class ShieldVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        alive--
+        val hadTunnel = synchronized(engineLock) { engine != null } || worker != null || blackhole != null
         // Normally everything is already let go; this covers Android ending the service early.
         destroyed = true
         pending = null
@@ -287,6 +290,9 @@ class ShieldVpnService : VpnService() {
         VpnController.stats = null
         if (VpnController.watcher === link) VpnController.watcher = null
         super.onDestroy()
+        // With no tunnel nothing else lives in this process, so it ends instead of staying cached
+        // (about 8 MB). Not when a new start came meanwhile: that service is alive here again.
+        if (!hadTunnel) handler.postDelayed({ if (alive == 0) android.os.Process.killProcess(android.os.Process.myPid()) }, 500)
     }
 
     /** What to tell the user once the core has stopped. */
@@ -799,6 +805,9 @@ class ShieldVpnService : VpnService() {
     }
 
     companion object {
+        /** Services of this class alive in this process, so an idle process ends only when none is. */
+        private var alive = 0
+
         private const val TAG = "ShieldVpnService"
 
         const val ACTION_CONNECT = "dev.shieldvpn.action.CONNECT"

@@ -270,14 +270,15 @@ private fun ConnectingFor(since: Long?) {
  */
 @Composable
 private fun Idle(state: VpnUiState, c: Connection) {
-    val ps = ProfileStatus.of(c, null, state.asksForLogin(c))
+    val now = minuteTick.longValue
+    val ps = ProfileStatus.of(c, null, state.asksForLogin(c), now)
     val failed = c.lastError
     if (failed != null) {
         Lede(ps.word, " · ${firstSentence(failed)}")
         Live(whatToCheck(failed))
     } else {
         Lede(ps.word, "")
-        Live(ps.detail ?: Words.lastConnected(c.lastUsed))
+        Live(ps.detail ?: Words.lastConnected(c.lastUsed, now))
     }
 }
 
@@ -314,17 +315,7 @@ private fun LiveTraffic(ip: String) {
 private fun firstSentence(text: String): String = text.substringBefore(". ").trimEnd('.')
 
 /** What to check after [why], for the live line. */
-private fun whatToCheck(why: String): String {
-    // Without its full stop, like every other live line.
-    val rest = why.substringAfter(". ", "").trim().trimEnd('.')
-    return when {
-        rest.isNotEmpty() -> rest
-        "did not respond" in why || "didn’t answer" in why -> "Check the server’s address in the profile, or try again later"
-        "username or password" in why -> "Check the username and password in the profile"
-        "certificate" in why -> "The profile’s certificate or the server’s may have changed: import the file again"
-        else -> "View log shows what happened"
-    }
-}
+private fun whatToCheck(why: String): String = Words.whatToCheck(why)
 
 /** How long the pause has left, ticking on its own. */
 @Composable

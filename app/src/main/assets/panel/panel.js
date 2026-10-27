@@ -157,6 +157,7 @@
   let online = true;
   let lastTest = null;
   const draft = new Map(); // path -> op
+  const fieldErrors = new Map(); // path -> what the TV said is wrong with it
   let sheetWatch = null; // the change the sheet follows
 
   // What is typed into a form the page draws again on every push from the TV: kept by a name
@@ -203,6 +204,7 @@
     return null;
   };
   function setDraft(path, value, extra) {
+    fieldErrors.delete(path);
     const item = schemaItem(path);
     const from = settingValue(path);
     if (item && item.type !== 'secret' && same(value, from) && !extra) draft.delete(path);
@@ -238,6 +240,8 @@
     const f = add(el('div', 'field'), el('label', null, 'This phone’s name'), el('span', 'help', 'The TV shows it when it asks, and in its list of phones.'));
     f.style.padding = '0';
     const input = el('input', 'input');
+    input.id = 'pair-name';
+    f.querySelector('label').htmlFor = 'pair-name';
     input.value = guessName();
     input.maxLength = 40;
     input.autocomplete = 'off';
@@ -353,7 +357,8 @@
         if (e instanceof Unpaired) return;
         setOnline(false, e.message);
         await sleep(wait);
-        wait = Math.min(wait * 2, 15000);
+        // At most 5 s apart: on the home network a try costs nothing, and Live comes back sooner.
+        wait = Math.min(wait * 2, 5000);
       }
     }
   }
@@ -399,14 +404,14 @@
     $('tv').textContent = 'On ' + S.tv.name + (me && me.name ? ' · ' + me.name : '');
     document.title = S.tv.app;
     const [tab, arg] = route();
-    document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === (tab === 'p' || tab === 'add' ? 'profiles' : tab) ? 'page' : 'false'));
+    document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === (tab === 'add' && arg === 'restore' ? 'settings' : tab === 'p' || tab === 'add' ? 'profiles' : tab) ? 'page' : 'false'));
     const main = $('main');
     const y = window.scrollY;
     main.replaceChildren();
     if (!online) showBanner(OFFLINE);
     if (tab === 'profiles') profilesView(main);
     else if (tab === 'p') profileView(main, arg);
-    else if (tab === 'add') addView(main);
+    else if (tab === 'add') addView(main, arg);
     else if (tab === 'settings') settingsView(main);
     else if (tab === 'log') logView(main);
     else statusView(main);
@@ -455,7 +460,7 @@
       case 'connecting': return ['busy', 'Connecting…', p && p.server ? 'Reaching ' + p.server.split(' · ')[0] : 'Reaching the server'];
       case 'paused': return ['busy', 'Paused', 'Paused until ' + clock(t.pausedUntil) + '. Traffic goes directly to the internet until then.'];
       case 'blocked': return ['bad', 'Blocking traffic', 'The tunnel dropped. The kill switch holds traffic back until it is back.'];
-      case 'failed': return ['bad', 'Couldn’t connect', t.error || ''];
+      case 'failed': return ['bad', 'Couldn’t connect', [t.error, t.advice && !(t.error || '').includes(t.advice) ? t.advice + '.' : ''].filter(Boolean).join(' ')];
       default: return ['', 'Not connected', p ? p.status.line : ''];
     }
   }
@@ -632,11 +637,7 @@
     main.append(card);
     if (p.publicKey) {
       main.append(el('div', 'section', 'This device’s public key'));
-      const kc = add(el('section', 'card'), el('p', 'lede', 'The WireGuard server needs this key in its peer list.'));
-      const key = el('div', 'key', p.publicKey);
-      const copy = el('button', 'link', 'Copy');
-      copy.onclick = () => copyText(p.publicKey);
-      main.append(add(kc, key, copy));
+      main.append(add(el('section', 'card'), keyBlock(p.publicKey)));
     }
     main.append(el('div', 'section', 'More'));
     const more = el('section', 'card tight');
@@ -651,6 +652,13 @@
     del.onclick = () => review([{ op: 'delete', path: 'profiles.' + p.id }], { title: 'Delete ' + p.name + '?', done: () => { location.hash = '#/profiles'; toast('Deleted ' + p.name); } });
     add(rows, dl, del);
     main.append(add(more, rows));
+  }
+
+  /** This device's WireGuard public key, whole, with Copy: what the server's peer list needs. */
+  function keyBlock(publicKey) {
+    const copy = el('button', 'link', 'Copy');
+    copy.onclick = () => copyText(publicKey);
+    return add(el('div', 'keyblock'), el('p', 'lede', 'The WireGuard server needs this device’s public key in its peer list.'), el('div', 'key', publicKey), copy);
   }
 
   async function copyText(text) {
@@ -774,6 +782,11 @@
       }
       default: break;
     }
+    const bad = fieldErrors.get(path);
+    if (bad) {
+      f.classList.add('bad');
+      f.append(el('p', 'err', bad));
+    }
     return f;
   }
 
@@ -859,17 +872,21 @@
       S.backup.passphrase ? button('Download a backup', '', () => download({ what: 'backup' })) : null,
       set,
       S.backup.passphrase ? button('Remove the passphrase', 'danger', () => review([{ op: 'set', path: 'backup.passphrase', value: null }])) : null,
-      button('Restore a backup', 'ghost', () => { location.hash = '#/add'; })));
+      button('Restore a backup', 'ghost', () => { location.hash = '#/add/restore'; })));
     return card;
   }
 
   // ---- Add a profile, restore, certificates ---------------------------------------------------
   let arrived = null; // what the TV made of the last file sent
 
-  function addView(main) {
-    const back = el('button', 'link', '‹ Profiles');
-    back.onclick = () => { arrived = null; location.hash = '#/profiles'; };
-    add(main, back, el('h1', null, 'Add a profile'), el('p', 'lede', 'A .ovpn or WireGuard .conf, a picture of a WireGuard QR code, a .zip, a backup, or a .p12 certificate. The TV works out what it is.'));
+  function addView(main, from) {
+    // Opened from Settings › Backup it is the restore page, and goes back there.
+    const restore = from === 'restore';
+    const back = el('button', 'link', restore ? '‹ Settings' : '‹ Profiles');
+    back.onclick = () => { arrived = null; forgetTyped('add:'); location.hash = restore ? '#/settings' : '#/profiles'; };
+    add(main, back, el('h1', null, restore ? 'Restore a backup' : 'Add a profile'), el('p', 'lede', restore
+      ? 'Choose the backup file. Type its passphrase next; you see what it adds and changes before anything happens.'
+      : 'A .ovpn or WireGuard .conf, a picture of a WireGuard QR code, a .zip, a backup, or a .p12 certificate. The TV works out what it is.'));
     if (arrived) {
       main.append(arrivedCard(arrived));
       return;
@@ -920,7 +937,7 @@
       const r = await api('files', { name, data: b64(bytes) });
       if (!r.ok) return toast(r.text || 'The TV couldn’t read that.', true);
       arrived = r;
-      if (location.hash !== '#/add') location.hash = '#/add'; else draw(true);
+      if (!location.hash.startsWith('#/add')) location.hash = '#/add'; else draw(true);
     } catch (e) { if (!(e instanceof Unpaired)) toast(e.message, true); }
   }
 
@@ -934,7 +951,10 @@
     if (a.what === 'profile') {
       const rv = a.review;
       add(card, add(el('div', 'meta'), tag(rv.kind, rv.kindLabel)), el('h2', null, rv.name));
-      add(card, el('p', 'lede', rv.server), rv.note ? el('p', 'lede', rv.note) : null);
+      // Named after its server, the name says the address already: the line under it adds the rest.
+      const rest = rv.server.startsWith(rv.name + ':') ? 'Port ' + rv.server.slice(rv.name.length + 1) : rv.server;
+      add(card, el('p', 'lede', rest), rv.note ? el('p', 'lede', rv.note) : null);
+      if (rv.publicKey) card.append(keyBlock(rv.publicKey));
       const name = el('input', 'input');
       name.value = rv.name;
       name.maxLength = 60;
@@ -967,7 +987,7 @@
         card.append(el('p', 'info', a.same.name + ' is for the same server. Update it with this file, or add this as a new profile.'));
         acts.append(button('Update ' + a.same.name, 'mint', () => review([{ op: 'update', file: a.file, path: 'profiles.' + a.same.id }], { done: finished })));
       }
-      add(acts, button(a.same ? 'Add as a new profile' : 'Add it', a.same ? 'ghost' : 'mint', () => review(ops(), { title: 'Add ' + (name.value.trim() || rv.name) + '?', done: () => { finished(); location.hash = '#/profiles'; } })));
+      add(acts, button(a.same ? 'Add as a new profile' : 'Add it', a.same ? 'ghost' : 'mint', () => review(ops(), { title: 'Add ' + (name.value.trim() || rv.name) + '?', publicKey: rv.publicKey, done: () => { finished(); location.hash = '#/profiles'; } })));
       add(card, acts, again);
       return card;
     }
@@ -1054,13 +1074,21 @@
       if (pin == null) return;
       req = Object.assign({}, req, { pin });
     }
-    toast('Press Allow on the TV');
+    // The TV asks first; this sheet waits with it, up to the 90 s the TV gives.
+    const s = openSheet();
+    const started = Date.now();
+    const line = add(el('div', 'progress'), svg(ICON.spin), document.createTextNode(' Press Allow on the TV'));
+    add(s, el('h2', null, 'Waiting for the TV'), line);
+    const tick = setInterval(() => { line.lastChild.textContent = ' Press Allow on the TV · ' + hms(Date.now() - started).slice(3); }, 1000);
     try {
       const r = await api('download', req);
       if (!r.ok) return toast(r.text, true);
       save(r.name, unb64(r.data), 'application/octet-stream');
       toast('Downloaded ' + r.name);
-    } catch (e) { if (!(e instanceof Unpaired)) toast(e.message, true); }
+    } catch (e) { if (!(e instanceof Unpaired)) toast(e.message, true); } finally {
+      clearInterval(tick);
+      if (sheetEl && sheetEl.contains(s)) closeSheet();
+    }
   }
 
   function save(name, bytes, type) {
@@ -1100,10 +1128,14 @@
     box.id = 'logbox';
     LOG.lines.forEach((x) => box.append(logLine(x)));
     if (!LOG.lines.length) box.append(el('div', 't', 'Nothing yet.'));
-    main.append(box);
+    // Above the box, so they are on the first screen.
     main.append(add(el('div', 'toolbar'),
-      button('Download', 'ghost small', () => save((S ? S.tv.app : APP).toLowerCase().replace(/[^a-z0-9]/g, '') + '-log.txt', enc.encode(LOG.lines.map((x) => x[0] + '  ' + x[1]).join('\n') + '\n'), 'text/plain')),
+      button('Download', 'ghost small', () => {
+        const head = S ? [S.tv.app + ' ' + S.tv.version + ' · build ' + S.tv.build + ' · on ' + S.tv.name, 'Downloaded ' + new Date().toString(), ''] : [];
+        save((S ? S.tv.app : APP).toLowerCase().replace(/[^a-z0-9]/g, '') + '-log.txt', enc.encode(head.concat(LOG.lines.map((x) => x[0] + '  ' + x[1])).join('\n') + '\n'), 'text/plain');
+      }),
       button('Clear', 'ghost small', clearLog)));
+    main.append(box);
     setTimeout(() => { box.scrollTop = box.scrollHeight; }, 0);
   }
 
@@ -1128,7 +1160,7 @@
     document.body.classList.remove('sheet-open');
   }
 
-  $('discard').onclick = () => { draft.clear(); draw(true); };
+  $('discard').onclick = () => { draft.clear(); fieldErrors.clear(); draw(true); };
   $('review').onclick = () => review([...draft.values()], { fromDraft: true });
 
   /** Sends [ops] to the TV to check; shows what would change, then applies it. */
@@ -1141,8 +1173,21 @@
       if (!(e instanceof Unpaired)) toast(e.message, true);
       return;
     }
+    // A problem with one of the draft's settings shows under that field, where it is fixed.
+    const problems = Object.entries(p.problems);
+    if (opts.fromDraft && !p.conflicts.length && problems.length) {
+      const fieldOf = (k) => { const i = Number((k.match(/ops\.(\d+)$/) || [])[1]); const op = Number.isNaN(i) ? null : ops[i]; return op && op.op === 'set' && draft.has(op.path) ? op.path : null; };
+      if (problems.every(([k]) => fieldOf(k))) {
+        problems.forEach(([k, v]) => fieldErrors.set(fieldOf(k), v));
+        draw(true);
+        const first = document.querySelector('.field.bad');
+        if (first) first.scrollIntoView({ block: 'center' });
+        toast(problems.length === 1 ? 'One setting needs fixing first' : problems.length + ' settings need fixing first', true);
+        return;
+      }
+    }
     const s = openSheet();
-    const blocked = p.conflicts.length || Object.keys(p.problems).length;
+    const blocked = p.conflicts.length || problems.length;
     add(s, el('h2', null, blocked ? 'This can’t be applied yet' : opts.title || (p.diff.length === 1 ? 'Review the change' : 'Review ' + p.diff.length + ' changes')));
     const labelOf = (i) => {
       const op = ops[i];
@@ -1161,10 +1206,14 @@
         closeSheet();
         draw(true);
         if (draft.size) review([...draft.values()], opts);
-      }), button('Back', 'ghost', closeSheet)));
+      }), opts.fromDraft ? button('Use mine anyway', 'ghost', () => {
+        // Checked again against what the TV has now, so this phone's values replace it.
+        p.conflicts.forEach((c) => { const d = draft.get(c.path); if (d && 'from' in d) d.from = settingValue(c.path); });
+        closeSheet();
+        review([...draft.values()], opts);
+      }) : null, button('Back', 'ghost', closeSheet)));
       return;
     }
-    const problems = Object.entries(p.problems);
     if (problems.length) {
       problems.forEach(([k, v]) => {
         const i = Number((k.match(/ops\.(\d+)/) || [])[1]);
@@ -1220,10 +1269,13 @@
       }
     };
     const testLabel = ops.some((o) => o.op === 'import') ? 'Test before saving' : 'Apply and test';
-    const apply = button(ops.some((o) => o.op === 'delete') ? 'Delete' : ops.some((o) => o.op === 'import') ? 'Save' : 'Apply', ops.some((o) => o.op === 'delete') ? 'danger' : 'mint', () => go(false));
-    const test = p.testable ? button(testLabel, 'ghost', () => go(true)) : null;
+    const importing = ops.some((o) => o.op === 'import');
+    // A setting for the tunnel that is up: Apply and test leads, as it puts the old one back if it fails.
+    const testFirst = p.testable && !importing;
+    const apply = button(ops.some((o) => o.op === 'delete') ? 'Delete' : importing ? 'Save' : 'Apply', ops.some((o) => o.op === 'delete') ? 'danger' : testFirst ? 'ghost' : 'mint', () => go(false));
+    const test = p.testable ? button(testLabel, testFirst ? 'mint' : 'ghost', () => go(true)) : null;
     [apply, test].forEach((b) => { if (b) b.dataset.go = '1'; });
-    add(acts, apply, test, button('Back', 'ghost', closeSheet));
+    add(acts, testFirst ? test : apply, testFirst ? apply : test, button('Back', 'ghost', closeSheet));
     add(s, progress, acts);
     gate();
   }
@@ -1256,7 +1308,15 @@
     const busy = (text) => { w.progress.className = 'progress'; w.progress.replaceChildren(svg(ICON.spin), document.createTextNode(' ' + text)); };
     const end = (cls, text) => {
       w.progress.className = 'info ' + cls;
-      w.progress.textContent = text;
+      // The TV shortens the key ("QcW+Dn81…bwo="); the phone shows it whole, and offers Copy.
+      const key = w.opts.publicKey;
+      const short = key && text && text.includes('…') && /public key/.test(text);
+      w.progress.textContent = short ? text.replace(/[A-Za-z0-9+/]+…[A-Za-z0-9+/]+=*/, key) : text;
+      if (short) {
+        const copy = el('button', 'link', 'Copy the key');
+        copy.onclick = () => copyText(key);
+        w.progress.after(copy);
+      }
       if (e.checks && e.checks.length) {
         const box = el('div');
         e.checks.forEach((c) => box.append(checkRow(c)));

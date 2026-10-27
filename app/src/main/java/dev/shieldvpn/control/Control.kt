@@ -258,7 +258,10 @@ object Control {
     fun rename(id: String, name: String) {
         val clean = name.trim()
         if (clean.isEmpty()) return
-        ConnectionStore.update(app, id) { it.copy(name = clean) }
+        ConnectionStore.update(app, id) { c ->
+            val keep = dev.shieldvpn.ui.tv.lookToKeep(c, clean)
+            c.copy(name = clean, lookIcon = keep?.icon?.name ?: c.lookIcon, lookColour = keep?.colour ?: c.lookColour)
+        }
         refresh()
     }
 

@@ -120,9 +120,10 @@ object Changes {
         val notes = mutableListOf<String>()
         val ops = mutableListOf<Op>()
         var testProfile: String? = null
-        // Profiles whose tunnel changes, and whether a setting for every profile does.
+        // Profiles whose tunnel changes, and whether a setting for every profile does, or for every OpenVPN one.
         val touched = LinkedHashSet<String>()
         var allTunnels = false
+        var allOpenVpn = false
         if (list.length() > MAX_OPS) problems[""] = "That is too many changes at once."
         for (i in 0 until minOf(list.length(), MAX_OPS)) {
             val o = list.optJSONObject(i) ?: continue
@@ -169,7 +170,11 @@ object Changes {
                     item.askTv?.invoke(value)?.let { ask += if (c != null) "$it (${c.name})" else it }
                     extraChecks(s, op, item, c, value)?.let { problem(it) }
                     if (item.tunnel) {
-                        if (c != null) touched += c.id else allTunnels = true
+                        when {
+                            c != null -> touched += c.id
+                            item.kind == VpnKind.OpenVpn -> allOpenVpn = true
+                            else -> allTunnels = true
+                        }
                     }
                 }
                 "delete" -> {
@@ -178,7 +183,7 @@ object Changes {
                         problem("That profile is gone.")
                         continue
                     }
-                    lines += Line(op.path, c.name, "Kept", "Deleted")
+                    lines += Line(op.path, c.name, "", if (s.logins[c.id]?.hasPassword == true) "Deleted, with its saved password" else "Deleted")
                     ask += Words.deleteQuestion(c.name, s.logins[c.id]?.hasPassword == true).removeSuffix("?").replaceFirstChar { it.lowercase() }
                 }
                 "import" -> {
@@ -194,7 +199,9 @@ object Changes {
                         problem(badName)
                         continue
                     }
-                    lines += Line("import", "New profile", "", "$name · ${Words.kind(review.kind)} · ${Words.address(review.host, review.port)}")
+                    // Saying so when a password is kept: the phone's login goes onto the TV.
+                    val saved = (o.optString("password").isNotEmpty() || review.password.isNotEmpty()) && review.needsLogin
+                    lines += Line("import", "New profile", "", "$name · ${Words.kind(review.kind)} · ${Words.address(review.host, review.port)}" + if (saved) " · password saved" else "")
                     testProfile = "new"
                 }
                 "update" -> {
@@ -252,7 +259,7 @@ object Changes {
                             if (!same(a, b) && item.path != "settings.startup") {
                                 lines += Line(item.path, item.label, item.show(a, s), item.show(b, after))
                                 item.askTv?.invoke(b)?.let { ask += it }
-                                if (item.tunnel) allTunnels = true
+                                if (item.tunnel) if (item.kind == VpnKind.OpenVpn) allOpenVpn = true else allTunnels = true
                             }
                         }
                     }
@@ -289,16 +296,27 @@ object Changes {
             ask += merged
         }
         crossChecks(s, ops, problems)
+        // As the TV says before taking the startup slot: the profile that holds it loses it.
+        val holder = s.connections.firstOrNull { s.settings.boot && it.id == s.settings.startupId }
+        val takesStartup = ops.firstOrNull { op ->
+            op.hasSeen && !same(op.value, op.seen) &&
+                (op.path == "settings.startup" && (op.value as? String)?.isNotEmpty() == true || op.path.endsWith(".startup") && op.value == true)
+        }
+        if (holder != null && takesStartup != null && takesStartup.value != holder.id && !takesStartup.path.startsWith("profiles.${holder.id}.")) {
+            notes += "${holder.name} stops connecting at startup."
+        }
         // Said once: an update or a restore that changes nothing has said so already.
         if (lines.isEmpty() && problems.isEmpty() && conflicts.isEmpty() && notes.isEmpty()) notes += "Nothing would change: this is how the TV has it already."
         // When it takes effect: now, or with a reconnect of the tunnel that is up.
         val status = VpnController.status.value
         val liveId = status.connectionId?.takeIf { status.isActive || VpnController.pausedUntil.value != null }
         val live = liveId?.let { id -> s.connections.firstOrNull { it.id == id } }
-        val reconnects = live != null && (allTunnels || live.id in touched) && status !is VpnStatus.Failed
+        // A setting only OpenVPN reads (Log detail, TLS) leaves a WireGuard tunnel alone.
+        val liveIsOpenVpn = live?.let { s.servers[it.serverId]?.kind != VpnKind.WireGuard } == true
+        val reconnects = live != null && (allTunnels || live.id in touched || allOpenVpn && liveIsOpenVpn) && status !is VpnStatus.Failed
         val effect = when {
             reconnects -> Effect.Reconnect
-            allTunnels || touched.isNotEmpty() -> Effect.NextConnect
+            allTunnels || allOpenVpn || touched.isNotEmpty() -> Effect.NextConnect
             else -> Effect.Now
         }
         val killOn = live?.let { killSwitchFor(s, it) } == true
@@ -310,7 +328,7 @@ object Changes {
             } else {
                 "${live!!.name} is connected. Applying reconnects it: a few seconds without the VPN."
             }
-            Effect.NextConnect -> notes += "Tunnel settings take effect the next time a profile connects."
+            Effect.NextConnect -> notes += if (allOpenVpn && !allTunnels && touched.isEmpty()) "OpenVPN profiles use this the next time they connect." else "Tunnel settings take effect the next time a profile connects."
             Effect.Now -> Unit
         }
         if (lines.any { it.path == "settings.killSwitch" }) notes += "The kill switch changes at once, also on a tunnel that is up."

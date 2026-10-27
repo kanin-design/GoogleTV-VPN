@@ -105,6 +105,8 @@ fun TunnelBackdrop(mode: Mode, modifier: Modifier = Modifier, covered: Boolean =
     // Its own layer, so a new frame redraws only the background, not the screens over it.
     Canvas(modifier.graphicsLayer()) {
         frame
+        // Behind a panel or a sheet the names would read through it, out of place: they show on Connect.
+        scene.named = !hidden
         val unit = size.width / 1280f
         scale(unit, unit, pivot = Offset.Zero) { scene.draw(this) }
     }
@@ -301,6 +303,9 @@ private class NetworkScene(private val measurer: TextMeasurer) {
 
     private var labels: List<TextLayoutResult>? = null
 
+    /** The stops are named (THIS DEVICE, VPN SERVER, INTERNET) only while the drawing is uncovered. */
+    var named = true
+
     private fun labels(): List<TextLayoutResult> = labels ?: run {
         // Measured at one pixel a unit: the canvas is already scaled to the design's units.
         val style = TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.14.em, color = Color.White)
@@ -445,6 +450,7 @@ private class NetworkScene(private val measurer: TextMeasurer) {
         stop(0, deviceIcon, 1f, l)
         stop(1, vpnIcon, vpnLit, l)
         stop(2, netIcon, 1f, l)
+        if (!named) return
         val names = labels()
         label(names[0], x[0], y[0] + 34f, 1f)
         label(names[1], x[1], y[1] - 36f - names[1].size.height, 0.4f + 0.6f * vpnLit)

@@ -330,6 +330,12 @@ class Nav {
     /** What had focus when the sheet opened. */
     var opener: FocusRequester? = null
 
+    /** Focus back to what opened the sheets, if it is still there; else to where the screen starts. */
+    fun refocusOpener() {
+        val back = opener
+        if (back != null && back.isOnScreen) refocus(back) else contentFocus = screen
+    }
+
     /** The screen whose content should take focus next, for example after OK on its tab. */
     var contentFocus by mutableStateOf<Screen?>(null)
     var tabFocus by mutableStateOf(false)
@@ -489,6 +495,14 @@ fun rowKeyOpening(col: Col, parent: Col?): String = when (col) {
 fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
     val nav = remember { Nav().apply { contentFocus = Screen.Connect } }
     val mode = modeOf(state)
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            minuteTick.longValue = System.currentTimeMillis()
+        }
+    }
+    // Profiles opens on the profile Connect shows, or the one moved to there since it changed.
+    LaunchedEffect(state.activeId) { state.activeId?.let { nav.profFocus = it } }
 
     LaunchedEffect(nav.toastCount) {
         val shown = nav.toast ?: return@LaunchedEffect
@@ -606,7 +620,10 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
         val a = ask
         val shown = nav.overlay as? Overlay.Ask
         if (a == null) {
-            if (shown != null) nav.overlay = shown.back
+            if (shown != null) {
+                nav.overlay = shown.back
+                if (shown.back == null) nav.refocusOpener()
+            }
             return@LaunchedEffect
         }
         if (shown?.ask?.id == a.id) return@LaunchedEffect
@@ -771,9 +788,8 @@ private fun back(nav: Nav, state: VpnUiState, actions: TunnelActions, server: Ph
             return true
         }
         (nav.overlay as? Overlay.PickProfile)?.cancelled?.invoke()
-        val opener = nav.opener
         nav.overlay = null
-        if (opener != null && opener.isOnScreen) nav.refocus(opener) else nav.contentFocus = nav.screen
+        nav.refocusOpener()
         return true
     }
     when (nav.screen) {
@@ -836,6 +852,12 @@ fun modeOf(s: VpnUiState): Mode = when {
     else -> Mode.Off
 }
 
+/**
+ * The time, moved on every half minute while the screens run. Lines like "12 min ago" read it, so
+ * a screen that stays open redraws them instead of keeping the time it was drawn at.
+ */
+val minuteTick = androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis())
+
 /** How [c] is doing: the tunnel's state when it is the profile Connect shows, its history otherwise. */
 fun profileStatus(state: VpnUiState, c: Connection): ProfileStatus {
     val live = if (c.id != state.activeId) {
@@ -849,7 +871,7 @@ fun profileStatus(state: VpnUiState, c: Connection): ProfileStatus {
             Mode.Off -> null
         }
     }
-    return ProfileStatus.of(c, live, state.asksForLogin(c))
+    return ProfileStatus.of(c, live, state.asksForLogin(c), minuteTick.longValue)
 }
 
 /** The line under a profile's name in lists and on cards. */
@@ -857,7 +879,7 @@ fun statusText(state: VpnUiState, c: Connection): String = profileStatus(state, 
 
 fun authText(state: VpnUiState, c: Connection): String = Words.signIn(state.infoOf(c), state.logins[c.id], c.keyAlias).summary
 
-fun ago(millis: Long): String = Words.ago(millis)
+fun ago(millis: Long): String = Words.ago(millis, minuteTick.longValue)
 
 fun fmtDuration(seconds: Long): String =
     "%02d:%02d:%02d".format(seconds / 3600, (seconds / 60) % 60, seconds % 60)

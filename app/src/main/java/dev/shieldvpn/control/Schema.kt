@@ -110,6 +110,7 @@ object Schema {
     /** The apps the panel lists, set by [Control] from the launcher. */
     @Volatile var launcherApps: List<Option> = emptyList()
 
+    // In the order of the TV's Settings column, so both read the same.
     val groups: List<Group> = listOf(
         Group(
             "protection", "Protection", "What happens when the tunnel drops, and what may leave the device outside it.",
@@ -145,14 +146,26 @@ object Schema {
             ),
         ),
         Group(
+            "diagnostics", "Diagnostics", "For when something does not connect.",
+            listOf(
+                Item("settings.verb", Item.Type.Choice, "Log detail", "How much the log shows", tunnel = true, kind = VpnKind.OpenVpn, advanced = true, options = { choices("1 · quiet" to "Errors and connection changes only", "3 · normal" to "Recommended", "4 · detailed" to "Everything, for troubleshooting with your VPN admin") }),
+            ),
+        ),
+        Group(
+            "phones", "Phone access", "Paired phones can see and change $APP_NAME from their browser, on your home network.",
+            listOf(
+                Item("settings.phoneReach", Item.Type.Choice, "When phones can reach the TV", "When the panel answers a paired phone", options = { phoneReach }),
+            ),
+        ),
+        Group(
             "openvpn", "OpenVPN", "Applied on top of every profile. A setting inside the .ovpn file wins unless noted.",
             listOf(
-                Item("settings.proto", Item.Type.Choice, "Preferred protocol", "Tried first when a profile lists UDP and TCP", tunnel = true, options = { choices("From file" to "Use what the profile says", "UDP" to "Faster. The usual choice", "TCP" to "Gets through strict networks") }),
+                Item("settings.proto", Item.Type.Choice, "Preferred protocol", "Tried first when a profile lists UDP and TCP", tunnel = true, kind = VpnKind.OpenVpn, options = { choices("From file" to "Use what the profile says", "UDP" to "Faster. The usual choice", "TCP" to "Gets through strict networks") }),
                 Item("settings.timeout", Item.Type.Choice, "Connection timeout", "Move on to the next server after this long", tunnel = true, options = { listOf(Option("30", "30 s", "Quick to give up on a dead server"), Option("60", "60 s", "Recommended"), Option("120", "120 s", "For slow or distant servers")) }),
                 Item("settings.mtu", Item.Type.Choice, "Tunnel MTU", "Lower it if video stalls on some networks", tunnel = true, options = { choices("Auto" to "Recommended", "1400" to "Try this if video stalls", "1300" to "For networks that drop large packets") }),
-                Item("settings.tlsMin", Item.Type.Choice, "Minimum TLS version", "Refuse servers that only offer older TLS", tunnel = true, options = { choices("TLS 1.2" to "Works with almost every server", "TLS 1.3" to "Stricter. Newer servers only") }),
-                Item("settings.legacyCiphers", Item.Type.Switch, "Allow legacy ciphers", "BF-CBC and others removed in OpenVPN 2.6", tunnel = true),
-                Item("settings.compress", Item.Type.Switch, "Compress what this device sends", "Can leak data (VORACLE). Compression the server sends is always accepted", tunnel = true),
+                Item("settings.tlsMin", Item.Type.Choice, "Minimum TLS version", "Refuse servers that only offer older TLS", tunnel = true, kind = VpnKind.OpenVpn, options = { choices("TLS 1.2" to "Works with almost every server", "TLS 1.3" to "Stricter. Newer servers only") }),
+                Item("settings.legacyCiphers", Item.Type.Switch, "Allow legacy ciphers", "BF-CBC and others removed in OpenVPN 2.6", tunnel = true, kind = VpnKind.OpenVpn),
+                Item("settings.compress", Item.Type.Switch, "Compress what this device sends", "Can leak data (VORACLE). Compression the server sends is always accepted", tunnel = true, kind = VpnKind.OpenVpn),
             ),
             advanced = true,
         ),
@@ -166,23 +179,11 @@ object Schema {
             advanced = true,
         ),
         Group(
-            "diagnostics", "Diagnostics", "For when something does not connect.",
-            listOf(
-                Item("settings.verb", Item.Type.Choice, "Log detail", "How much the log shows", tunnel = true, advanced = true, options = { choices("1 · quiet" to "Errors and connection changes only", "3 · normal" to "Recommended", "4 · detailed" to "Everything, for troubleshooting with your VPN admin") }),
-            ),
-        ),
-        Group(
             "automation", "Automation", "For home automation apps and ADB. Off until you turn it on.",
             listOf(
                 Item("settings.automation", Item.Type.Switch, "Let other apps control $APP_NAME", "They can connect and disconnect profiles"),
             ),
             advanced = true,
-        ),
-        Group(
-            "phones", "Phone access", "Paired phones can see and change $APP_NAME from their browser, on your home network.",
-            listOf(
-                Item("settings.phoneReach", Item.Type.Choice, "When phones can reach the TV", "When the panel answers a paired phone", options = { phoneReach }),
-            ),
         ),
         Group(
             "general", "General", "",
@@ -215,7 +216,7 @@ object Schema {
             options = { choices("In order" to "Try them as they are written", "Random" to "Spread the load across servers") }),
         Item("killMode", Item.Type.Choice, "Kill switch", "For this profile only. App setting follows Settings › Protection", tunnel = true,
             options = { choices("App setting" to "Follow Settings › Protection", "Always on" to "Block traffic whenever this tunnel is down", "Off" to "Never block for this profile") },
-            askTv = { if (it == "Off") "never block traffic for this profile" else null }),
+            askTv = { if (it == "Off") "turn off the kill switch for this profile" else null }),
         Item("dnsMode", Item.Type.Choice, "DNS", "For this profile only", tunnel = true,
             options = { choices("App setting" to "The server’s DNS, or 1.1.1.1 if it sends none", "Server only" to "Only the DNS servers this server pushes", "Custom" to "Your own DNS servers") }),
         Item("username", Item.Type.Text, "Username", "For signing in to the server", tunnel = true, kind = VpnKind.OpenVpn,

@@ -84,6 +84,19 @@ object Words {
 
     // ---- Time ---------------------------------------------------------------------------
 
+    /** What to check after a failed connect: the reason's own advice, or one for its kind. On the TV and the phone. */
+    fun whatToCheck(why: String): String {
+        // Without its full stop, like every other live line.
+        val rest = why.substringAfter(". ", "").trim().trimEnd('.')
+        return when {
+            rest.isNotEmpty() -> rest
+            "did not respond" in why || "didn’t answer" in why -> "Check the server’s address in the profile, or try again later"
+            "username or password" in why -> "Check the username and password in the profile"
+            "certificate" in why -> "The profile’s certificate or the server’s may have changed: import the file again"
+            else -> "View log shows what happened"
+        }
+    }
+
     fun ago(millis: Long, now: Long = System.currentTimeMillis()): String {
         val minutes = (now - millis) / 60_000
         val hours = minutes / 60

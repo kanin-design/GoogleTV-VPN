@@ -21,7 +21,7 @@ An OpenVPN and WireGuard client for Android TV and Google TV, made for the remot
 - **Updates.** Each time it opens, it looks on GitHub for a newer build, by build number, so a build republished under the same version counts too. Settings › About downloads the APK for the device, checks its SHA-256 and installs it; Android asks you to confirm. If the VPN was on, it connects again once the new build is in.
 - **PIN lock** for settings or the whole app, and **automation intents** for home automation apps and ADB.
 - **Remote, keyboard or mouse.** Everything works with the remote; a keyboard types into fields (Enter moves on, as Done does), and a mouse can click anything.
-- **Light on the device.** The VPN runs in its own small process (about 15 MB with OpenVPN on the Android TV emulator). The screens close themselves ten minutes after you leave them, so the device gets that memory back while you watch; with a phone paired, the panel's server stays in a process of about 12 MB while the VPN is on.
+- **Light on the device.** The VPN runs in its own small process (about 15 MB with OpenVPN on the Android TV emulator). The screens close themselves when you press Back, or three minutes after Home, so the device gets that memory back while you watch; with a phone paired, the panel's server stays in a process of about 12 MB while the VPN is on.
 
 ## Screenshots
 

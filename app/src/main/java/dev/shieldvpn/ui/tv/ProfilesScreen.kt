@@ -142,10 +142,11 @@ fun ProfilesScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
         // Used once: coming back to this screen must not replay an old move.
         val key = nav.stackFocus ?: return@LaunchedEffect
         nav.stackFocus = null
-        req[key].focusWhenReady()
-        if (!req[key].hasFocusNow) {
-            delay(150)
+        // The row may only come back once the columns have slid (after a delete): keep trying a moment.
+        repeat(6) {
             req[key].focusWhenReady()
+            if (req[key].hasFocusNow) return@LaunchedEffect
+            delay(120)
         }
     }
 
@@ -1212,7 +1213,7 @@ private fun SignInBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
                         }
                     }
                 },
-                subtitle = "A certificate in Android’s keystore, instead of the file’s",
+                subtitle = if (state.infoOf(c)?.clientCert == true) "A certificate in Android’s keystore, instead of the file’s" else "A certificate in Android’s keystore",
                 flash = nav.flashKey == "sl-keystore",
                 leading = { IconSquare(Ic.Lock, it) },
                 trailing = { Chevron(it) },
@@ -1343,7 +1344,8 @@ fun DetailGrid(rows: List<Pair<String, String>>, columns: Int = 2) {
                 line.forEach { (k, v) ->
                     Column(Modifier.weight(1f)) {
                         Text(k, style = TvType.ui(14f, FontWeight.SemiBold, Tv.soft(0.55f)))
-                        Text(v, style = TvType.mono(16.5f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                        // Two lines, so a long server name and its address both show.
+                        Text(v, style = TvType.mono(16.5f), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
                     }
                 }
                 repeat(columns - line.size) { Spacer(Modifier.weight(1f)) }

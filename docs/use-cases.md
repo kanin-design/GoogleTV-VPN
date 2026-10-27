@@ -379,7 +379,9 @@ A beta tester went through the phone panel and the TV. What is fixed below was c
 | PIN | An empty PIN is not a try. Apply waits for four digits, and a wrong PIN says how many tries are left before a wait. |
 | Reviews | An update with the file the profile has already, or a restore that adds nothing, says so once and offers only Back. A kill switch change says it applies at once. Save and Test stay off while a change runs. |
 | Words | The panel says Pause 15 minutes, 15 more minutes, VPN IP, "Connected · 00:02:10" (ticking), "Reaching 192.0.2.79:1194" and Cancel while connecting, Try again after a failure, and "Paused until 07:24" on a 24-hour clock. Clear log and Unpair ask first. The TV: "Pick the apps that skip the VPN", the About line names WireGuard, the Automation line follows the switch, the import review says "Key in the profile", and the restore panel's eyebrow and line read plainly. A typed "https://http://…" link drops the doubled scheme, and the link sheet's buttons fit with an error showing. |
-| Not tried on a device | The panel's words while connected, connecting, paused and failed (no tunnel was connected for this check); the 90-second check when the TV is reachable but quiet; an identical update and an all-here restore; the empty-PIN path; the link sheet with an error. |
+| Second round | Checked: after a phone's question, the TV's focus goes back where it was (Edit profile stayed focused after Not now). Sheets are opaque, and the Connect drawing's names (THIS DEVICE, VPN SERVER, INTERNET) are left out while a panel or sheet covers it, so neither reads through. The per-screen code on the TV says "On Pixel 8, the panel does this too." A setting the TV refuses shows its reason under the field on the phone ("not-a-server is not an IP address"), not in a box, and Discard clears it. A download waits in a sheet with a timer while the TV asks. The panel's files are tagged by their content (CRC-32), not the build number, so a rebuild under the same number is not served from the browser's cache. The phone's settings follow the TV's order, and Restore a backup has its own page with a way back to Settings. Not checked on a device: Profiles opening on the profile Connect shows; focus after a delete; "Use mine anyway" for a conflict; "X stops connecting at startup" in the phone's review; the log's header and buttons above it; a rename keeping the colour; the TV's "ago" lines moving on every 30 s; Details values on two lines. |
+| Third round | Checked: a WireGuard import's review on the phone names its server once ("192.0.2.98", then "Port 51820") and shows this device's whole public key with Copy, before it is saved. A failed "Test before saving" shows the key whole instead of the TV's short "JbaWE7Lg…kwA=", with "Copy the key". Log detail, Preferred protocol, Minimum TLS, Legacy ciphers and Compression are marked as OpenVPN's (`kind`): changing one with WireGuard up no longer says the tunnel reconnects ("OpenVPN profiles use this the next time they connect"). |
+| Not tried on a device | The panel's words while connecting and failed (connected and paused were checked: "Connected · 00:00:44" ticking, "Paused until 09:18. Traffic goes directly to the internet until then."); the 90-second check when the TV is reachable but quiet; an identical update and an all-here restore; the empty-PIN path; the link sheet with an error. |
 
 ## Speed test (2026-10-24)
 
@@ -484,13 +486,29 @@ Leak rounds on this build, connected, on the emulator (`cycle3.sh`: Details, the
 
 Nothing grows from round to round. The tunnel stayed up for every measurement. Release builds hide a process's open files from adb, so those were counted on a debug build of the same code.
 
-On the Shield (3 GB, about 800 MB free while a streaming app played), Android may keep a cached screens' process for a long time before it needs the room. So the screens close themselves ten minutes after you leave them (`MainActivity`, `CLOSE_AFTER_MS`): the activity finishes and its process ends, and the next launch starts fresh at Connect with the tunnel's state from the link. They stay while something waits on them: the VPN consent, a file picker or the certificate chooser, a file to review, or a backup or certificate to unlock. Coming back within the ten minutes cancels it. Debug builds take `--ei closeafterseconds N` to test it sooner.
+On the Shield (3 GB, about 800 MB free while a streaming app played), Android may keep a cached screens' process for a long time before it needs the room. So the screens close themselves three minutes after you leave them (`MainActivity`, `CLOSE_AFTER_MS`; ten minutes until 0.2.0 build 120): the activity finishes and its process ends, and the next launch starts fresh at Connect with the tunnel's state from the link. They stay while something waits on them: the VPN consent, a file picker or the certificate chooser, a file to review, or a backup or certificate to unlock. Coming back within the three minutes cancels it. Back ends the screens' process at once, unless a phone's change or an update download is under way in it; before, it stayed cached at about 52 MB when the panel wasn't running. Debug builds take `--ei closeafterseconds N` to test it sooner.
 
 Checked on the emulator: with a 15-second delay, the screens' process ended on time while the tunnel kept carrying traffic; coming back after 8 seconds kept the screens; with an import waiting for review they stayed, and after Cancel they closed. The release build with the real ten minutes: the screens’ process was still there at 9:30 and gone at 10:30, the tunnel kept carrying traffic, and the VPN process held 15.5 MB.
 
 Reconnect after a network change, on the Shield: Wi-Fi off for 20 seconds, then on. Wi-Fi took about 25 seconds to rejoin; Tunnel logged "The network changed. Reconnecting." and the session was active 3 seconds later, with a new tunnel address and traffic flowing.
 
 Keep it this way: no cached full-screen bitmaps, no per-item thumbnails, small app icons (96 px), nothing animating behind panels, the phone pages only while a screen with a phone code is open (and two minutes after), the panel's server only while the app is open or a tunnel is up with a phone paired (in a process without the screens), and measure `dumpsys meminfo` and `top` before calling a build done.
+
+### Nothing left behind (2026-10-27, emulator, release build)
+
+The screens, the panel and the VPN each end their process as soon as nothing needs it, instead of leaving it cached for Android to reclaim:
+- **Back** ends the screens' process at once (`MainActivity.onDestroy`), unless a phone's change or an update download is under way in it. While the panel serves a paired phone for the VPN, Android starts the process again for the panel alone.
+- **Home** closes the screens after three minutes, the same way.
+- **The VPN's process** ends when its service stops without a tunnel (`ShieldVpnService.onDestroy`). It doesn't end when a new start came in meanwhile.
+- **The panel's process** ends when the VPN goes off and no screens are open (`RemoteService.onDestroy`).
+
+| What was done | Screens' process | VPN's process |
+|---|---|---|
+| Back, VPN off | gone (was cached at 52 MB) | gone (was cached at 7.7 MB) |
+| App open, WireGuard up | 37 to 40 MB | 16 MB |
+| Back, WireGuard up, a phone paired | panel alone, 14.2 MB | 16.2 MB, tunnel up |
+| Home, WireGuard up, after 3½ min | panel alone, 11.8 MB (38 MB at 20 s) | same process, tunnel up |
+| Then Disconnect from the phone | gone (was cached at 12.3 MB) | gone |
 
 ## The app's name
 

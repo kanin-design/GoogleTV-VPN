@@ -99,7 +99,7 @@ class ChangesTest {
         assertEquals("turn off the kill switch", kill.askTv!!(false))
         assertNull(kill.askTv!!(true))
         assertEquals("turn off the PIN lock", Schema.item("settings.pinMode")!!.askTv!!("Off"))
-        assertEquals("never block traffic for this profile", Schema.profileItem("killMode")!!.askTv!!("Off"))
+        assertEquals("turn off the kill switch for this profile", Schema.profileItem("killMode")!!.askTv!!("Off"))
         assertEquals("forget a saved password", Schema.profileItem("password")!!.askTv!!(null))
         assertNull(Schema.profileItem("password")!!.askTv!!("new one"))
     }

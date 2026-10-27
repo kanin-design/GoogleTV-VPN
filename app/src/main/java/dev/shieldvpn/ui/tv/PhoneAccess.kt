@@ -148,6 +148,8 @@ fun AskSheet(req: Requesters, o: Overlay.Ask, answer: (Boolean) -> Unit) {
 fun answerAsk(nav: Nav, o: Overlay.Ask, yes: Boolean) {
     Asks.answer(o.ask.id, yes)
     nav.overlay = o.back
+    // With no sheet under it, focus goes back to where it was when the question came.
+    if (o.back == null) nav.refocusOpener()
 }
 
 /** Words for the panel's place in Settings: shown once phones are paired. */

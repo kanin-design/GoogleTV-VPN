@@ -24,7 +24,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
 import dev.shieldvpn.control.Control
 import dev.shieldvpn.remote.RemoteApi
-import dev.shieldvpn.remote.RemoteService
 import dev.shieldvpn.ui.tv.LauncherApp
 import dev.shieldvpn.ui.tv.TunnelActions
 import dev.shieldvpn.ui.tv.TunnelApp
@@ -38,6 +37,7 @@ import dev.shieldvpn.vpn.VpnController
 import dev.shieldvpn.vpn.VpnStatus
 import dev.shieldvpn.vpn.SpeedTest
 import dev.shieldvpn.vpn.Tunnels
+import dev.shieldvpn.vpn.UpdateState
 import dev.shieldvpn.vpn.Updates
 import dev.shieldvpn.vpn.VpnViewModel
 
@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     private var pending: PendingConnect? = null
 
-    // The screens close themselves ten minutes after you leave them, and their process ends, so
+    // The screens close themselves three minutes after you leave them, and their process ends, so
     // the TV gets the memory back. The tunnel runs in its own process and keeps going.
     private val away = Handler(Looper.getMainLooper())
     private val closeAway = Runnable { closeWhileAway() }
@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        screens++
         setContent {
             val state by viewModel.state.collectAsState()
             TunnelApp(state = state, actions = this)
@@ -110,20 +111,24 @@ class MainActivity : ComponentActivity(), TunnelActions {
     private fun closeWhileAway() {
         val s = viewModel.state.value
         // Stay while something unsaved waits on the screens: a file to review, a backup or certificate to unlock.
-        if (waitingForAnswer || holdingFile || s.review != null || s.pendingRestore != null || s.pendingP12 != null) return
+        if (waitingForAnswer || holdingFile || s.review != null || s.pendingRestore != null || s.pendingP12 != null || !idle()) return
         closedAway = true
         finishAndRemoveTask()
     }
 
     override fun onDestroy() {
+        screens--
         away.removeCallbacks(closeAway)
         super.onDestroy()
-        // Nothing else needs the screens' memory, so the process ends instead of staying cached.
-        // While the phones' panel keeps it up for the VPN, Android starts it again for the panel
-        // alone: about half the memory the screens leave behind.
-        val panelOnly = isFinishing && RemoteService.running && !RemoteApi.busy
-        if (closedAway || panelOnly) away.post { Process.killProcess(Process.myPid()) }
+        // Nothing else needs the screens' memory, so the process ends instead of staying cached
+        // (52 MB on the emulator after Back). While the phones' panel keeps it up for the VPN,
+        // Android starts it again for the panel alone, at about a quarter of that.
+        if ((closedAway || isFinishing) && idle()) away.post { Process.killProcess(Process.myPid()) }
     }
+
+    /** Nothing in this process is part way through: a phone's change, or an update download. */
+    private fun idle(): Boolean =
+        !RemoteApi.busy && viewModel.state.value.update.let { it !is UpdateState.Downloading && it !is UpdateState.Installing }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -134,7 +139,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
      * Debug builds only, for testing: `am start ... --ez autoconnect true` presses Connect,
      * `--ez simulatedrop true` ends the tunnel after a delay, `--ez dumpthreads true` logs threads,
      * `--ei pauseseconds N` pauses the tunnel for N seconds instead of 15 minutes,
-     * `--ei closeafterseconds N` closes the screens N seconds after they leave instead of 10 minutes,
+     * `--ei closeafterseconds N` closes the screens N seconds after they leave instead of 3 minutes,
      * `--ez demo true` shows a made-up connected tunnel for screenshots; nothing connects
      * (`--es demostate Busy`, `Off` or `Blocked` shows connecting, not connected or the kill
      * switch blocking traffic instead),
@@ -429,8 +434,12 @@ class MainActivity : ComponentActivity(), TunnelActions {
     override fun installUpdate() = viewModel.installUpdate()
 
     companion object {
+        /** The screens alive in this process: while any is, nothing else ends the process. */
+        @Volatile var screens = 0
+            private set
+
         private const val EXTRA_AUTOCONNECT = "autoconnect"
         private const val EXTRA_SIMULATE_DROP = "simulatedrop"
-        private const val CLOSE_AFTER_MS = 10 * 60 * 1000L
+        private const val CLOSE_AFTER_MS = 3 * 60 * 1000L
     }
 }

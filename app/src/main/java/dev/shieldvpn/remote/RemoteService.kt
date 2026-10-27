@@ -11,6 +11,7 @@ import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import dev.shieldvpn.MainActivity
 import dev.shieldvpn.control.Control
 import dev.shieldvpn.http.HttpServer
 
@@ -57,6 +58,11 @@ class RemoteService : Service() {
         Control.detachLink()
         running = false
         super.onDestroy()
+        // The VPN is off: with no screens open, nothing else lives in this process, so it ends
+        // instead of staying cached (about 12 MB). The next tunnel starts it again for the panel.
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!running && MainActivity.screens == 0 && !RemoteApi.busy) android.os.Process.killProcess(android.os.Process.myPid())
+        }, 500)
     }
 
     companion object {

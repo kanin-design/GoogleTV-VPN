@@ -76,10 +76,8 @@ import dev.shieldvpn.vpn.isActive
 fun Overlays(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (String) -> Unit) {
     val overlay = nav.overlay ?: return
     val close = {
-        val back = nav.opener
         nav.overlay = null
-        // Back to what opened the sheet, if it is still there; else to where the screen starts.
-        if (back != null && back.isOnScreen) nav.refocus(back) else nav.contentFocus = nav.screen
+        nav.refocusOpener()
     }
     Box(
         modifier = Modifier
@@ -146,14 +144,14 @@ private fun Sheets(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Req
 
 @Composable
 fun Sheet(width: Float, content: @Composable () -> Unit) {
-    // Denser than the panels, so a bright title behind does not show through the keyboard.
+    // Opaque, unlike the panels: at 96 % a bright title or row behind still read through it.
     val shape = RoundedCornerShape(30.dp)
     Box(
         modifier = Modifier
             .shadow(40.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
             .width(width.dp)
             .clip(shape)
-            .background(Color(0xF50A0E15))
+            .background(Color(0xFF0A0E15))
             .border(1.dp, Tv.GlassEdge, shape),
     ) {
         Column(Modifier.padding(horizontal = 34.dp, vertical = 30.dp)) { content() }

@@ -90,6 +90,17 @@ private val ByName = listOf(
 /** Colours for names that match no word above. */
 private val OtherColours = intArrayOf(1, 4, 6)
 
+/**
+ * The look to keep when [c] is renamed to [name]: its current one, unless it was chosen already or
+ * a word in the new name picks one ("home", "work"). Otherwise the colour would jump, as it comes
+ * from the name.
+ */
+fun lookToKeep(c: Connection, name: String): ProfileLook? {
+    val now = lookOf(c)
+    if (now.chosen || ByName.any { it.first.containsMatchIn(name) }) return null
+    return now
+}
+
 fun lookOf(c: Connection): ProfileLook {
     val icon = c.lookIcon?.let { name -> LookIcon.entries.firstOrNull { it.name == name } }
     val colour = c.lookColour

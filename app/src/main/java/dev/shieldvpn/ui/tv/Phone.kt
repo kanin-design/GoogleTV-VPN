@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -125,6 +126,13 @@ fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier 
     }
     val url = LocalPhoneServer.current?.url(session) ?: return
     val code = session.code.chunked(3).joinToString(" ")
+    // A paired phone has the whole app in its panel: the code is for any other device.
+    val paired by dev.shieldvpn.remote.Devices.list.collectAsState()
+    val panelLine = when (paired.size) {
+        0 -> null
+        1 -> "On ${paired.first().name}, the panel does this too."
+        else -> "On a paired phone, the panel does this too."
+    }
     val qrShadow = Modifier.shadow(10.dp, RoundedCornerShape(14.dp), ambientColor = Color.Black, spotColor = Color.Black)
     when (size) {
         PhoneBlockSize.Panel -> Column(modifier, verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -147,6 +155,7 @@ fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier 
                 AddressPart("And type", code, big = true)
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (panelLine != null) Text(panelLine, style = TvType.ui(15f, color = Tv.soft(0.7f)))
                 Text(SAME_WIFI, style = TvType.ui(15f, color = Tv.soft(0.55f)))
                 PhoneStatusLine(session)
             }
@@ -155,6 +164,7 @@ fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier 
             Text(title ?: "Or use your phone", style = TvType.ui(18f, FontWeight.Bold))
             QrCode(url, 180f)
             Text("No camera? Open http://$address and type $code.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
+            if (panelLine != null) Text(panelLine, style = TvType.ui(14f, color = Tv.soft(0.7f)))
             Text(SAME_WIFI, style = TvType.ui(13.5f, color = Tv.soft(0.5f)))
             PhoneStatusLine(session, small = true)
         }

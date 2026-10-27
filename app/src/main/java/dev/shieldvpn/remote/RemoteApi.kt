@@ -198,6 +198,7 @@ object RemoteApi : HttpServer.Route {
     // ---- The page ------------------------------------------------------------------------
 
     private val assets = HashMap<String, ByteArray>()
+    private val tags = HashMap<String, String>()
 
     private fun page(r: Request) {
         r.skipBody()
@@ -213,8 +214,8 @@ object RemoteApi : HttpServer.Route {
         val bytes = synchronized(assets) {
             assets.getOrPut(name) { runCatching { app.assets.open("panel/$name").use { it.readBytes() } }.getOrNull() ?: return r.text(404, "Not found.") }
         }
-        // A new build serves new files; the page is checked again each time it opens.
-        val tag = "\"${BuildConfig.VERSION_CODE}\""
+        // From the file itself, so a rebuild under the same build number still serves its new files.
+        val tag = synchronized(assets) { tags.getOrPut(name) { "\"" + java.util.zip.CRC32().also { it.update(bytes) }.value.toString(16) + "\"" } }
         if (r.headers["if-none-match"] == tag) return r.send(304, type, ByteArray(0), "ETag" to tag, "Cache-Control" to "no-cache")
         r.send(200, type, bytes, "ETag" to tag, "Cache-Control" to "no-cache", "Content-Security-Policy" to CSP, head = r.head)
     }
@@ -332,6 +333,7 @@ object RemoteApi : HttpServer.Route {
             .put("since", (status as? VpnStatus.Connected)?.sinceMillis ?: JSONObject.NULL)
             .put("pausedUntil", paused ?: JSONObject.NULL)
             .put("error", (status as? VpnStatus.Failed)?.message ?: JSONObject.NULL)
+            .put("advice", (status as? VpnStatus.Failed)?.message?.let(Words::whatToCheck) ?: JSONObject.NULL)
             .put("ip", t?.publicIp ?: JSONObject.NULL)
             .put("address", t?.address ?: JSONObject.NULL)
             .put("dns", JSONArray(t?.dns.orEmpty()))
@@ -619,6 +621,8 @@ object RemoteApi : HttpServer.Route {
         .put("canSignIn", r.kind == VpnKind.WireGuard || r.needsLogin || ServerStore.hasClientCertificate(r.text))
         .put("warnings", JSONArray(r.warnings))
         .put("note", r.note ?: JSONObject.NULL)
+        // What the server's peer list needs, shown before the profile is even saved.
+        .put("publicKey", r.wgSecrets?.let { k -> runCatching { com.wireguard.crypto.KeyPair(com.wireguard.crypto.Key.fromBase64(k.privateKey)).publicKey.toBase64() }.getOrNull() } ?: JSONObject.NULL)
 
     // The phones that have a question waiting on the TV: one each, so none can fill the server's threads.
     private val asking = java.util.Collections.synchronizedSet(HashSet<String>())
@@ -651,7 +655,7 @@ object RemoteApi : HttpServer.Route {
             "profile" -> {
                 val c = Control.connection(req.optString("profile")) ?: return fail("That profile is gone.")
                 val kind = Control.state.value.servers[c.serverId]?.kind
-                "download the file of ${c.name}, with its keys" to suspend {
+                "download ${c.name}’s file, with its ${if (kind == VpnKind.WireGuard) "private key" else "keys"}" to suspend {
                     Control.profileFile(c.id)?.let { "${c.name.replace(Regex("[^A-Za-z0-9 ._-]"), "_")}.${if (kind == VpnKind.WireGuard) "conf" else "ovpn"}" to it }
                 }
             }
