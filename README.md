@@ -33,8 +33,10 @@ An OpenVPN and WireGuard client for Android TV and Google TV, made for the remot
 | Import: scan the code and send the file from your phone | Settings › Apps: which apps skip the VPN |
 | ![Speed test](docs/screenshots/speedtest.png) | ![Connection details](docs/screenshots/details.png) |
 | Speed test through the VPN | Connection details |
+| ![The phone panel](docs/screenshots/phone-status.png) | ![The phone panel's profiles](docs/screenshots/phone-profiles.png) |
+| The phone panel: the tunnel and the other profiles | The phone panel: every profile, to change |
 
-The screenshots use demo profiles on the Android TV emulator. The speed test is a real run through a home OpenVPN server about 250 ms away.
+The screenshots are the app's own screens with demo profiles, drawn by `tools/screenshots` (see Build). The speed test's numbers are made up.
 
 ## Install
 
@@ -82,6 +84,14 @@ The TV banner and the launcher icon are a placeholder, "VPN" on a teal gradient,
 ```
 python3 tools/banner.py Archivo-ExpandedBlack.ttf
 ```
+
+The screenshots above come from `tools/screenshots/shoot.sh`. It draws the app's own screens with demo profiles: the TV's with Compose for desktop, from the code in `app/src/main/java`, and the phone panel in a headless Chromium, both in Android's fonts, which it downloads the first time. It needs JDK 17, curl, and Node with Playwright (`npm install` in `tools/screenshots/phone`, then `npx playwright install chromium`):
+
+```
+tools/screenshots/shoot.sh
+```
+
+That redraws `docs/screenshots`. `tools/screenshots/shoot.sh out all` draws every screen it knows into `out`, to look at a change to the screens without a TV.
 
 ## How it is built
 

@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Draws the phone panel for tools/screenshots",
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

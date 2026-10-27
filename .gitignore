@@ -28,3 +28,6 @@ third_party/asio/
 *.key
 *.tunnelbackup
 *.openvpnclientbackup
+
+# tools/screenshots/phone installs Playwright here.
+node_modules/
