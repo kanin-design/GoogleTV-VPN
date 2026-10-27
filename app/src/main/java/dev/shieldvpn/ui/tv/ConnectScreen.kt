@@ -401,7 +401,9 @@ private fun QuickRow(state: VpnUiState, nav: Nav, connect: (String) -> Unit, pri
                     },
                     onBlur = { if (nav.focusedPid == c.id) nav.focusedPid = null },
                     onClick = {
-                        val live = current && (modeOf(state) == Mode.On || modeOf(state) == Mode.Busy)
+                        // While a tunnel is up or paused, a card's OK never drops it: focus goes to the
+                        // button above, Disconnect for this profile or "Connect instead" for another.
+                        val live = state.status.isActive || state.pausedUntil != null
                         if (live) primaryFocus.tryFocus() else connect(c.id)
                     },
                     modifier = Modifier.weight(1f),
