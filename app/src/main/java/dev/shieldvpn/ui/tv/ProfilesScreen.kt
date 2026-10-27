@@ -550,7 +550,8 @@ private fun ProfileColumn(
                     )
                 } else {
                     ListRow(
-                        "Connect when the device starts",
+                        // The narrow column, once a page opens beside it, has room for the short form only.
+                        if (mini) "Connect at startup" else "Connect when the device starts",
                         {
                             if (stepBackTo(nav, index, "pe-startup")) return@ListRow
                             when {

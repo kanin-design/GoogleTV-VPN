@@ -142,7 +142,12 @@ private fun MethodRow(m: ImportMethod, state: VpnUiState, nav: Nav, actions: Tun
     ListRow(
         m.title,
         { if (m == ImportMethod.Files) actions.pickFile() else req["im-entry"].tryFocus() },
-        subtitle = if (usable) m.sub else "This device has no file picker",
+        subtitle = when {
+            !usable -> "This device has no file picker"
+            // Only what this device can do: without a file picker, a backup comes from the phone.
+            m == ImportMethod.Restore && !actions.hasFilePicker -> "From your phone"
+            else -> m.sub
+        },
         kind = RowKind.Method,
         selected = nav.importMethod == m,
         enabled = usable,

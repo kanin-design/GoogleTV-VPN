@@ -503,6 +503,8 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
     }
     // Profiles opens on the profile Connect shows, or the one moved to there since it changed.
     LaunchedEffect(state.activeId) { state.activeId?.let { nav.profFocus = it } }
+    // A connect from elsewhere (a phone, automation) shows on Connect, unless a card has focus now.
+    LaunchedEffect(state.activeId, state.status.isActive) { if (nav.focusedPid == null) nav.preview = null }
 
     LaunchedEffect(nav.toastCount) {
         val shown = nav.toast ?: return@LaunchedEffect
@@ -709,7 +711,9 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
             TunnelBackdrop(
                 mode,
                 Modifier.fillMaxSize(),
-                covered = nav.overlay != null || nav.screen == Screen.Import || nav.screen == Screen.Settings,
+                // Profiles covers it too once a profile's page is open over it.
+                covered = nav.overlay != null || nav.screen == Screen.Import || nav.screen == Screen.Settings ||
+                    (nav.screen == Screen.Profiles && nav.stack.isNotEmpty()),
                 blocked = state.status is VpnStatus.Blocked,
             )
             Scrims(nav)

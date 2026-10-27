@@ -260,8 +260,10 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
         }
     }
     Box(Modifier.padding(top = 124.dp, end = 64.dp, bottom = 36.dp).width(540.dp)) {
-        Glass(Modifier.fillMaxSize(), shape = RoundedCornerShape(30.dp)) {
-            Column(Modifier.fillMaxSize().padding(horizontal = 34.dp, vertical = 30.dp)) {
+        // Solid like the sheets, and as tall as its rows: on glass the cards and the drawing read through.
+        val shape = RoundedCornerShape(30.dp)
+        Box(Modifier.clip(shape).background(Color(0xFF0A0E15)).border(1.dp, Tv.GlassEdge, shape)) {
+            Column(Modifier.padding(horizontal = 34.dp, vertical = 30.dp)) {
                 PanelHeading("Connect › ${c.name}", "Connection details")
                 Spacer(Modifier.height(16.dp))
                 DetailGrid(
@@ -279,7 +281,7 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
                         "Connected for" to (since?.let { fmtDuration((now - it).coerceAtLeast(0) / 1000) } ?: "—"),
                     ),
                 )
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(26.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TvButton("Close", close, focusRequester = req["ov-first"])
                     TvButton("View log", {
