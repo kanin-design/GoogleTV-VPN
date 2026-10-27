@@ -437,7 +437,10 @@ private fun UpdateSheet(state: VpnUiState, actions: TunnelActions, req: Requeste
     LaunchedEffect(u::class) { req["ov-first"].focusWhenReady() }
     Sheet(680f) {
         when (u) {
-            is UpdateState.Available -> {
+            is UpdateState.Available -> if (u.newKey) {
+                PanelHeading("Update", "Build ${u.build.number} needs a fresh install", dev.shieldvpn.vpn.NEW_KEY, titleSize = 32f)
+                Row(Modifier.padding(top = 26.dp)) { TvButton("Close", close, focusRequester = req["ov-first"]) }
+            } else {
                 PanelHeading("Update", "Install build ${u.build.number}?", "${dev.shieldvpn.APP_NAME} ${u.build.version}, ${u.build.size / 100_000 / 10f} MB. Android asks you to confirm. If the VPN is on, it connects again after.", titleSize = 32f)
                 Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TvButton("Install", actions::installUpdate, icon = Ic.Download, focusRequester = req["ov-first"])

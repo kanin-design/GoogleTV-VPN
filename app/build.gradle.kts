@@ -14,6 +14,19 @@ fun git(vararg args: String): String? = runCatching {
 val buildNumber = providers.gradleProperty("buildNumber").orNull?.toInt() ?: git("rev-list", "--count", "HEAD")?.toInt()?.plus(100) ?: 1
 val buildCommit = git("rev-parse", "--short=7", "HEAD") ?: "unknown"
 
+// Release builds are signed with the project's release key, ~/Keys/OpenTVPN/opentvpn-release.p12
+// (-PreleaseKeystore=path for another place). Its password comes from OPENTVPN_KEY_PASSWORD or the
+// macOS Keychain item "OpenTVPN release key", and is only looked up for a release build. Neither
+// the key nor its password is ever in the repository. Without them a release build is signed with
+// the debug key, which tools/release.sh refuses to publish.
+val releaseKeystore = file(providers.gradleProperty("releaseKeystore").orNull ?: "${System.getProperty("user.home")}/Keys/OpenTVPN/opentvpn-release.p12")
+val buildsRelease = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+val releasePassword: String? = if (!buildsRelease || !releaseKeystore.exists()) null else {
+    System.getenv("OPENTVPN_KEY_PASSWORD") ?: runCatching {
+        providers.exec { commandLine("security", "find-generic-password", "-s", "OpenTVPN release key", "-w") }.standardOutput.asText.get().trim()
+    }.getOrNull()?.ifEmpty { null }
+}
+
 // WireGuard is on; -Pwireguard=false builds an OpenVPN-only app, with WireGuard's code compiled out (Features.kt).
 val wireguard = providers.gradleProperty("wireguard").orNull != "false"
 
@@ -50,14 +63,24 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releasePassword != null) create("release") {
+            storeFile = releaseKeystore
+            storeType = "pkcs12"
+            storePassword = releasePassword
+            keyAlias = "opentvpn"
+            keyPassword = releasePassword
+        }
+    }
+
     buildTypes {
-        // Release: code shrinking cuts the app and its memory. It is signed with the debug key,
-        // so it installs over a debug build on a TV without losing profiles.
+        // Release: code shrinking cuts the app and its memory. Signed with the release key, it
+        // can't install over a debug build: on a test device, back up, uninstall and restore.
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
         debug {
             isMinifyEnabled = false

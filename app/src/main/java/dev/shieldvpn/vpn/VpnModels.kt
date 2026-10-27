@@ -226,8 +226,11 @@ sealed interface UpdateState {
     data object Checking : UpdateState
     data object UpToDate : UpdateState
 
-    /** [found]: the check when the app opened found it, so the screens mention it once. */
-    data class Available(val build: Updates.Published, val found: Boolean = false) : UpdateState
+    /**
+     * [found]: the check when the app opened found it, so the screens mention it once. [newKey]:
+     * it is signed with another key, so it can't install over this build and only the steps show.
+     */
+    data class Available(val build: Updates.Published, val found: Boolean = false, val newKey: Boolean = false) : UpdateState
     data class Downloading(val build: Updates.Published, val percent: Int) : UpdateState
     data class Installing(val build: Updates.Published) : UpdateState
     data class Failed(val message: String) : UpdateState

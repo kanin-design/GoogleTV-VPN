@@ -76,7 +76,10 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val found = withContext(Dispatchers.IO) { runCatching { Updates.newest() } }
             val next = found.fold(
-                onSuccess = { b -> if (b != null && b.number > BuildConfig.VERSION_CODE) UpdateState.Available(b, found = atStart) else UpdateState.UpToDate },
+                onSuccess = { b ->
+                    if (b == null || b.number <= BuildConfig.VERSION_CODE) UpdateState.UpToDate
+                    else UpdateState.Available(b, found = atStart, newKey = b.signer != null && b.signer != Updates.signer(app))
+                },
                 onFailure = { UpdateState.Failed("GitHub didn't answer. Try again later.") },
             )
             // The check at startup only reports what it found; a failure or no news waits for the next start.
@@ -86,7 +89,10 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Downloads the newer build, checks it and hands it to Android's installer. */
     fun installUpdate() {
-        val build = (_state.value.update as? UpdateState.Available)?.build ?: return
+        val available = _state.value.update as? UpdateState.Available ?: return
+        // Android would refuse it at the end; the screens show the steps instead.
+        if (available.newKey) return
+        val build = available.build
         _state.update { it.copy(update = UpdateState.Downloading(build, 0)) }
         viewModelScope.launch {
             val file = File(app.cacheDir, UPDATE_APK)

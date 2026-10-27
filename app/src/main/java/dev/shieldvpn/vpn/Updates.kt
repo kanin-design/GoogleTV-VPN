@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageInstaller
+import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import androidx.core.content.IntentCompat
@@ -45,6 +46,8 @@ object Updates {
         val url: String,
         val size: Long,
         val sha256: String,
+        /** The SHA-256 of the certificate it is signed with; null for builds listed before 128. */
+        val signer: String?,
     )
 
     /**
@@ -71,10 +74,21 @@ object Updates {
                 url = urls[apk.getString("name")] ?: return null,
                 size = apk.getLong("size"),
                 sha256 = apk.getString("sha256").lowercase(),
+                signer = manifest.optString("signer").lowercase().ifEmpty { null },
             )
         }
         return null
     }
+
+    /**
+     * The SHA-256 of the certificate this app is signed with, as update.json lists it. Android
+     * installs an update only when the two match.
+     */
+    fun signer(context: Context): String? = runCatching {
+        val info = context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+        val cert = info.signingInfo?.apkContentsSigners?.firstOrNull() ?: return null
+        MessageDigest.getInstance("SHA-256").digest(cert.toByteArray()).joinToString("") { "%02x".format(it) }
+    }.getOrNull()
 
     /**
      * Downloads [build]'s APK to [file], reporting whole percents to [progress]. Returns what went
@@ -167,14 +181,18 @@ class UpdateReceiver : BroadcastReceiver() {
                 SettingsStore.setReconnectAfterUpdate(context, null)
                 Updates.installFailure.value = when (status) {
                     PackageInstaller.STATUS_FAILURE_ABORTED -> "The update was cancelled."
-                    PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
-                        "This build can't replace the installed one: it was signed with another key."
+                    PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> NEW_KEY
                     else -> intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Android could not install the update."
                 }
             }
         }
     }
 }
+
+/** What to do when a build is signed with another key, which Android won't put over this one. */
+const val NEW_KEY = "This build is signed with another key, so Android won't put it over this one. " +
+    "Back up your profiles in Settings › Backup, uninstall $APP_NAME, install the new build from " +
+    "github.com/kanin-design/GoogleTV-VPN/releases, then restore the backup."
 
 /** The new build is in: connects again the tunnel that installing it ended, as the boot receiver does. */
 class UpdatedReceiver : BroadcastReceiver() {

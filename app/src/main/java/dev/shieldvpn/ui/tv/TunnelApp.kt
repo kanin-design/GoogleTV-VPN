@@ -526,7 +526,9 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
     // The check when the app opened found a newer build: say so once; Update in the top bar installs it.
     LaunchedEffect(state.update) {
         val u = state.update
-        if (u is UpdateState.Available && u.found) nav.toast("Build ${u.build.number} is ready. Update is at the top right")
+        if (u is UpdateState.Available && u.found) {
+            nav.toast(if (u.newKey) "Build ${u.build.number} is out and needs a fresh install. Update at the top right says how" else "Build ${u.build.number} is ready. Update is at the top right")
+        }
     }
     LaunchedEffect(nav.importItem, nav.staged.size) {
         actions.keepOpen(nav.importItem != null || nav.staged.isNotEmpty())

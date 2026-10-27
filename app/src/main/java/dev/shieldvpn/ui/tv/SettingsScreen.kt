@@ -692,12 +692,18 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                     UpdateState.Idle -> "Look on GitHub for a newer build" to "Check"
                     UpdateState.Checking -> "Looking on GitHub…" to "Checking"
                     UpdateState.UpToDate -> "This is the newest build" to "Check"
-                    is UpdateState.Available -> "Build ${update.build.number} is ready (${update.build.version}, ${update.build.size / 100_000 / 10f} MB)" to "Update"
+                    is UpdateState.Available -> if (update.newKey) "Build ${update.build.number} is signed with a new key and installs by hand" to "How"
+                    else "Build ${update.build.number} is ready (${update.build.version}, ${update.build.size / 100_000 / 10f} MB)" to "Update"
                     is UpdateState.Downloading -> "Downloading build ${update.build.number}… ${update.percent}%" to "Wait"
                     is UpdateState.Installing -> "Installing build ${update.build.number}. Confirm it when Android asks" to "Wait"
                     is UpdateState.Failed -> update.message to "Try again"
                 }
-                action(scope, "s-upd", Ic.Download, if (update is UpdateState.Available) "Install the update" else "Updates", updateSub) {
+                val updateTitle = when {
+                    update is UpdateState.Available && update.newKey -> "Move to the new build"
+                    update is UpdateState.Available -> "Install the update"
+                    else -> "Updates"
+                }
+                action(scope, "s-upd", Ic.Download, updateTitle, updateSub) {
                     when (update) {
                         is UpdateState.Available, is UpdateState.Downloading, is UpdateState.Installing -> nav.overlay = Overlay.Update
                         UpdateState.Checking -> Unit

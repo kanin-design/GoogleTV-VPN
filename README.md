@@ -48,7 +48,7 @@ It needs Android TV or Google TV on Android 9 or newer, on ARM. There is one APK
 
 Later builds install from the app, in Settings › About › Updates. The first time, Android asks you to allow the app to install apps.
 
-This is an alpha, signed with a development key. A later build signed with a release key will need this one uninstalled first. Back up your profiles before that (Settings › Backup).
+This is an alpha. Builds from 128 on are signed with the project's release key. Builds up to 127 were signed with a development key, and Android won't put one key's build over the other's. To move from one of those, back up your profiles (Settings › Backup), uninstall the app, install the new build, then restore the backup. The app says the same when it finds such a build.
 
 ## Build
 
@@ -65,15 +65,15 @@ The libraries are submodules in `third_party/`, pinned to the commits the app is
 JAVA_HOME=/path/to/jdk-17 ./gradlew assembleRelease
 ```
 
-The APKs are `app-arm64-v8a-release.apk` and `app-armeabi-v7a-release.apk` in `app/build/outputs/apk/release/`. Release builds are shrunk with R8 and signed with your debug key, so they install over a debug build without losing profiles.
+The APKs are `app-arm64-v8a-release.apk` and `app-armeabi-v7a-release.apk` in `app/build/outputs/apk/release/`. Release builds are shrunk with R8. They are signed with the release key if this machine has it: `~/Keys/OpenTVPN/opentvpn-release.p12` (or `-PreleaseKeystore=path`), with its password in `OPENTVPN_KEY_PASSWORD` or the macOS Keychain item "OpenTVPN release key". Otherwise they are signed with your debug key, and `tools/release.sh` won't publish them. The key and its password are never in the repository.
 
 Each build is numbered 100 plus the commits on its branch (`git rev-list --count HEAD`). The number is the APKs' `versionCode`, Settings › About shows it, and the update check compares it. To publish a release, from a clean checkout:
 
 ```
-tools/release.sh v0.1.2-beta
+tools/release.sh v0.2.2-alpha
 ```
 
-It builds both APKs, writes `update.json` (the version, build number, commit, and each APK's name, size and SHA-256) and uploads all three to that GitHub release with `gh`. `--dry-run` builds without uploading. The app finds updates through `update.json`, so every release needs it.
+It builds both APKs, checks they are signed with the release key, writes `update.json` (the version, build number, commit, the key's certificate, and each APK's name, size and SHA-256) and uploads all three to that GitHub release with `gh`. `--dry-run` builds without uploading. The app finds updates through `update.json`, so every release needs it.
 
 To rename the app, change `appName` in `gradle.properties`. Every screen, the notification and the home-screen label read it.
 

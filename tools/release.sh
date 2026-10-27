@@ -5,9 +5,10 @@
 #
 # update.json is what the app's update check reads (app/src/main/java/dev/shieldvpn/vpn/Updates.kt):
 # the build number (100 plus the commits on the branch, as app/build.gradle.kts counts; also the
-# APKs' versionCode), the commit, and each APK's name, size and SHA-256 by ABI. With --dry-run it
-# builds and writes everything to build/release/ without uploading. The release notes are left to
-# you; the checksums are printed for them.
+# APKs' versionCode), the commit, the SHA-256 of the key's certificate (so an app signed with
+# another key can say so before it downloads anything), and each APK's name, size and SHA-256 by
+# ABI. With --dry-run it builds and writes everything to build/release/ without uploading. The
+# release notes are left to you; the checksums are printed for them.
 set -euo pipefail
 cd "${0:A:h}/.."
 
@@ -45,7 +46,9 @@ for apk in app/build/outputs/apk/release/app-*-release.apk; do
 done
 
 # Every installed copy refuses an update signed with another key, so check it before uploading.
-cert=e5dd5da370db3301f9f7f5e80190d6b342500f20c5c404ef71588def6c0adba3
+# The release key's certificate (~/Keys/OpenTVPN/opentvpn-release.p12). Builds up to 127 used the
+# Mac's debug key, e5dd5da3…; a TV with one of those has to uninstall before it can take these.
+cert=45625a96af4a28cc46e8cfda6bba18135d23e29eab2f16039f68624876507677
 apksigner=$(ls -d ${ANDROID_HOME:-$HOME/Library/Android/sdk}/build-tools/*/apksigner | tail -1)
 for apk in app/build/outputs/apk/release/app-*-release.apk; do
   certs=$($apksigner verify --print-certs "$apk")
@@ -72,6 +75,7 @@ done
   echo "  \"version\": \"$version\","
   echo "  \"build\": $build,"
   echo "  \"commit\": \"$commit\","
+  echo "  \"signer\": \"$cert\","
   echo "  \"apks\": {"
   echo "${(pj:,\n:)entries}"
   echo "  }"
