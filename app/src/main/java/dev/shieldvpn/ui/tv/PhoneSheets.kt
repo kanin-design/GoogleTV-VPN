@@ -53,10 +53,10 @@ fun PhoneSheet(req: Requesters, o: Overlay.Phone, close: () -> Unit) {
         onDispose { if (session?.focus == o.section) session?.point(null) }
     }
     // As wide as the code and its steps, so no half of the sheet stays empty.
-    Sheet(740f) {
+    Sheet(TvSize.SheetMedium) {
         PanelHeading(o.eyebrow, o.title, o.lede, titleSize = 32f)
-        Box(Modifier.padding(top = 22.dp)) { PhoneBlock(session, PhoneBlockSize.Panel, steps = o.steps) }
-        Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.padding(top = 24.dp)) { PhoneBlock(session, PhoneBlockSize.Panel, steps = o.steps) }
+        Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TvButton("Done", close, icon = Ic.Check, focusRequester = req["ov-first"])
             o.extra?.let { (label, run) -> TvButton(label, run, glass = true) }
         }
@@ -132,24 +132,24 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
             problem = null
         }
     }
-    Sheet(460f) {
+    Sheet(TvSize.SheetSmall) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(title, style = TvType.display(32f))
             Text(
                 if (o.setting) "4 to 8 digits. Without it, Connect still works." else "Profiles and settings are locked on this device.",
                 style = TvType.ui(15f, color = Tv.soft(0.7f)).copy(textAlign = TextAlign.Center),
-                modifier = Modifier.padding(top = 6.dp),
+                modifier = Modifier.padding(top = 8.dp),
             )
             Row(Modifier.padding(top = 22.dp, bottom = if (problem != null) 8.dp else 22.dp).height(18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 repeat(maxOf(4, digits.length)) { i ->
                     Box(Modifier.size(16.dp).clip(CircleShape).background(if (i < digits.length) Tv.Ink else if (problem != null) Tv.Red.copy(alpha = 0.5f) else Tv.white(0.18f)))
                 }
             }
-            problem?.let { Text(it, style = TvType.ui(15f, FontWeight.SemiBold, Tv.Red), modifier = Modifier.padding(bottom = 14.dp)) }
+            problem?.let { Text(it, style = TvType.ui(15f, FontWeight.SemiBold, Tv.Red), modifier = Modifier.padding(bottom = 16.dp)) }
             val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "OK")
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 keys.chunked(3).forEach { line ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         line.forEach { k ->
                             TvButton(
                                 k,
@@ -172,7 +172,7 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
                 }
             }
             if (!o.locksApp) {
-                Row(Modifier.padding(top = 18.dp)) {
+                Row(Modifier.padding(top = 16.dp)) {
                     TvButton("Cancel", close, glass = true, small = true)
                 }
             }
@@ -186,15 +186,15 @@ fun P12TargetSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Req
     var replacing by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { req["p12-first"].focusWhenReady() }
-    Sheet(820f) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Sheet(TvSize.SheetLarge) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             PanelHeading("Import › Certificates", "Add the certificate to a profile", "Its certificate and key go into the profile’s file, in place of any it had.", titleSize = 32f)
             val list = rememberLazyListState()
             LazyColumn(
                 state = list,
-                modifier = Modifier.heightIn(max = 470.dp).bleed(12.dp).scrollFade(list),
+                modifier = Modifier.heightIn(max = 470.dp).bleed(28.dp).scrollFade(list),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 itemsIndexed(state.connections, key = { _, c -> c.id }) { i, c ->
                     val hasCert = state.infoOf(c)?.cert != null
@@ -267,15 +267,15 @@ fun P12TargetSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Req
 /** A list of profiles to pick one from. */
 @Composable
 fun PickProfileSheet(state: VpnUiState, req: Requesters, o: Overlay.PickProfile, close: () -> Unit) {
-    Sheet(640f) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Sheet(TvSize.SheetMedium) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             PanelHeading(o.eyebrow, o.title, o.sub, titleSize = 32f)
             val list = rememberLazyListState()
             LazyColumn(
                 state = list,
-                modifier = Modifier.heightIn(max = 520.dp).bleed(12.dp).scrollFade(list),
+                modifier = Modifier.heightIn(max = 520.dp).bleed(28.dp).scrollFade(list),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 itemsIndexed(state.connections, key = { _, c -> c.id }) { i, c ->
                     ListRow(
@@ -291,7 +291,7 @@ fun PickProfileSheet(state: VpnUiState, req: Requesters, o: Overlay.PickProfile,
                 }
             }
             if (state.connections.isEmpty()) {
-                Text("Add a profile first.", style = TvType.ui(16f, color = Tv.soft(0.7f)))
+                Text("Add a profile first.", style = TvType.ui(17f, color = Tv.soft(0.7f)))
             }
             TvButton("Cancel", {
                 o.cancelled?.invoke()

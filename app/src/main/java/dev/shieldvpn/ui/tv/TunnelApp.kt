@@ -683,6 +683,7 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
 
     CompositionLocalProvider(LocalPhoneServer provides server) {
     TvStage {
+    ClearOfFadeLists {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -731,6 +732,7 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
             Overlays(state, nav, actions, connect)
             TvToast(nav.toast)
         }
+    }
     }
     }
 }
@@ -885,6 +887,9 @@ fun profileStatus(state: VpnUiState, c: Connection): ProfileStatus {
 /** The line under a profile's name in lists and on cards. */
 fun statusText(state: VpnUiState, c: Connection): String = profileStatus(state, c).line
 
+/** The line under a profile's name on its Quick connect card. */
+fun cardStatus(state: VpnUiState, c: Connection): String = profileStatus(state, c).short
+
 fun authText(state: VpnUiState, c: Connection): String = Words.signIn(state.infoOf(c), state.logins[c.id], c.keyAlias).summary
 
 fun ago(millis: Long): String = Words.ago(millis, minuteTick.longValue)
@@ -984,13 +989,13 @@ private fun TopBar(state: VpnUiState, nav: Nav) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(TvSize.Icon.dp)
                     .clip(RoundedCornerShape(TvRadius.Small.dp))
                     .background(Tv.white(0.08f))
                     .border(1.dp, Tv.white(0.12f), RoundedCornerShape(TvRadius.Small.dp)),
                 contentAlignment = Alignment.Center,
             ) { TvIcon(Ic.Logo, 24f, stroke = 2f) }
-            Text(APP_NAME, style = TvType.display(25f, tracking = -0.02f))
+            Text(APP_NAME, style = TvType.display(TvType.Heading, tracking = -0.02f))
         }
         Spacer(Modifier.width(32.dp))
         Glass(deep = false, shape = CircleShape) {
@@ -1000,6 +1005,7 @@ private fun TopBar(state: VpnUiState, nav: Nav) {
                     .onFocusChanged { nav.onTabs = it.hasFocus }
                     .focusProperties { enter = { tabs[nav.screen.name] } }
                     .focusGroup()
+                    // A small-size tab in a bar as tall as a button.
                     .padding(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -1017,7 +1023,7 @@ private fun TopBar(state: VpnUiState, nav: Nav) {
         // A newer build that was found: right of the tabs, one press from installing it.
         val u = state.update
         if (u is UpdateState.Available || u is UpdateState.Downloading || u is UpdateState.Installing) {
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(16.dp))
             TvButton(
                 when (u) {
                     is UpdateState.Downloading -> "Updating ${u.percent}%"
@@ -1032,7 +1038,7 @@ private fun TopBar(state: VpnUiState, nav: Nav) {
         val now = rememberMinute()
         Text(
             remember(now / 60_000) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(now)) },
-            style = TvType.ui(20f, FontWeight.Medium, Tv.soft(0.72f)),
+            style = TvType.ui(19f, FontWeight.Medium, Tv.soft(0.72f)),
         )
     }
 }
@@ -1040,7 +1046,8 @@ private fun TopBar(state: VpnUiState, nav: Nav) {
 @Composable
 private fun TabItem(label: String, selected: Boolean, focusRequester: FocusRequester, onFocus: () -> Unit, onEnter: () -> Unit) {
     val f = rememberFocusState()
-    val scale by animateFloatAsState(if (f.focused) 1.06f else 1f, tween(180, easing = FocusEase), label = "tab")
+    // Less than a button grows: more would reach the bar's edge.
+    val scale by animateFloatAsState(if (f.focused) TvFocus.GrowNav else 1f, tween(TvFocus.Ms, easing = FocusEase), label = "tab")
     Box(
         modifier = Modifier
             .graphicsLayer {
@@ -1066,7 +1073,9 @@ private fun TabItem(label: String, selected: Boolean, focusRequester: FocusReque
                 }
             }
             .tvFocus(f, onEnter, focusRequester, onFocus)
-            .padding(horizontal = 22.dp, vertical = 10.dp),
+            .height(TvSize.Small.dp)
+            .padding(horizontal = 20.dp),
+        contentAlignment = Alignment.Center,
     ) {
         // One weight in every state, so the tabs keep their width as focus moves along them.
         Text(

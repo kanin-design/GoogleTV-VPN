@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -83,21 +85,14 @@ fun Overlays(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (Stri
         modifier = Modifier
             .fillMaxSize()
             // A PIN that locks the whole app hides the app behind it too.
-            .background(
-                Color(0xFF020407).copy(
-                    alpha = when {
-                        (overlay as? Overlay.Pin)?.locksApp == true -> 0.97f
-                        overlay is Overlay.Details -> 0.35f
-                        else -> 0.58f
-                    },
-                ),
-            )
+            .background(if ((overlay as? Overlay.Pin)?.locksApp == true) Color(0xFF020407).copy(alpha = 0.97f) else Tv.Scrim)
             .focusProperties { exit = { FocusRequester.Cancel } }
             .focusGroup(),
         contentAlignment = if (overlay is Overlay.Details) Alignment.TopEnd else Alignment.Center,
     ) {
         AnimatedContent(
             targetState = overlay,
+            modifier = if (overlay is Overlay.Details) Modifier else Modifier.inPanelBox(),
             // The fade is drawn below, not with fadeIn and fadeOut: those draw the sheet into an
             // offscreen buffer, and the graphics driver keeps it.
             transitionSpec = {
@@ -142,6 +137,18 @@ private fun Sheets(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Req
     }
 }
 
+/**
+ * Centres a sheet in the box the panels fill, under the tabs ([TvSize.PanelTop]). A sheet taller
+ * than the box, one with a keyboard, rises until it is 16 from the screen's bottom, and at most
+ * to the middle.
+ */
+private fun Modifier.inPanelBox(): Modifier = layout { measurable, constraints ->
+    val sheet = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+    val inBox = TvSize.PanelTop.dp.roundToPx() + (TvSize.PanelHeight.dp.roundToPx() - sheet.height) / 2
+    val y = minOf(inBox, constraints.maxHeight - 16.dp.roundToPx() - sheet.height).coerceAtLeast((constraints.maxHeight - sheet.height) / 2)
+    layout(constraints.maxWidth, constraints.maxHeight) { sheet.place((constraints.maxWidth - sheet.width) / 2, y) }
+}
+
 @Composable
 fun Sheet(width: Float, content: @Composable () -> Unit) {
     // Opaque, unlike the panels: at 96 % a bright title or row behind still read through it.
@@ -154,7 +161,7 @@ fun Sheet(width: Float, content: @Composable () -> Unit) {
             .background(Color(0xFF0A0E15))
             .border(1.dp, Tv.GlassEdge, shape),
     ) {
-        Column(Modifier.padding(horizontal = 34.dp, vertical = 30.dp)) { content() }
+        Column(Modifier.padding(start = TvSize.PanelInset.dp, end = TvSize.PanelInset.dp, top = TvSize.PanelInsetY.dp, bottom = TvSize.PanelInsetY.dp)) { content() }
     }
 }
 
@@ -259,17 +266,25 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
             withFrameNanos { }
         }
     }
-    Box(Modifier.padding(top = 124.dp, end = 64.dp, bottom = 36.dp).width(540.dp)) {
-        // Solid like the sheets, and as tall as its rows: on glass the cards and the drawing read through.
+    Box(Modifier.padding(top = TvSize.PanelTop.dp, end = 64.dp).width(TvSize.SheetSide.dp)) {
+        // Solid like the sheets, and the panels' height, with the buttons at its foot: shorter, the
+        // tops of the cards under it showed below its edge.
         val shape = RoundedCornerShape(TvRadius.Large.dp)
         Box(Modifier.clip(shape).background(Color(0xFF0A0E15)).border(1.dp, Tv.GlassEdge, shape)) {
-            Column(Modifier.padding(horizontal = 34.dp, vertical = 30.dp)) {
+            Column(
+                Modifier
+                    .defaultMinSize(minHeight = TvSize.PanelHeight.dp)
+                    .padding(start = TvSize.PanelInset.dp, end = TvSize.PanelInset.dp, top = TvSize.PanelInsetY.dp, bottom = TvSize.PanelInsetY.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Column {
                 PanelHeading("Connect › ${c.name}", "Connection details")
                 Spacer(Modifier.height(16.dp))
                 DetailGrid(
                     listOf(
                         // The address it resolved to, only when the file names the server.
-                        "Server" to listOfNotNull(server?.host, t?.remote?.takeIf { it != server?.host }).joinToString(" · "),
+                        // The name and the address it reached, one a line: joined, a long name broke the address in two.
+                        "Server" to listOfNotNull(server?.host, t?.remote?.takeIf { it != server?.host }).joinToString("\n"),
                         "Protocol" to (server?.let { "${Words.kind(info?.kind ?: VpnKind.OpenVpn)} · ${it.protocol.label} ${it.port}" } ?: "—"),
                         "VPN IP (what sites see)" to (t?.publicIp ?: if (since != null) "Looking it up…" else "—"),
                         "Tunnel IP" to (t?.address ?: "—"),
@@ -281,8 +296,8 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
                         "Connected for" to (since?.let { fmtDuration((now - it).coerceAtLeast(0) / 1000) } ?: "—"),
                     ),
                 )
-                Spacer(Modifier.height(26.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+              }
+                Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TvButton("Close", close, focusRequester = req["ov-first"])
                     TvButton("View log", {
                         nav.overlay = null
@@ -296,8 +311,8 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
 
 @Composable
 private fun FileSheet(o: Overlay.File, req: Requesters, close: () -> Unit) {
-    Sheet(760f) {
-        Text(o.eyebrow, style = TvType.eyebrow(14f, 0.55f), maxLines = 1)
+    Sheet(TvSize.SheetMedium) {
+        Text(o.eyebrow, style = TvType.eyebrow(15f, 0.6f), maxLines = 1)
         Text(o.title, style = TvType.display(32f), modifier = Modifier.padding(top = 4.dp))
         Spacer(Modifier.height(16.dp))
         RawConfig(o.text, maxHeight = 340f, plain = o.plain, focusWhenLong = req["ov-text"])
@@ -321,9 +336,9 @@ private fun MenuSheet(
     val live = isLive(state, c.id)
     // The menu opens with a held OK: while a tunnel is up, it doesn't open one press from changing it.
     val tunnelUp = state.status.isActive || state.pausedUntil != null
-    Sheet(460f) {
+    Sheet(TvSize.SheetSmall) {
         PanelHeading("Quick menu", c.name)
-        Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ListRow(
                 when {
                     live -> "Disconnect"
@@ -337,14 +352,12 @@ private fun MenuSheet(
                 },
                 subtitle = profileStatus(state, c).line,
                 focusRequester = if (tunnelUp) null else req["ov-first"],
-                leading = { IconSquare(Ic.Power, it) },
             )
             ListRow(
                 "Speed test",
                 { nav.overlay = Overlay.Speed(c.id, "Quick menu") },
                 subtitle = state.speeds[c.id]?.let { "Last: ${fmtMbps(it.downMbps)} Mbps, ${ago(it.at)}" } ?: "Is it fast enough for 4K?",
                 focusRequester = if (tunnelUp) req["ov-first"] else null,
-                leading = { IconSquare(Ic.Gauge, it) },
             )
             ListRow(
                 "Edit profile",
@@ -358,7 +371,6 @@ private fun MenuSheet(
                     }
                 },
                 subtitle = if (state.serverOf(c)?.kind == VpnKind.WireGuard) "Name, key, advanced" else "Name, sign-in, advanced",
-                leading = { IconSquare(Ic.Pencil, it) },
             )
             ListRow(
                 "Duplicate",
@@ -374,7 +386,6 @@ private fun MenuSheet(
                     }
                 },
                 subtitle = Words.DUPLICATE_HELP,
-                leading = { IconSquare(Ic.Copy, it) },
             )
             ListRow(
                 if (c.pinned) "Unpin from Quick connect" else "Pin to Quick connect",
@@ -384,7 +395,6 @@ private fun MenuSheet(
                     close()
                 },
                 subtitle = "Pinned profiles come first",
-                leading = { IconSquare(Ic.Pin, it) },
             )
             var confirm by remember { mutableStateOf(false) }
             if (confirm) {
@@ -416,7 +426,6 @@ private fun MenuSheet(
                     subtitle = Words.deleteHelp(state.logins[c.id]?.hasPassword == true),
                     danger = true,
                     focusRequester = req["qm-del"],
-                    leading = { IconSquare(Ic.Trash, it) },
                 )
             }
         }
@@ -435,14 +444,14 @@ private fun UpdateSheet(state: VpnUiState, actions: TunnelActions, req: Requeste
     val u = state.update
     // The buttons change as the update goes on; focus moves to the new first one.
     LaunchedEffect(u::class) { req["ov-first"].focusWhenReady() }
-    Sheet(680f) {
+    Sheet(TvSize.SheetMedium) {
         when (u) {
             is UpdateState.Available -> if (u.newKey) {
                 PanelHeading("Update", "Build ${u.build.number} needs a fresh install", dev.shieldvpn.vpn.NEW_KEY, titleSize = 32f)
-                Row(Modifier.padding(top = 26.dp)) { TvButton("Close", close, focusRequester = req["ov-first"]) }
+                Row(Modifier.padding(top = 24.dp)) { TvButton("Close", close, focusRequester = req["ov-first"]) }
             } else {
                 PanelHeading("Update", "Install build ${u.build.number}?", "${dev.shieldvpn.APP_NAME} ${u.build.version}, ${u.build.size / 100_000 / 10f} MB. Android asks you to confirm. If the VPN is on, it connects again after.", titleSize = 32f)
-                Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TvButton("Install", actions::installUpdate, icon = Ic.Download, focusRequester = req["ov-first"])
                     TvButton("Not now", close, glass = true)
                 }
@@ -450,22 +459,22 @@ private fun UpdateSheet(state: VpnUiState, actions: TunnelActions, req: Requeste
             is UpdateState.Downloading -> {
                 PanelHeading("Update", "Downloading build ${u.build.number}", "${u.percent}%. It is checked before Android installs it.", titleSize = 32f)
                 Progress(u.percent / 100f, Modifier.padding(top = 20.dp))
-                Row(Modifier.padding(top = 26.dp)) { TvButton("Hide", close, glass = true, focusRequester = req["ov-first"]) }
+                Row(Modifier.padding(top = 24.dp)) { TvButton("Hide", close, glass = true, focusRequester = req["ov-first"]) }
             }
             is UpdateState.Installing -> {
                 PanelHeading("Update", "Installing build ${u.build.number}", "Confirm it when Android asks. The app closes and opens again on the new build.", titleSize = 32f)
-                Row(Modifier.padding(top = 26.dp)) { TvButton("Hide", close, glass = true, focusRequester = req["ov-first"]) }
+                Row(Modifier.padding(top = 24.dp)) { TvButton("Hide", close, glass = true, focusRequester = req["ov-first"]) }
             }
             is UpdateState.Failed -> {
                 PanelHeading("Update", "The update didn’t install", u.message, titleSize = 32f)
-                Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TvButton("Try again", actions::checkUpdate, icon = Ic.Swap, focusRequester = req["ov-first"])
                     TvButton("Close", close, glass = true)
                 }
             }
             else -> {
                 PanelHeading("Update", "This is the newest build", "${dev.shieldvpn.APP_NAME} looks for a newer one each time it opens.", titleSize = 32f)
-                Row(Modifier.padding(top = 26.dp)) { TvButton("Close", close, focusRequester = req["ov-first"]) }
+                Row(Modifier.padding(top = 24.dp)) { TvButton("Close", close, focusRequester = req["ov-first"]) }
             }
         }
     }

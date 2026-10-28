@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -240,34 +241,58 @@ fun Modifier.fade(alpha: () -> Float): Modifier = graphicsLayer {
     compositingStrategy = CompositingStrategy.ModulateAlpha
 }
 
+/** How far [scrollFade] fades a list's ends, and so how far inside them focus keeps an item. */
+val FadeEdge = 24.dp
+
 /**
- * Lists inside scroll by whole rows, and only as far as it takes to show the focused row whole, so
- * the row at the top is never cut off; only the one at the bottom shows in part, under the fade.
- * Android TV's own way moves the focused row to a point a third of the way down, which can leave a
- * row cut anywhere. The rows are all one height, [gap] apart.
+ * Scrolls a list only as far as it takes to show the focused item whole and clear of the fade at
+ * the list's ends; Android TV's own way moves it to a point a third of the way down. With [gap],
+ * the rows are all one height and the list moves by whole rows.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private class ClearOfFade(private val margin: Float, private val gap: Float?) : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        // An item too tall for both margins keeps what room there is.
+        val m = margin.coerceAtMost(((containerSize - size) / 2f).coerceAtLeast(0f))
+        val need = when {
+            offset < m -> offset - m
+            offset + size > containerSize - m -> offset + size - (containerSize - m)
+            else -> return 0f
+        }
+        if (gap == null) return need
+        val row = size + gap
+        return sign(need) * ceil(abs(need) / row) * row
+    }
+}
+
+/** Every list under it keeps the focused item clear of its fade. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ClearOfFadeLists(content: @Composable () -> Unit) {
+    val margin = with(LocalDensity.current) { FadeEdge.toPx() }
+    val spec = remember(margin) { ClearOfFade(margin, null) }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
+}
+
+/**
+ * Lists inside scroll by whole rows, so the row at the top is never cut off; only one past the
+ * focused row shows in part, under the fade. The rows are all one height, [gap] apart.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WholeRows(gap: Dp, content: @Composable () -> Unit) {
-    val gapPx = with(LocalDensity.current) { gap.toPx() }
-    val spec = remember(gapPx) {
-        object : BringIntoViewSpec {
-            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-                val need = when {
-                    offset < 0f -> offset
-                    offset + size > containerSize -> offset + size - containerSize
-                    else -> return 0f
-                }
-                val row = size + gapPx
-                return sign(need) * ceil(abs(need) / row) * row
-            }
-        }
-    }
+    val density = LocalDensity.current
+    val margin = with(density) { FadeEdge.toPx() }
+    val gapPx = with(density) { gap.toPx() }
+    val spec = remember(margin, gapPx) { ClearOfFade(margin, gapPx) }
     CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
 }
 
-/** .scroll: a list fades out at an edge it can scroll past, instead of being cut off. */
-fun Modifier.scrollFade(list: LazyListState, edge: Dp = 14.dp): Modifier = this
+/**
+ * .scroll: a list fades out at an edge it can scroll past, instead of being cut off, and a thin
+ * track at its right edge shows where in the list it is.
+ */
+fun Modifier.scrollFade(list: LazyListState, edge: Dp = FadeEdge): Modifier = this
     // The fade needs its own buffer; a list that fits on screen has no fade and needs none.
     .graphicsLayer {
         compositingStrategy = if (list.canScrollBackward || list.canScrollForward) CompositingStrategy.Offscreen else CompositingStrategy.Auto
@@ -287,8 +312,33 @@ fun Modifier.scrollFade(list: LazyListState, edge: Dp = 14.dp): Modifier = this
                 ),
                 blendMode = BlendMode.DstIn,
             )
+            scrollTrack(list)
         }
     }
+
+/**
+ * The list's place, 3 wide and 4 in from its right edge, in the room a list keeps beside its rows.
+ * Rows of other heights count as the average of those on screen.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.scrollTrack(list: LazyListState) {
+    val info = list.layoutInfo
+    val shown = info.visibleItemsInfo
+    if (info.totalItemsCount == 0 || shown.isEmpty()) return
+    val row = shown.sumOf { it.size } / shown.size.toFloat() + info.mainAxisItemSpacing
+    val view = (info.viewportEndOffset - info.viewportStartOffset).toFloat()
+    val all = row * info.totalItemsCount
+    if (all <= view) return
+    val done = list.firstVisibleItemIndex * row + list.firstVisibleItemScrollOffset
+    val w = 3.dp.toPx()
+    val x = size.width - 4.dp.toPx() - w
+    val top = FadeEdge.toPx() / 2
+    val track = size.height - 2 * top
+    val thumb = (track * view / all).coerceAtLeast(24.dp.toPx())
+    val y = top + (track - thumb) * (done / (all - view)).coerceIn(0f, 1f)
+    val r = androidx.compose.ui.geometry.CornerRadius(w / 2)
+    drawRoundRect(Tv.white(0.08f), androidx.compose.ui.geometry.Offset(x, top), androidx.compose.ui.geometry.Size(w, track), r)
+    drawRoundRect(Tv.white(0.45f), androidx.compose.ui.geometry.Offset(x, y), androidx.compose.ui.geometry.Size(w, thumb), r)
+}
 
 /**
  * Places this at [x], [y] with the width [width], read while laying out: an animated place or
@@ -341,7 +391,7 @@ fun TvButton(
     onFocus: (() -> Unit)? = null,
 ) {
     val f = rememberFocusState()
-    val scale by animateFloatAsState(if (f.focused) 1.06f else 1f, tween(180, easing = FocusEase), label = "btn")
+    val scale by animateFloatAsState(if (f.focused) TvFocus.Grow else 1f, tween(TvFocus.Ms, easing = FocusEase), label = "btn")
     val bg = when {
         f.focused -> Tv.Focus
         primary -> Tv.Mint.copy(alpha = 0.18f)
@@ -366,33 +416,35 @@ fun TvButton(
                 scaleY = scale
             }
             .shadow(if (f.focused) 16.dp else 0.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
-            .height(if (small) 48.dp else 60.dp)
+            .height((if (small) TvSize.ButtonSmall else TvSize.Button).dp)
             .clip(CircleShape)
             .background(bg)
             .border(1.dp, edge, CircleShape)
             .tvFocus(f, onClick, focusRequester, onFocus)
-            .padding(horizontal = if (small) 20.dp else 28.dp),
+            .padding(horizontal = if (small) 16.dp else 24.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (small) 8.dp else 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        icon?.let { TvIcon(it, if (small) 18f else 22f, fg) }
-        Text(text, style = TvType.ui(if (small) 16f else 19f, FontWeight.SemiBold, fg), maxLines = 1)
+        icon?.let { TvIcon(it, if (small) 16f else 20f, fg) }
+        Text(text, style = TvType.ui(if (small) 17f else 19f, FontWeight.SemiBold, fg), maxLines = 1)
     }
 }
 
 /** Row shapes from the design: .row, .prow (lists of profiles and pictures) and .mrow (import methods). */
 enum class RowKind(val minHeight: Float, val radius: Float, val scale: Float, val titleSize: Float) {
-    Row(60f, TvRadius.Medium, 1.02f, 17f),
-    Profile(72f, TvRadius.Medium, 1.02f, 17f),
-    Pick(76f, TvRadius.Medium, 1.03f, 17f),
-    Method(74f, TvRadius.Medium, 1.03f, 17f),
+    Row(TvSize.Row, TvRadius.Small, TvFocus.GrowRow, 17f),
+    Profile(TvSize.RowTall, TvRadius.Small, TvFocus.GrowRow, 17f),
+    Pick(TvSize.RowTall, TvRadius.Small, TvFocus.GrowRow, 17f),
+    Method(TvSize.RowTall, TvRadius.Small, TvFocus.GrowRow, 17f),
 }
 
 /**
  * A focusable row with a title, an optional line under it, and slots on both sides.
  * [open] marks the row whose column is open next to it; [mini] is the narrow column,
  * where only names show. [flash] shows "Saved" on it for a moment; a row that can't be used
- * here ([enabled] false) is dimmed and focus passes it by.
+ * here ([enabled] false) dims its title and icon, keeps the line that says why, and focus
+ * passes it by. A row with an icon or a picture is [TvSize.RowTall] high, one of words
+ * [TvSize.Row], and so is every row of the narrow column, where only the name shows.
  */
 @Composable
 fun ListRow(
@@ -414,8 +466,17 @@ fun ListRow(
     trailing: (@Composable RowScope.(focused: Boolean) -> Unit)? = null,
 ) {
     val f = rememberFocusState()
-    val scale by animateFloatAsState(if (f.focused) kind.scale else 1f, tween(180, easing = FocusEase), label = "row")
+    val scale by animateFloatAsState(if (f.focused) kind.scale else 1f, tween(TvFocus.Ms, easing = FocusEase), label = "row")
     val foldAlpha by animateFloatAsState(if (mini) 0f else 1f, tween(250), label = "fold")
+    val minHeight by animateDpAsState(
+        when {
+            mini -> TvSize.Row
+            kind == RowKind.Row && leading != null -> TvSize.RowTall
+            else -> kind.minHeight
+        }.dp,
+        tween(250),
+        label = "rowH",
+    )
     val shape = RoundedCornerShape(kind.radius.dp)
     val bg by animateColorAsState(
         when {
@@ -423,10 +484,10 @@ fun ListRow(
             open -> Tv.white(0.14f)
             selected && kind == RowKind.Row -> Tv.white(0.13f)
             selected -> Tv.white(0.1f)
-            kind == RowKind.Row || kind == RowKind.Profile -> Tv.white(0.04f)
-            else -> Color.Transparent
+            kind == RowKind.Pick -> Color.Transparent
+            else -> Tv.white(0.04f)
         },
-        tween(180),
+        tween(TvFocus.Ms),
         label = "rowBg",
     )
     val ring = !f.focused && (open || (selected && kind == RowKind.Row))
@@ -436,8 +497,18 @@ fun ListRow(
         danger -> Tv.Red
         else -> Tv.Ink
     }
-    val titleAlpha = if (mini && !open && !f.focused) 0.55f else 1f
-    val subColor = if (f.focused) Tv.dark(0.6f) else Tv.soft(0.6f)
+    val titleAlpha = when {
+        !enabled -> 0.5f
+        mini && !open && !f.focused -> 0.55f
+        else -> 1f
+    }
+    val subColor = when {
+        f.focused -> Tv.dark(0.6f)
+        // The reason a row can't be used is what it is there to say.
+        !enabled -> Tv.soft(0.55f)
+        else -> Tv.soft(0.6f)
+    }
+    val iconAlpha = if (enabled) 1f else 0.5f
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -446,18 +517,18 @@ fun ListRow(
                 scaleY = scale
             }
             .shadow(if (f.focused) 14.dp else 0.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
-            .defaultMinSize(minHeight = kind.minHeight.dp)
+            .defaultMinSize(minHeight = minHeight)
             .clip(shape)
             .background(bg)
             .then(if (ring) Modifier.border(1.dp, Tv.white(0.16f), shape) else Modifier)
-            .then(if (enabled) Modifier.tvFocus(f, onClick, focusRequester, onFocus) else Modifier.fade { 0.42f })
+            .then(if (enabled) Modifier.tvFocus(f, onClick, focusRequester, onFocus) else Modifier)
             // The same inset in every kind, so a heading lines up with any list under it.
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (leading != null && foldAlpha > 0.01f) {
-            Box(Modifier.fade { foldAlpha }) { leading(f.focused) }
+            Box(Modifier.fade { foldAlpha * iconAlpha }) { leading(f.focused) }
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
@@ -470,7 +541,7 @@ fun ListRow(
             if (subtitle != null && foldAlpha > 0.01f) {
                 Text(
                     subtitle,
-                    style = TvType.ui(14f, color = subColor),
+                    style = TvType.ui(15f, color = subColor),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fade { foldAlpha },
@@ -480,7 +551,7 @@ fun ListRow(
         SavedPill(flash && foldAlpha > 0.01f)
         if (trailing != null && foldAlpha > 0.01f) {
             Row(
-                modifier = Modifier.fade { foldAlpha },
+                modifier = Modifier.fade { foldAlpha * iconAlpha },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) { trailing(f.focused) }
@@ -488,10 +559,12 @@ fun ListRow(
     }
 }
 
-/** The chevron at the end of a row that opens something. */
+/** The chevron at the end of a row that opens something, where a [ValueChip]'s chevron ends. */
 @Composable
 fun Chevron(focused: Boolean) {
-    TvIcon(Ic.Chev, 18f, if (focused) Tv.OnFocus else Tv.Ink, stroke = 2.4f)
+    Box(Modifier.height(TvSize.Chip.dp).padding(end = 8.dp), contentAlignment = Alignment.Center) {
+        TvIcon(Ic.Chev, 16f, if (focused) Tv.OnFocus else Tv.Ink, stroke = 2.4f)
+    }
 }
 
 /** The mint "Saved" pill a row shows for a moment after its value was saved. */
@@ -502,12 +575,12 @@ fun SavedPill(visible: Boolean, modifier: Modifier = Modifier) {
             modifier = Modifier
                 .clip(CircleShape)
                 .background(Tv.Mint.copy(alpha = 0.16f))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             TvIcon(Ic.Check, 15f, Tv.Mint, stroke = 3f)
-            Text("Saved", style = TvType.ui(14f, FontWeight.SemiBold, Tv.Mint))
+            Text("Saved", style = TvType.ui(15f, FontWeight.SemiBold, Tv.Mint))
         }
     }
 }
@@ -518,16 +591,32 @@ fun ValueChip(text: String, focused: Boolean, leading: (@Composable () -> Unit)?
     Row(
         modifier = Modifier
             .widthIn(max = 300.dp)
+            .height(TvSize.Chip.dp)
             .clip(CircleShape)
             .background(if (focused) Tv.dark(0.1f) else Tv.white(0.1f))
-            .padding(start = 14.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = 12.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         val c = if (focused) Tv.OnFocus else Tv.soft(0.9f)
         leading?.invoke()
         if (text.isNotEmpty()) Text(text, style = TvType.ui(15f, FontWeight.Medium, c), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         TvIcon(Ic.Chev, 16f, c, stroke = 2.4f)
+    }
+}
+
+/** An action at the end of a row, such as Remove: a chip's size, with no chevron. */
+@Composable
+fun ActionChip(text: String, focused: Boolean, danger: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .height(TvSize.Chip.dp)
+            .clip(CircleShape)
+            .background(if (focused) Tv.dark(0.1f) else if (danger) Tv.Red.copy(alpha = 0.14f) else Tv.white(0.1f))
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, style = TvType.ui(15f, FontWeight.SemiBold, if (focused && danger) Tv.DarkRed else if (focused) Tv.OnFocus else if (danger) Tv.Red else Tv.soft(0.9f)))
     }
 }
 
@@ -546,10 +635,10 @@ fun TvSwitch(on: Boolean, focused: Boolean) {
         on -> Color(0xFF06140D)
         else -> Tv.soft(0.7f)
     }
-    val x by animateFloatAsState(if (on) 24f else 0f, tween(200, easing = FocusEase), label = "knob")
+    val x by animateFloatAsState(if (on) 20f else 0f, tween(200, easing = FocusEase), label = "knob")
     Box(
         modifier = Modifier
-            .size(54.dp, 30.dp)
+            .size(52.dp, TvSize.Chip.dp)
             .clip(CircleShape)
             .background(track)
             .padding(4.dp),
@@ -557,7 +646,7 @@ fun TvSwitch(on: Boolean, focused: Boolean) {
         Box(
             Modifier
                 .graphicsLayer { translationX = x * density }
-                .size(22.dp)
+                .size(24.dp)
                 .clip(CircleShape)
                 .background(knob),
         )
@@ -578,7 +667,7 @@ fun CheckBadge(focused: Boolean) {
 
 /** The icon square at the start of an action row. */
 @Composable
-fun IconSquare(icon: Ic, focused: Boolean, size: Float = 40f, radius: Float = TvRadius.Small) {
+fun IconSquare(icon: Ic, focused: Boolean, size: Float = TvSize.Icon, radius: Float = TvRadius.Small) {
     Box(
         modifier = Modifier
             .size(size.dp)
@@ -592,20 +681,20 @@ fun IconSquare(icon: Ic, focused: Boolean, size: Float = 40f, radius: Float = Tv
 @Composable
 fun AddSquare(focused: Boolean, icon: Ic = Ic.Plus) {
     // A row's icon like the others, filled, so the row doesn't read as a button inside a row.
-    IconSquare(icon, focused, size = 44f)
+    IconSquare(icon, focused)
 }
 
 /** .sect: a small heading between rows, on the same edge as the rows' words. */
 @Composable
 fun SectionLabel(text: String) {
-    Text(text, style = TvType.eyebrow(14f, 0.5f), modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
+    Text(text, style = TvType.eyebrow(15f, 0.6f), modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
 }
 
 /** .p-eyebrow, .p-title and .p-sub: the heading of a panel. */
 @Composable
 fun PanelHeading(eyebrow: String?, title: String, sub: String? = null, titleSize: Float = 32f) {
     Column {
-        if (eyebrow != null) Text(eyebrow, style = TvType.eyebrow(14f, 0.55f))
+        if (eyebrow != null) Text(eyebrow, style = TvType.eyebrow(15f, 0.6f))
         Text(title, style = TvType.display(titleSize), modifier = Modifier.padding(top = if (eyebrow != null) 4.dp else 0.dp))
         if (sub != null) Text(sub, style = TvType.ui(17f, color = Tv.soft(0.7f)).copy(lineHeight = (17 * 1.45f).sp), modifier = Modifier.padding(top = 8.dp).widthIn(max = 600.dp))
     }
@@ -748,30 +837,33 @@ fun InputBox(
     mono: Boolean = false,
     focusRequester: FocusRequester? = null,
     error: String? = null,
+    /** How far the field reaches past the label on both sides: 16 in a panel, so the words in it line up with the label. */
+    bleed: Dp = 0.dp,
 ) {
     val f = rememberFocusState()
-    val shape = RoundedCornerShape(TvRadius.Medium.dp)
+    val shape = RoundedCornerShape(TvRadius.Small.dp)
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, style = TvType.ui(14f, FontWeight.Medium, Tv.soft(0.6f)))
+        Text(label, style = TvType.ui(15f, FontWeight.Medium, Tv.soft(0.6f)))
         Row(
             modifier = Modifier
+                .bleed(bleed)
                 .fillMaxWidth()
-                .then(if (f.focused) Modifier.border(5.dp, Tv.white(0.12f), RoundedCornerShape((TvRadius.Medium + 4).dp)).padding(0.dp) else Modifier)
-                .height(58.dp)
+                .then(if (f.focused) Modifier.border(4.dp, Tv.white(0.12f), RoundedCornerShape(TvRadius.Medium.dp)) else Modifier)
+                .height(TvSize.Row.dp)
                 .clip(shape)
                 .background(if (f.focused) Tv.white(0.12f) else Tv.white(0.07f))
                 .border(2.dp, if (f.focused) Tv.Focus else if (error != null) Tv.Red else if (editing) Tv.white(0.3f) else Color.Transparent, shape)
                 .tvFocus(f, onClick, focusRequester)
-                .padding(horizontal = 18.dp),
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val shown = if (secret && !showSecret) "•".repeat(value.length) else value
             if (value.isEmpty()) {
-                Text(label, style = TvType.ui(20f, FontWeight.Medium, Tv.soft(0.45f)), maxLines = 1)
+                Text(label, style = TvType.ui(19f, FontWeight.Medium, Tv.soft(0.45f)), maxLines = 1)
             } else {
                 Text(
                     shown,
-                    style = if (secret || mono) TvType.mono(19f, FontWeight.SemiBold).copy(letterSpacing = 0.08.em) else TvType.ui(20f, FontWeight.SemiBold),
+                    style = if (secret || mono) TvType.mono(19f, FontWeight.SemiBold).copy(letterSpacing = 0.08.em) else TvType.ui(19f, FontWeight.SemiBold),
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                     modifier = Modifier.weight(1f, fill = false),
@@ -779,7 +871,7 @@ fun InputBox(
             }
             if (editing) Caret()
         }
-        if (error != null) Text(error, style = TvType.ui(14f, FontWeight.Medium, Tv.Red), maxLines = 2)
+        if (error != null) Text(error, style = TvType.ui(15f, FontWeight.Medium, Tv.Red), maxLines = 2)
     }
 }
 
@@ -818,7 +910,7 @@ fun BoxScope.TvToast(message: String?) {
                 .background(Color(0xFF111821))
                 .border(1.dp, Tv.GlassEdge, CircleShape),
         ) {
-            Text(last, style = TvType.ui(16f, FontWeight.SemiBold), maxLines = 1, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+            Text(last, style = TvType.ui(17f, FontWeight.SemiBold), maxLines = 1, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
         }
     }
 }
@@ -869,11 +961,11 @@ fun ConfirmBar(text: String, confirm: String, keep: FocusRequester, onConfirm: (
             .fillMaxWidth()
             // As tall as the row it takes the place of, so the sheet or list around it doesn't jump.
             .height(RowKind.Row.minHeight.dp)
-            .clip(RoundedCornerShape(TvRadius.Medium.dp))
+            .clip(RoundedCornerShape(TvRadius.Small.dp))
             .background(Tv.Red.copy(alpha = 0.12f))
-            .padding(start = 18.dp, end = 10.dp),
+            .padding(start = 16.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(text, style = TvType.ui(15f, FontWeight.SemiBold).copy(lineHeight = 18.sp), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         TvButton(confirm, onConfirm, icon = icon, small = true, danger = true)

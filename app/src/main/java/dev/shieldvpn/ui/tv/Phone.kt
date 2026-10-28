@@ -118,7 +118,7 @@ enum class PhoneBlockSize {
  * the same-Wi-Fi hint, and a line saying what the phone did last.
  */
 @Composable
-fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier = Modifier, title: String? = null, steps: List<String> = emptyList()) {
+fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier = Modifier, title: String? = null, steps: List<String> = emptyList(), qr: Float? = null) {
     val address = LocalPhoneServer.current?.address
     if (session == null || address == null) {
         Box(modifier) { Notice(Ic.Bang, NO_HOME_NETWORK, amber = true) }
@@ -130,20 +130,20 @@ fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier 
     val paired by dev.shieldvpn.remote.Devices.list.collectAsState()
     val panelLine = when (paired.size) {
         0 -> null
-        1 -> "On ${paired.first().name}, the panel does this too."
-        else -> "On a paired phone, the panel does this too."
+        1 -> "${paired.first().name} is paired: its phone panel does this too."
+        else -> "A paired phone does this in its phone panel too."
     }
-    val qrShadow = Modifier.shadow(10.dp, RoundedCornerShape(TvRadius.Medium.dp), ambientColor = Color.Black, spotColor = Color.Black)
+    val qrShadow = Modifier.shadow(10.dp, RoundedCornerShape(TvRadius.Small.dp), ambientColor = Color.Black, spotColor = Color.Black)
     when (size) {
-        PhoneBlockSize.Panel -> Column(modifier, verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(30.dp), verticalAlignment = Alignment.CenterVertically) {
+        PhoneBlockSize.Panel -> Column(modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(32.dp), verticalAlignment = Alignment.CenterVertically) {
                 QrCode(url, 196f, qrShadow)
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (title != null) Text(title, style = TvType.ui(19f, FontWeight.SemiBold))
                     steps.forEachIndexed { i, step ->
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.white(0.12f)), contentAlignment = Alignment.Center) {
-                                Text("${i + 1}", style = TvType.ui(14f, FontWeight.SemiBold))
+                                Text("${i + 1}", style = TvType.ui(15f, FontWeight.SemiBold))
                             }
                             Text(step, style = TvType.ui(17f, color = Tv.soft(0.86f)), modifier = Modifier.widthIn(max = 360.dp))
                         }
@@ -156,54 +156,59 @@ fun PhoneBlock(session: PhoneSession?, size: PhoneBlockSize, modifier: Modifier 
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (panelLine != null) Text(panelLine, style = TvType.ui(15f, color = Tv.soft(0.7f)))
-                Text(SAME_WIFI, style = TvType.ui(15f, color = Tv.soft(0.55f)))
+                Text(SAME_WIFI, style = TvType.ui(15f, color = Tv.soft(0.6f)))
                 PhoneStatusLine(session)
             }
         }
         PhoneBlockSize.Side -> Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title ?: "Or use your phone", style = TvType.ui(17f, FontWeight.SemiBold))
             QrCode(url, 180f)
-            Text("No camera? Open http://$address and type $code.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
-            if (panelLine != null) Text(panelLine, style = TvType.ui(14f, color = Tv.soft(0.7f)))
-            Text(SAME_WIFI, style = TvType.ui(13f, color = Tv.soft(0.5f)))
-            PhoneStatusLine(session, small = true)
+            // The column is narrow: the address at the data size, so a long one stays on one line.
+            AddressPart("No camera? Open on any device", "http://$address", size = 17f)
+            AddressPart("And type", code, big = true)
+            if (panelLine != null) Text(panelLine, style = TvType.ui(15f, color = Tv.soft(0.7f)))
+            Text(SAME_WIFI, style = TvType.ui(15f, color = Tv.soft(0.6f)))
+            PhoneStatusLine(session)
         }
-        PhoneBlockSize.Wide -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(30.dp), verticalAlignment = Alignment.CenterVertically) {
+        PhoneBlockSize.Wide -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(32.dp), verticalAlignment = Alignment.CenterVertically) {
             QrCode(url, 196f, qrShadow)
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 steps.forEachIndexed { i, step ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(26.dp).clip(CircleShape).background(Tv.white(0.12f)), contentAlignment = Alignment.Center) {
-                            Text("${i + 1}", style = TvType.ui(13f, FontWeight.SemiBold))
+                        Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.white(0.12f)), contentAlignment = Alignment.Center) {
+                            Text("${i + 1}", style = TvType.ui(15f, FontWeight.SemiBold))
                         }
                         Text(step, style = TvType.ui(17f, color = Tv.soft(0.86f)))
                     }
                 }
-                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(36.dp)) {
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(36.dp)) {
                     AddressPart("No camera? Open on any device", "http://$address")
                     AddressPart("And type", code, big = true)
                 }
-                Text(SAME_WIFI, style = TvType.ui(14f, color = Tv.soft(0.55f)))
-                PhoneStatusLine(session, small = true)
+                Text(SAME_WIFI, style = TvType.ui(15f, color = Tv.soft(0.6f)))
+                PhoneStatusLine(session)
             }
         }
-        PhoneBlockSize.Compact -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
-            QrCode(url, 128f, qrShadow)
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        PhoneBlockSize.Compact -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+            QrCode(url, qr ?: 160f, qrShadow)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(title ?: "Or use your phone", style = TvType.ui(17f, FontWeight.SemiBold))
-                Text("No camera? Open http://$address and type $code.", style = TvType.ui(15f, color = Tv.soft(0.7f)))
-                Text(SAME_WIFI, style = TvType.ui(13f, color = Tv.soft(0.5f)))
-                PhoneStatusLine(session, small = true)
+                Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+                    AddressPart("No camera? Open on any device", "http://$address")
+                    AddressPart("And type", code, big = true)
+                }
+                Text(SAME_WIFI, style = TvType.ui(15f, color = Tv.soft(0.6f)))
+                PhoneStatusLine(session)
             }
         }
     }
 }
 
 @Composable
-private fun AddressPart(label: String, value: String, big: Boolean = false) {
+private fun AddressPart(label: String, value: String, big: Boolean = false, size: Float = TvType.MonoUrl) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = TvType.ui(14f, FontWeight.SemiBold, Tv.soft(0.55f)))
-        Text(value, style = TvType.mono(if (big) 24f else 20f).copy(letterSpacing = if (big) 0.08.em else 0.em))
+        Text(label, style = TvType.ui(15f, FontWeight.Medium, Tv.soft(0.6f)))
+        Text(value, style = TvType.mono(if (big) TvType.MonoCode else size).copy(letterSpacing = if (big) 0.08.em else 0.em), maxLines = 1)
     }
 }
 
@@ -212,7 +217,7 @@ private fun AddressPart(label: String, value: String, big: Boolean = false) {
  * these screens otherwise hold still, and an animation would redraw them every frame.
  */
 @Composable
-fun PhoneStatusLine(session: PhoneSession, small: Boolean = false) {
+fun PhoneStatusLine(session: PhoneSession) {
     val line = session.tvLine
     val seen = session.lastSeen
     // A phone counts as here until 40 s after it last asked; one wait flips that, not a ticking clock.
@@ -224,8 +229,9 @@ fun PhoneStatusLine(session: PhoneSession, small: Boolean = false) {
             here = false
         }
     }
-    val text = TvType.ui(if (small) 14f else 15f, FontWeight.SemiBold, if (line != null || here) Tv.Ink else Tv.soft(0.6f))
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+    // Waiting is the block's news too, so it reads as plainly as the other two.
+    val text = TvType.ui(15f, FontWeight.SemiBold, if (line != null || here) Tv.Ink else Tv.soft(0.86f))
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
         when {
             line != null -> {
                 TvIcon(Ic.Check, 16f, Tv.Mint, stroke = 3f)
@@ -236,7 +242,7 @@ fun PhoneStatusLine(session: PhoneSession, small: Boolean = false) {
                 Text("Your phone has the page open", style = text)
             }
             else -> {
-                TvIcon(Ic.Phone, 16f, Tv.soft(0.5f))
+                TvIcon(Ic.Phone, 16f, Tv.soft(0.86f))
                 Text("Waiting for your phone", style = text)
             }
         }

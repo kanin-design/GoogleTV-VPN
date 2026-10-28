@@ -134,6 +134,10 @@ data class ProfileStatus(val word: String, val detail: String?, val tone: Tone) 
             else -> word
         }
 
+    /** A card's line: a failure's reason alone, since the card says it failed in red. */
+    val short: String
+        get() = if (tone == Tone.Bad && detail != null) detail.substringBefore(". ").trimEnd('.') else line
+
     companion object {
         /**
          * [live] is the tunnel's state when it belongs to this profile, and null otherwise; a

@@ -177,8 +177,8 @@ fun FormSheet(nav: Nav, req: Requesters, spec: FormSpec, close: () -> Unit, sess
         onDispose { if (nav.sheetBack === mine) nav.sheetBack = null }
     }
 
-    Sheet(if (spec.phone != null) 1100f else 820f) {
-        Row(horizontalArrangement = Arrangement.spacedBy(34.dp)) {
+    Sheet(if (spec.phone != null) TvSize.SheetForm else TvSize.SheetLarge) {
+        Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
             // An error line or the Back note takes room the buttons need on the tallest sheets.
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(if (errors.isEmpty() && !warned) 14.dp else 8.dp)) {
                 PanelHeading(spec.eyebrow, spec.title, spec.sub, titleSize = 32f)
@@ -191,12 +191,12 @@ fun FormSheet(nav: Nav, req: Requesters, spec: FormSpec, close: () -> Unit, sess
                 }
                 when (spec.fields.size) {
                     1 -> box(spec.fields[0], Modifier)
-                    2 -> Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    2 -> Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         spec.fields.forEach { box(it, Modifier.weight(1f)) }
                     }
                     else -> {
                         box(spec.fields[0], Modifier)
-                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             spec.fields.drop(1).forEach { box(it, Modifier.weight(1f)) }
                         }
                     }

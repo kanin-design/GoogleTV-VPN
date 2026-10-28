@@ -165,7 +165,7 @@ fun LookCard(
     tone: Color? = null,
 ) {
     val f = rememberFocusState()
-    val scale by animateFloatAsState(if (f.focused) 1.06f else 1f, tween(200, easing = FocusEase), label = "card")
+    val scale by animateFloatAsState(if (f.focused) TvFocus.Grow else 1f, tween(TvFocus.Ms, easing = FocusEase), label = "card")
     val shape = RoundedCornerShape(TvRadius.Medium.dp)
     Box(
         modifier = modifier
@@ -183,7 +183,7 @@ fun LookCard(
         Box(
             modifier = Modifier
                 .padding(16.dp)
-                .size(44.dp)
+                .size(TvSize.Icon.dp)
                 .clip(RoundedCornerShape(TvRadius.Small.dp))
                 .lookFill(colours),
             contentAlignment = Alignment.Center,
@@ -192,12 +192,12 @@ fun LookCard(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
         ) {
             Text(title, style = TvType.ui(17f, FontWeight.SemiBold, if (f.focused) Tv.OnFocus else Tv.Ink), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 subtitle,
-                style = TvType.ui(14f, color = if (f.focused) Tv.dark(0.62f) else tone ?: Tv.soft(0.6f)),
+                style = TvType.ui(15f, color = if (f.focused) Tv.dark(0.62f) else tone ?: Tv.soft(0.6f)),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

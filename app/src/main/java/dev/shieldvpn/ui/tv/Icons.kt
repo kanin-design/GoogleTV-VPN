@@ -45,6 +45,7 @@ enum class Ic(vararg val paths: String) {
     Copy(rect(8f, 8f, 12f, 12f, 2f), "M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"),
     Pin("M9 4h6l-1 6 3 3H7l3-3z", "M12 16v4"),
     Download("M12 4v11", "M7 10.5l5 5 5-5", "M5 20h14"),
+    Close("M6 6l12 12", "M18 6L6 18"),
 }
 
 private val vectors = HashMap<Pair<Ic, Float>, ImageVector>()

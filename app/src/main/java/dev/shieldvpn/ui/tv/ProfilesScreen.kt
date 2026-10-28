@@ -159,7 +159,8 @@ fun ProfilesScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
         Box(
             Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 536.dp, bottom = 44.dp)
+                // On the panels' bottom edge, 36 above the screen's.
+                .padding(start = 536.dp, bottom = TvSize.PanelBottom.dp)
                 .width(680.dp)
                 .graphicsLayer {
                     alpha = heroAlpha
@@ -238,7 +239,7 @@ private fun SlidingColumn(role: Role, list: Boolean, focus: Modifier, shown: () 
     )
     val width by animateDpAsState(
         when (role) {
-            Role.Root -> 440.dp
+            Role.Root -> TvSize.ListWidth.dp
             Role.Mini, Role.Gone -> 264.dp
             Role.Cur -> 864.dp
         },
@@ -265,7 +266,7 @@ private fun SlidingColumn(role: Role, list: Boolean, focus: Modifier, shown: () 
             Modifier
                 .fillMaxHeight()
                 .wrapContentWidth(Alignment.Start, unbounded = true)
-                .width(if (list) 440.dp else 864.dp)
+                .width(if (list) TvSize.ListWidth.dp else 864.dp)
                 .then(focus),
         ) { content(role == Role.Mini) }
         // The edge sinks into the dark page beside it, which looks the same as fading the column.
@@ -281,16 +282,18 @@ private fun SlidingColumn(role: Role, list: Boolean, focus: Modifier, shown: () 
 
 /** .c-head: eyebrow, title and a line under it. In the narrow column only the title stays. */
 @Composable
-private fun ColumnHead(eyebrow: String, title: String, sub: String?, mini: Boolean, count: Int? = null, extra: (@Composable () -> Unit)? = null) {
+private fun ColumnHead(eyebrow: String?, title: String, sub: String?, mini: Boolean, count: Int? = null, inList: Boolean = false, extra: (@Composable () -> Unit)? = null) {
     val fold by animateFloatAsState(if (mini) 0f else 1f, tween(250), label = "headFold")
-    Column(Modifier.padding(start = 30.dp, end = 30.dp, top = 22.dp, bottom = 10.dp)) {
-        if (fold > 0.01f) Text(eyebrow, style = TvType.eyebrow(14f, 0.55f), maxLines = 1, modifier = Modifier.fade { fold })
-        Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 4.dp)) {
-            Text(title, style = TvType.display(if (mini) 24f else 32f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-            if (count != null && !mini) Text("$count", style = TvType.ui(16f, FontWeight.SemiBold, Tv.soft(0.55f)), modifier = Modifier.padding(start = 10.dp, bottom = 5.dp))
+    // In a list, its padding and gap already give part of the inset.
+    val side = if (inList) TvSize.PanelInset - 16 else TvSize.PanelInset
+    Column(Modifier.padding(start = side.dp, end = side.dp, top = (if (inList) TvSize.PanelInsetY - 8 else TvSize.PanelInsetY).dp, bottom = if (inList) 4.dp else 12.dp)) {
+        if (eyebrow != null && fold > 0.01f) Text(eyebrow, style = TvType.eyebrow(15f, 0.6f), maxLines = 1, modifier = Modifier.fade { fold })
+        Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = if (eyebrow != null) 4.dp else 0.dp)) {
+            Text(title, style = TvType.display(if (mini) TvType.Heading else 32f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            if (count != null && !mini) Text("$count", style = TvType.ui(17f, FontWeight.SemiBold, Tv.soft(0.6f)), modifier = Modifier.padding(start = 12.dp, bottom = 4.dp))
         }
-        if (sub != null && !mini) Text(sub, style = TvType.ui(16f, color = Tv.soft(0.68f)), maxLines = 1, modifier = Modifier.padding(top = 6.dp))
-        if (extra != null && !mini) Box(Modifier.padding(top = 14.dp)) { extra() }
+        if (sub != null && !mini) Text(sub, style = TvType.ui(17f, color = Tv.soft(0.68f)), maxLines = 1, modifier = Modifier.padding(top = 8.dp))
+        if (extra != null && !mini) Box(Modifier.padding(top = 16.dp)) { extra() }
     }
 }
 
@@ -299,13 +302,13 @@ private fun ColumnHead(eyebrow: String, title: String, sub: String?, mini: Boole
 @Composable
 private fun ListColumn(state: VpnUiState, nav: Nav, req: Requesters, mini: Boolean) {
     Column(Modifier.fillMaxSize()) {
-        ColumnHead("On this device", "Profiles", null, mini, count = state.connections.size)
+        ColumnHead(null, "Profiles", null, mini, count = state.connections.size)
         val list = rememberLazyListState()
-        WholeRows(6.dp) { LazyColumn(
+        WholeRows(8.dp) { LazyColumn(
             state = list,
             modifier = Modifier.scrollFade(list),
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(state.connections, key = { it.id }) { c ->
                 val open = nav.stack.firstOrNull()?.id == c.id
@@ -366,10 +369,10 @@ private fun ProfileHero(state: VpnUiState, c: Connection) {
         "Pinned to Quick connect".takeIf { c.pinned },
     )
     Column(horizontalAlignment = Alignment.Start) {
-        Text(c.name, style = TvType.title(92f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 18.dp))
+        Text(c.name, style = TvType.title(TvType.HeroCompact), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 16.dp))
         MetaLine(listOf(listOfNotNull(Words.kind(server?.kind ?: VpnKind.OpenVpn), server?.let { Words.serverLine(it.host, it.port, it.protocol, state.infoOf(c)?.cipher) }).joinToString(" · ")))
         MetaLine(facts)
-        Row(Modifier.padding(top = 22.dp), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+        Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             // One key, two ways to press it.
             Hint("OK", "Open · hold it for the quick menu")
         }
@@ -380,7 +383,7 @@ private fun ProfileHero(state: VpnUiState, c: Connection) {
 @Composable
 private fun MetaLine(parts: List<String>) {
     Row(
-        modifier = Modifier.padding(top = 10.dp),
+        modifier = Modifier.padding(top = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -393,15 +396,15 @@ private fun MetaLine(parts: List<String>) {
 
 @Composable
 private fun Hint(key: String, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(
             modifier = Modifier
                 .size(32.dp)
                 .clip(CircleShape)
                 .border(2.dp, Tv.white(0.3f), CircleShape),
             contentAlignment = Alignment.Center,
-        ) { Text(key, style = TvType.ui(13f, FontWeight.SemiBold, Color.White)) }
-        Text(text, style = TvType.ui(16f, FontWeight.SemiBold, Tv.soft(0.7f)))
+        ) { Text(key, style = TvType.ui(15f, FontWeight.SemiBold, Color.White)) }
+        Text(text, style = TvType.ui(17f, FontWeight.SemiBold, Tv.soft(0.7f)))
     }
 }
 
@@ -452,36 +455,39 @@ private fun ProfileColumn(
     val startup = state.settings.boot && state.settings.startupId == c.id
 
     Column(Modifier.fillMaxSize()) {
-        ColumnHead(nav.copyOf[c.id]?.let { "Copy of $it" } ?: "Profiles", c.name, listOfNotNull(Words.kind(server?.kind ?: VpnKind.OpenVpn), server?.let { Words.serverLine(it.host, it.port, it.protocol, info?.cipher) }).joinToString(" · "), mini, extra = {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                val connecting = (state.status as? VpnStatus.Connecting)?.connectionId == c.id
-                TvButton(
-                    when {
-                        connecting -> "Cancel"
-                        live -> "Disconnect"
-                        else -> "Connect"
-                    },
-                    {
-                        if (live) actions.disconnect() else connect(c.id)
-                        // A profile without its password opens the sign-in sheet instead.
-                        if (!live && !state.asksForLogin(c)) nav.toast("Connecting to ${c.name}")
-                    },
-                    icon = Ic.Power,
-                    small = true,
-                    focusRequester = req["pe-connect"],
-                )
-                TvButton("Edit on your phone", {
-                    nav.overlay = profilePhone(c, "Edit ${c.name} on your phone", "Scan the code: the page has every setting of this profile, and its .ovpn file. Save there keeps only what you changed.")
-                }, icon = Ic.Phone, small = true, glass = true)
-            }
-        })
         val list = nav.listState("profile-${c.id}")
         LazyColumn(
             state = list,
             modifier = Modifier.scrollFade(list),
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // The heading scrolls with the rows, so the rows under it get the column's height.
+            item("head") {
+                ColumnHead(nav.copyOf[c.id]?.let { "Copy of $it" }, c.name, listOfNotNull(Words.kind(server?.kind ?: VpnKind.OpenVpn), server?.let { Words.serverLine(it.host, it.port, it.protocol, info?.cipher) }).joinToString(" · "), mini, extra = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val connecting = (state.status as? VpnStatus.Connecting)?.connectionId == c.id
+                        TvButton(
+                            when {
+                                connecting -> "Cancel"
+                                live -> "Disconnect"
+                                else -> "Connect"
+                            },
+                            {
+                                if (live) actions.disconnect() else connect(c.id)
+                                // A profile without its password opens the sign-in sheet instead.
+                                if (!live && !state.asksForLogin(c)) nav.toast("Connecting to ${c.name}")
+                            },
+                            icon = if (connecting) Ic.Close else Ic.Power,
+                            small = true,
+                            focusRequester = req["pe-connect"],
+                        )
+                        TvButton("Edit on your phone", {
+                            nav.overlay = profilePhone(c, "Edit ${c.name} on your phone", "Scan the code: the page has every setting of this profile, and its .ovpn file. Save there keeps only what you changed.")
+                        }, icon = Ic.Phone, small = true, glass = true)
+                    }
+                }, inList = true)
+            }
             item {
                 ListRow(
                     "Name", { if (!stepBackTo(nav, index, "pe-name")) nav.overlay = Overlay.Form(nameSpec(nav, actions, c)) },
@@ -587,7 +593,6 @@ private fun ProfileColumn(
                     "Advanced options", { open(nav, index, Col.Advanced(c.id), entryKey(Col.Advanced(c.id), state)) },
                     subtitle = "Server, protocol, kill switch, DNS, the file", open = openKey == "pe-adv", mini = mini,
                     focusRequester = req["pe-adv"],
-                    leading = { IconSquare(Ic.Gear, it) },
                     trailing = { Chevron(it) },
                 )
             }
@@ -602,7 +607,6 @@ private fun ProfileColumn(
                         ?: if (live) "Is it fast enough for 4K?" else "Connects, then measures it",
                     mini = mini,
                     focusRequester = req["pe-speed"],
-                    leading = { IconSquare(Ic.Gauge, it) },
                     trailing = { Chevron(it) },
                 )
             }
@@ -614,7 +618,6 @@ private fun ProfileColumn(
                         },
                         subtitle = "Addresses, DNS, routes and what has gone through", mini = mini,
                         focusRequester = req["pe-details"],
-                        leading = { IconSquare(Ic.Info, it) },
                         trailing = { Chevron(it) },
                     )
                 }
@@ -632,7 +635,6 @@ private fun ProfileColumn(
                     },
                     subtitle = "Get ${Words.fileTitle(state.infoOf(c)?.kind).removePrefix("The ")} on your phone", mini = mini,
                     focusRequester = req["pe-send"],
-                    leading = { IconSquare(Ic.Phone, it) },
                     trailing = { Chevron(it) },
                 )
             }
@@ -650,7 +652,6 @@ private fun ProfileColumn(
                     },
                     subtitle = Words.DUPLICATE_HELP, mini = mini,
                     focusRequester = req["pe-dup"],
-                    leading = { IconSquare(Ic.Copy, it) },
                     trailing = { Chevron(it) },
                 )
             }
@@ -683,7 +684,6 @@ private fun ProfileColumn(
                         },
                         subtitle = Words.deleteHelp(state.logins[c.id]?.hasPassword == true), danger = true, mini = mini,
                         focusRequester = req["pe-del"],
-                        leading = { IconSquare(Ic.Trash, it) },
                         trailing = { Chevron(it) },
                     )
                 }
@@ -936,7 +936,6 @@ private fun AdvancedColumn(state: VpnUiState, nav: Nav, actions: TunnelActions, 
             title, { open(nav, index, Col.Leaf(c.id, kind), entryKey(Col.Leaf(c.id, kind), state)) },
             subtitle = sub, open = openKey == key, mini = mini, focusRequester = req[key],
             flash = nav.flashKey == key,
-            leading = if (value == null) ({ IconSquare(Ic.File, it) }) else null,
             trailing = { if (value != null) ValueChip(value, it) else Chevron(it) },
         )
     }
@@ -947,8 +946,8 @@ private fun AdvancedColumn(state: VpnUiState, nav: Nav, actions: TunnelActions, 
         LazyColumn(
             state = list,
             modifier = Modifier.scrollFade(list),
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
                 // A file with <connection> blocks lists its own servers, and those are used as they are.
@@ -1039,9 +1038,9 @@ private fun LeafColumn(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth()) {
             ColumnHead(path, label, sub, mini = false)
-            SavedChip(savedPulse, Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 26.dp))
+            SavedChip(savedPulse, Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 24.dp))
         }
-        Box(Modifier.padding(start = 26.dp, end = 26.dp, top = 6.dp, bottom = 20.dp)) {
+        Box(Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 20.dp)) {
             when (kind) {
                 LeafKind.Protocol, LeafKind.Order, LeafKind.Kill, LeafKind.Dns -> OptionsBody(state, nav, actions, req, c, kind, saved)
                 LeafKind.File -> FileBody(state, nav, actions, req, c)
@@ -1073,7 +1072,7 @@ private fun OptionsBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req
         LeafKind.Kill -> c.killMode
         else -> c.dnsMode
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Options.getValue(kind).forEachIndexed { i, (value, sub) ->
             val selected = value == current
             ListRow(
@@ -1106,7 +1105,7 @@ private fun OptionsBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req
 @Composable
 private fun FileBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Requesters, c: Connection) {
     val text = remember(c.serverId, state.servers[c.serverId]) { actions.rawConfig(c.serverId) }
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         RawConfig(text, maxHeight = 270f, focusWhenLong = req["ed-text"])
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TvButton("Close", { nav.pop() }, focusRequester = req["ed-done"])
@@ -1131,7 +1130,7 @@ private fun SignInBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
     val saved = login != null && login.hasPassword && login.username.isNotEmpty()
     var confirmForget by remember(c.id) { mutableStateOf(false) }
     val list = rememberLazyListState()
-    LazyColumn(state = list, modifier = Modifier.heightIn(max = 420.dp).bleed(12.dp).scrollFade(list), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    LazyColumn(state = list, modifier = Modifier.heightIn(max = 420.dp).bleed(28.dp).scrollFade(list), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (needsLogin) {
             item { SectionLabel("Password") }
             item {
@@ -1162,7 +1161,6 @@ private fun SignInBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
                             "Forget the saved password", { confirmForget = true },
                             subtitle = "It is asked for at the next connect", danger = true,
                             focusRequester = req["sl-forget"],
-                            leading = { IconSquare(Ic.Trash, it) },
                             trailing = { Chevron(it) },
                         )
                     }
@@ -1171,12 +1169,12 @@ private fun SignInBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
         }
         item { SectionLabel("Certificate") }
         item {
-            Box(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+            Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                 when {
                     c.keyAlias != null -> DetailGrid(listOf("Certificate" to Certificates.label(c.keyAlias), "Stored" to "In this device’s keystore. The key can’t be copied off it"), columns = 1)
                     cert == null -> Text(
                         if (needsLogin) "There is no client certificate in this file. The username and password sign you in." else "There is no client certificate in this file, and no password either.",
-                        style = TvType.ui(16f, color = Tv.soft(0.7f)),
+                        style = TvType.ui(17f, color = Tv.soft(0.7f)),
                     )
                     else -> DetailGrid(
                         listOf(
@@ -1245,9 +1243,9 @@ private fun LookBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: R
     val look = lookOf(c)
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxHeight()) {
-        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(30.dp)) {
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
             LookCard(look.colours, look.icon.path, 34f, c.name, state.serverOf(c)?.host.orEmpty(), Modifier.width(290.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Icon", style = TvType.ui(15f, FontWeight.Medium, Tv.soft(0.7f)))
                 Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     LookIcon.entries.chunked(6).forEach { line ->
@@ -1268,7 +1266,7 @@ private fun LookBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: R
                     }
                 }
                 Text("Colour", style = TvType.ui(15f, FontWeight.Medium, Tv.soft(0.7f)))
-                Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Swatches.forEachIndexed { i, colours ->
                         LookSwatch(colours, selected = i == look.colour, focusRequester = req["lc-$i"]) {
                             actions.setLook(c.id, look.icon.name, i)
@@ -1279,7 +1277,7 @@ private fun LookBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: R
             }
         }
         Spacer(Modifier.weight(1f))
-        Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TvButton("Done", { nav.pop() }, icon = Ic.Check, focusRequester = req["ed-done"])
             if (look.chosen) {
                 TvButton("Use the one from the name", {
@@ -1297,8 +1295,8 @@ private fun LookBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req: R
 @Composable
 private fun LookTile(selected: Boolean, colours: Pair<Color, Color>, focusRequester: FocusRequester, onClick: () -> Unit, content: @Composable () -> Unit) {
     val f = rememberFocusState()
-    val scale by animateFloatAsState(if (f.focused) 1.12f else 1f, tween(180, easing = FocusEase), label = "tile")
-    val shape = RoundedCornerShape(TvRadius.Medium.dp)
+    val scale by animateFloatAsState(if (f.focused) 1.12f else 1f, tween(TvFocus.Ms, easing = FocusEase), label = "tile")
+    val shape = RoundedCornerShape(TvRadius.Small.dp)
     Box(
         modifier = Modifier
             .size(62.dp)
@@ -1319,7 +1317,7 @@ private fun LookTile(selected: Boolean, colours: Pair<Color, Color>, focusReques
 @Composable
 private fun LookSwatch(colours: Pair<Color, Color>, selected: Boolean, focusRequester: FocusRequester, onClick: () -> Unit) {
     val f = rememberFocusState()
-    val scale by animateFloatAsState(if (f.focused) 1.18f else 1f, tween(180, easing = FocusEase), label = "swatch")
+    val scale by animateFloatAsState(if (f.focused) 1.18f else 1f, tween(TvFocus.Ms, easing = FocusEase), label = "swatch")
     Box(
         modifier = Modifier
             .size(44.dp)
@@ -1341,12 +1339,12 @@ private fun LookSwatch(colours: Pair<Color, Color>, selected: Boolean, focusRequ
 fun DetailGrid(rows: List<Pair<String, String>>, columns: Int = 2) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         rows.chunked(columns).forEach { line ->
-            Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 line.forEach { (k, v) ->
                     Column(Modifier.weight(1f)) {
-                        Text(k, style = TvType.ui(14f, FontWeight.SemiBold, Tv.soft(0.55f)))
+                        Text(k, style = TvType.ui(15f, FontWeight.Medium, Tv.soft(0.6f)))
                         // Two lines, so a long server name and its address both show.
-                        Text(v, style = TvType.mono(16f), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                        Text(v, style = TvType.mono(17f), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
                 repeat(columns - line.size) { Spacer(Modifier.weight(1f)) }
@@ -1370,9 +1368,9 @@ fun RawConfig(text: String, maxHeight: Float, plain: Boolean = false, focusWhenL
             .fillMaxWidth()
             .then(if (focusWhenLong != null) Modifier.focusRequester(focusWhenLong) else Modifier)
             .heightIn(max = maxHeight.dp)
-            .clip(RoundedCornerShape(TvRadius.Medium.dp))
+            .clip(RoundedCornerShape(TvRadius.Small.dp))
             .background(Color.Black.copy(alpha = 0.35f))
-            .border(2.dp, if (f.focused) Tv.Focus else Color.Transparent, RoundedCornerShape(TvRadius.Medium.dp))
+            .border(2.dp, if (f.focused) Tv.Focus else Color.Transparent, RoundedCornerShape(TvRadius.Small.dp))
             .onKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when (e.key) {
@@ -1394,9 +1392,9 @@ fun RawConfig(text: String, maxHeight: Float, plain: Boolean = false, focusWhenL
             .onFocusChanged { f.hasFocus = it.isFocused }
             .focusable()
             .verticalScroll(scroll)
-            .padding(horizontal = 18.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
     ) {
-        Text(styled, style = TvType.mono(14f, color = Tv.soft(0.82f)))
+        Text(styled, style = TvType.mono(15f, color = Tv.soft(0.82f)))
     }
 }
 

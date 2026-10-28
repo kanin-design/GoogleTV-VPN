@@ -96,35 +96,36 @@ fun ImportScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: (
     val session = rememberImportSession(state, nav, actions)
 
     Box(Modifier.fillMaxSize()) {
-        Glass(Modifier.padding(start = 64.dp, top = 124.dp, bottom = 36.dp).width(400.dp)) {
-            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 22.dp)) {
-                Box(Modifier.padding(horizontal = 16.dp)) { PanelHeading("Import", "Add a profile", "A profile, a backup or a certificate.") }
+        Glass(Modifier.padding(start = 64.dp, top = TvSize.PanelTop.dp, bottom = TvSize.PanelBottom.dp).width(TvSize.ListWidth.dp)) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = TvSize.PanelInsetY.dp)) {
+                Box(Modifier.padding(horizontal = 16.dp)) { PanelHeading(null, "Add a profile", "A profile, a backup or a certificate.") }
                 val list = rememberLazyListState()
                 LazyColumn(
                     state = list,
                     modifier = Modifier
-                        .padding(top = 14.dp)
+                        .padding(top = 16.dp)
                         .weight(1f)
                         .bleed(12.dp)
                         .scrollFade(list)
                         .enterAt { req["m-${nav.importMethod.name}"] },
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     ImportMethod.entries.forEach { m -> item(m.name) { MethodRow(m, state, nav, actions, req, session) } }
                 }
-                Spacer(Modifier.height(10.dp))
-                Text("Every file is checked before it is saved.", style = TvType.ui(14f, color = Tv.soft(0.55f)), modifier = Modifier.padding(horizontal = 16.dp))
+                Spacer(Modifier.height(12.dp))
+                Text("Every file is checked before it is saved.", style = TvType.ui(15f, color = Tv.soft(0.6f)), modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
         val review = state.review
         Glass(
             Modifier
-                .padding(start = 488.dp, end = 64.dp, top = 124.dp, bottom = 36.dp)
+                // Beside the list, 24 apart, as on Profiles and Settings.
+                .padding(start = (64 + TvSize.ListWidth + 24).dp, end = 64.dp, top = TvSize.PanelTop.dp, bottom = TvSize.PanelBottom.dp)
                 .fillMaxSize()
                 .enterAt { req[if (review == null) "im-entry" else reviewFocus(review)] },
         ) {
-            Column(Modifier.fillMaxSize().padding(horizontal = 34.dp, vertical = 30.dp)) {
+            Column(Modifier.fillMaxSize().padding(start = TvSize.PanelInset.dp, end = TvSize.PanelInset.dp, top = TvSize.PanelInsetY.dp, bottom = TvSize.PanelInsetY.dp)) {
                 when {
                     review != null && review.problem != null -> ProblemPanel(review, nav, actions, req)
                     review != null -> ReviewPanel(state, review, nav, actions, req)
@@ -160,7 +161,7 @@ private fun MethodRow(m: ImportMethod, state: VpnUiState, nav: Nav, actions: Tun
                 session?.newTask()
             }
         },
-        leading = { IconSquare(m.icon, it, size = 44f, radius = 13f) },
+        leading = { IconSquare(m.icon, it) },
     )
 }
 
@@ -173,8 +174,8 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
     }
     when (m) {
         ImportMethod.Files -> {
-            PanelHeading("Import › On this device", "Pick a file", "Android’s file picker opens. Choose the .ovpn, .conf, .p12 or backup file from Downloads or a USB drive.")
-            Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PanelHeading(null, "Pick a file", "Android’s file picker opens. Choose the .ovpn, .conf, .p12 or backup file from Downloads or a USB drive.")
+            Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 TvButton("Choose a file", actions::pickFile, icon = Ic.File, focusRequester = req["im-entry"])
             }
             Steps(
@@ -189,8 +190,8 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
         ImportMethod.Phone -> PhonePanel(nav, actions, req, session)
         ImportMethod.Link -> LinkPanel(nav, actions, req, session)
         ImportMethod.Restore -> {
-            PanelHeading("Import", "Restore a backup", "A backup holds every profile, saved password and setting, encrypted with the passphrase chosen when it was made.")
-            Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            PanelHeading(null, "Restore a backup", "A backup holds every profile, saved password and setting. If it has a passphrase, it asks for it.")
+            Column(Modifier.padding(top = 24.dp).bleed(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ListRow(
                     "Send it from your phone", fromPhone,
                     subtitle = "Choose the backup file there and type its passphrase",
@@ -208,8 +209,8 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
             }
         }
         ImportMethod.Certs -> {
-            PanelHeading("Import", "Certificates", "For profiles that keep the certificate and key outside the .ovpn file.")
-            Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            PanelHeading(null, "Certificates", "For profiles that keep the certificate and key outside the .ovpn file.")
+            Column(Modifier.padding(top = 24.dp).bleed(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ListRow(
                     "Send the .p12 from your phone", fromPhone,
                     subtitle = "Its password and the profile it is for are chosen there",
@@ -249,9 +250,9 @@ private fun ColumnScope.MethodPanel(m: ImportMethod, state: VpnUiState, nav: Nav
 /** From your phone: the code is on screen and the TV listens while Import is open. */
 @Composable
 private fun ColumnScope.PhonePanel(nav: Nav, actions: TunnelActions, req: Requesters, session: PhoneSession?) {
-    PanelHeading("Import", "Send it from your phone")
+    PanelHeading(null, "Send it from your phone")
     PhoneBlock(
-        session, PhoneBlockSize.Panel, Modifier.padding(top = 22.dp),
+        session, PhoneBlockSize.Panel, Modifier.padding(top = 24.dp),
         steps = listOf("Scan the code with your phone’s camera", "Pick the file, paste its text or type a link", "Check it here before it is saved"),
     )
     Spacer(Modifier.weight(1f))
@@ -261,9 +262,9 @@ private fun ColumnScope.PhonePanel(nav: Nav, actions: TunnelActions, req: Reques
     LaunchedEffect(item) { if (item != null && nav.overlay == null) req["im-entry"].focusWhenReady() }
     if (item != null) {
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(TvRadius.Medium.dp)).background(Tv.white(0.05f)).padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(TvRadius.Small.dp)).background(Tv.white(0.05f)).padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
                 when (item) {
@@ -309,19 +310,20 @@ private fun cleanLink(url: String): String = url.trim().replace(Regex("^https://
 /** From a link, typed on the TV; the phone's page has a Link tab for typing it there. */
 @Composable
 private fun ColumnScope.LinkPanel(nav: Nav, actions: TunnelActions, req: Requesters, session: PhoneSession?) {
-    PanelHeading("Import", "Download from a link", "${APP_NAME} downloads the file and shows it to you before saving.")
+    PanelHeading(null, "Download from a link", "${APP_NAME} downloads the file and shows it to you before saving.")
     InputBox(
         "Profile link", nav.linkUrl.ifEmpty { "https://" }, editing = false,
         onClick = { nav.overlay = Overlay.Form(linkSpec(nav, actions)) },
         mono = true,
-        modifier = Modifier.padding(top = 22.dp),
+        modifier = Modifier.padding(top = 24.dp),
         focusRequester = req["im-entry"],
+        bleed = 16.dp,
     )
     if (nav.linkUser.isNotEmpty()) {
         Text("With the username ${nav.linkUser}", style = TvType.ui(15f, color = Tv.soft(0.62f)), modifier = Modifier.padding(top = 8.dp, start = 4.dp))
     }
-    Spacer(Modifier.weight(1f))
-    PhoneBlock(session, PhoneBlockSize.Compact, title = "Or type it on your phone: choose Link there")
+    // Right under the field, as the other way to do the same thing.
+    PhoneBlock(session, PhoneBlockSize.Compact, Modifier.padding(top = 32.dp), title = "Or type it on your phone: choose Link there")
 }
 
 /** .spin: a small spinning ring. */
@@ -341,7 +343,7 @@ private fun Steps(steps: List<String>, modifier: Modifier = Modifier) {
         steps.forEachIndexed { i, s ->
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.white(0.12f)), contentAlignment = Alignment.Center) {
-                    Text("${i + 1}", style = TvType.ui(14f, FontWeight.SemiBold))
+                    Text("${i + 1}", style = TvType.ui(15f, FontWeight.SemiBold))
                 }
                 Text(s, style = TvType.ui(17f, color = Tv.soft(0.86f)))
             }
@@ -360,7 +362,7 @@ fun Notice(icon: Ic, text: String, amber: Boolean = false, bad: Boolean = false,
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(TvRadius.Medium.dp))
+            .clip(RoundedCornerShape(TvRadius.Small.dp))
             .background(tint.copy(alpha = 0.13f))
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -380,7 +382,7 @@ private fun ProblemPanel(review: ImportReview, nav: Nav, actions: TunnelActions,
         if (noFile) "No file picker on this device" else "This isn’t an OpenVPN profile",
         review.problem,
     )
-    Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         if (noFile) {
             TvButton("Send it from your phone", {
                 actions.cancelReview()
@@ -483,7 +485,7 @@ private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav
     Box(Modifier.padding(top = 12.dp)) {
         DetailGrid(listOf("Server" to Words.serverLine(review.host, review.port, review.protocol), "Sign-in" to reviewSignIn(review)), columns = 1)
     }
-    review.note?.let { Text("$it.", style = TvType.ui(15f, color = Tv.soft(0.62f)), modifier = Modifier.padding(top = 10.dp, start = 4.dp)) }
+    review.note?.let { Text("$it.", style = TvType.ui(15f, color = Tv.soft(0.62f)), modifier = Modifier.padding(top = 12.dp, start = 4.dp)) }
     val wireGuard = review.kind == VpnKind.WireGuard
     // A file that can't sign in anywhere gets no tick: neither a certificate nor a login is in it.
     val canSignIn = wireGuard || review.needsLogin || reviewHasCert(review)
@@ -492,9 +494,9 @@ private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav
             Ic.Bang,
             "This profile has no way to sign in: no certificate and no password. After saving, send its .p12 from your phone, or ask for a file with a login." +
                 (review.warnings.takeIf { it.isNotEmpty() }?.joinToString(" ", prefix = " ") ?: ""),
-            amber = true, modifier = Modifier.padding(top = 14.dp),
+            amber = true, modifier = Modifier.padding(top = 16.dp),
         )
-        review.warnings.isNotEmpty() -> Notice(Ic.Bang, review.warnings.joinToString(" "), amber = true, modifier = Modifier.padding(top = 14.dp))
+        review.warnings.isNotEmpty() -> Notice(Ic.Bang, review.warnings.joinToString(" "), amber = true, modifier = Modifier.padding(top = 16.dp))
         else -> {
             val note = when {
                 wireGuard -> " The private key is saved, encrypted, and taken out of the file."
@@ -503,7 +505,7 @@ private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav
                 review.needsLogin -> " The login in the file is saved, encrypted, and taken out of the file."
                 else -> ""
             }
-            Notice(Ic.Check, "Looks good.$note", modifier = Modifier.padding(top = 14.dp))
+            Notice(Ic.Check, "Looks good.$note", modifier = Modifier.padding(top = 16.dp))
         }
     }
     // Many servers also want a client certificate; say where to add one if the file has none.
@@ -511,10 +513,10 @@ private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav
         Text(
             "There is no client certificate in this file. If the server asks for one, send the .p12 from your phone, or use Import › Certificates.",
             style = TvType.ui(15f, color = Tv.soft(0.62f)),
-            modifier = Modifier.padding(top = 10.dp, start = 4.dp),
+            modifier = Modifier.padding(top = 12.dp, start = 4.dp),
         )
     }
-    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ListRow(
             "Name",
             {
@@ -543,7 +545,6 @@ private fun ColumnScope.ReviewPanel(state: VpnUiState, review: ImportReview, nav
                 nav.overlay = Overlay.File("Import › ${review.fileName}", review.name, ServerStore.hideSecrets(review.text))
             },
             subtitle = if (review.kind == VpnKind.WireGuard) "Addresses, peers, endpoint; the key stays hidden" else "Raw config, ciphers, certificates",
-            leading = { IconSquare(Ic.File, it) },
             trailing = { Chevron(it) },
         )
     }

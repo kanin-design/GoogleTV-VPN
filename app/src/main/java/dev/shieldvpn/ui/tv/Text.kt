@@ -26,7 +26,7 @@ private fun TextStyle.withLineHeight(): TextStyle = if (lineHeight.isUnspecified
 fun Text(
     text: String,
     modifier: Modifier = Modifier,
-    style: TextStyle = TvType.ui(16f),
+    style: TextStyle = TvType.ui(17f),
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
 ) {
@@ -37,7 +37,7 @@ fun Text(
 fun Text(
     text: AnnotatedString,
     modifier: Modifier = Modifier,
-    style: TextStyle = TvType.ui(16f),
+    style: TextStyle = TvType.ui(17f),
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
 ) {

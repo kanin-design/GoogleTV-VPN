@@ -57,7 +57,8 @@ fun QrCode(text: String, size: Float, modifier: Modifier = Modifier) {
         val quiet = 2.2f
         val cell = this.size.width / (matrix.size + quiet * 2)
         val origin = cell * quiet
-        drawRoundRect(QrPaper, cornerRadius = CornerRadius(cell * 3.2f))
+        // The rows' corner at every size, not one that grows with the code.
+        drawRoundRect(QrPaper, cornerRadius = CornerRadius(TvRadius.Small.dp.toPx()))
 
         // The middle is left clear for the logo; high error correction covers what it hides.
         val clear = (matrix.size * 0.22f).toInt() or 1

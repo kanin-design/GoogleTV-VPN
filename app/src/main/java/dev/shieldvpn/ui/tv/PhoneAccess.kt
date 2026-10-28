@@ -68,19 +68,19 @@ fun PairSheet(nav: Nav, req: Requesters, o: Overlay.PairPhone, close: () -> Unit
         }
     }
     val left = current?.let { ((it.until - now) / 1000).coerceAtLeast(0) } ?: 0
-    Sheet(760f) {
+    Sheet(TvSize.SheetMedium) {
         PanelHeading(
             "Settings › Phone access", "Pair a phone",
             "Then the phone can see and change everything here from its browser: profiles, settings, the log. Only on your home network.",
             titleSize = 32f,
         )
-        Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(30.dp), verticalAlignment = Alignment.CenterVertically) {
-            val qrShadow = Modifier.shadow(10.dp, RoundedCornerShape(TvRadius.Medium.dp), ambientColor = Color.Black, spotColor = Color.Black)
+        Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(32.dp), verticalAlignment = Alignment.CenterVertically) {
+            val qrShadow = Modifier.shadow(10.dp, RoundedCornerShape(TvRadius.Small.dp), ambientColor = Color.Black, spotColor = Color.Black)
             if (current != null && address != null && left > 0 && done == null) {
                 QrCode(Pairing.link(address, current), 210f, qrShadow)
             } else {
-                Box(Modifier.size(210.dp).clip(RoundedCornerShape(TvRadius.Medium.dp)).background(Tv.white(0.06f)), contentAlignment = Alignment.Center) {
-                    Text(if (address == null) "No home network" else "Code ended", style = TvType.ui(16f, color = Tv.soft(0.6f)))
+                Box(Modifier.size(210.dp).clip(RoundedCornerShape(TvRadius.Small.dp)).background(Tv.white(0.06f)), contentAlignment = Alignment.Center) {
+                    Text(if (address == null) "No home network" else "Code ended", style = TvType.ui(17f, color = Tv.soft(0.6f)))
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -91,7 +91,7 @@ fun PairSheet(nav: Nav, req: Requesters, o: Overlay.PairPhone, close: () -> Unit
                 ).forEachIndexed { i, step ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.white(0.12f)), contentAlignment = Alignment.Center) {
-                            Text("${i + 1}", style = TvType.ui(14f, FontWeight.SemiBold))
+                            Text("${i + 1}", style = TvType.ui(15f, FontWeight.SemiBold))
                         }
                         Text(step, style = TvType.ui(17f, color = Tv.soft(0.86f)), modifier = Modifier.widthIn(max = 380.dp))
                     }
@@ -104,11 +104,11 @@ fun PairSheet(nav: Nav, req: Requesters, o: Overlay.PairPhone, close: () -> Unit
                         else -> "The code has ended. Show a new one."
                     },
                     style = TvType.ui(15f, color = if (done == Pairing.Result.Refused) Tv.Amber else Tv.soft(0.6f)),
-                    modifier = Modifier.padding(top = 6.dp).widthIn(max = 420.dp),
+                    modifier = Modifier.padding(top = 8.dp).widthIn(max = 420.dp),
                 )
             }
         }
-        Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TvButton(if (done is Pairing.Result.Paired) "Done" else "Close", close, icon = if (done is Pairing.Result.Paired) Ic.Check else null, focusRequester = req["ov-first"])
             if (left == 0L || done != null) {
                 TvButton("Show a new code", { nav.overlay = Overlay.PairPhone(Pairing.show().id) }, icon = Ic.Swap, glass = true)
@@ -124,9 +124,9 @@ fun PairSheet(nav: Nav, req: Requesters, o: Overlay.PairPhone, close: () -> Unit
 @Composable
 fun AskSheet(req: Requesters, o: Overlay.Ask, answer: (Boolean) -> Unit) {
     val a = o.ask
-    Sheet(720f) {
+    Sheet(TvSize.SheetMedium) {
         PanelHeading(a.eyebrow, a.title, a.text)
-        Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (a.danger) {
                 TvButton(a.no, { answer(false) }, focusRequester = req["ov-first"])
                 TvButton(a.yes, { answer(true) }, icon = Ic.Check, glass = true, danger = true)
@@ -138,8 +138,8 @@ fun AskSheet(req: Requesters, o: Overlay.Ask, answer: (Boolean) -> Unit) {
         Text(
             if (a.paired) "Asked from a paired phone. Phones are listed in Settings › Phone access, where they can be removed."
             else "Only a phone that scanned the code on this TV can ask this.",
-            style = TvType.ui(14f, color = Tv.soft(0.5f)),
-            modifier = Modifier.padding(top = 18.dp),
+            style = TvType.ui(15f, color = Tv.soft(0.6f)),
+            modifier = Modifier.padding(top = 16.dp),
         )
     }
 }

@@ -87,7 +87,7 @@ fun ConnectScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect: 
         Box(
             Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 64.dp, bottom = 224.dp)
+                .padding(start = 64.dp, bottom = 228.dp)
                 .onFocusChanged {
                     if (heroFocused && !it.hasFocus) heroLostAt = System.currentTimeMillis()
                     heroFocused = it.hasFocus
@@ -134,8 +134,11 @@ private fun Hero(
         val kind = info?.kind ?: VpnKind.OpenVpn
         Title(c.name)
         val failure = (state.status as? VpnStatus.Failed)?.message
+        // The state's word in its colour, as the drawing and the card show it; a preview of
+        // another profile says its own state in white.
+        val tone = if (current) Tv.tone(mode) else null
         when {
-            !current -> Idle(state, c)
+            !current -> Idle(state, c, null)
             mode == Mode.On -> {
                 ConnectedFor((state.status as? VpnStatus.Connected)?.sinceMillis)
                 LiveTraffic(state.tunnel?.publicIp?.let { "VPN IP $it" } ?: state.tunnel?.address?.substringBefore('/')?.let { "Tunnel IP $it" } ?: "VPN IP: looking it up")
@@ -152,19 +155,19 @@ private fun Hero(
                 // A tunnel that never came up (a switch, a try again) says why; one that dropped says so.
                 val why = (state.status as? VpnStatus.Blocked)?.reason
                 if (why != null) {
-                    Lede("Couldn’t connect", " · ${firstSentence(why)}")
+                    Lede("Couldn’t connect", " · ${firstSentence(why)}", tone)
                     Live("The kill switch holds traffic back. Try again, or allow internet")
                 } else {
-                    Lede("Blocked", " · the tunnel dropped and the kill switch is on")
+                    Lede("Blocked", " · the tunnel dropped and the kill switch is on", tone)
                     Live("Nothing reaches the internet until it connects again, or you allow it")
                 }
             }
             mode == Mode.Error -> {
                 val why = failure ?: "Could not connect"
-                Lede("Couldn’t connect", " · ${firstSentence(why)}")
+                Lede("Couldn’t connect", " · ${firstSentence(why)}", tone)
                 Live(whatToCheck(why))
             }
-            else -> Idle(state, c)
+            else -> Idle(state, c, tone)
         }
         // Connected, the cipher the server chose; otherwise what the file suggests. The kind of VPN
         // leads the line, as the one place it is said.
@@ -182,7 +185,7 @@ private fun Hero(
                     TvButton(if (state.status.isActive || state.pausedUntil != null) "Connect instead" else "Connect", {
                         nav.preview = null
                         connect(c.id)
-                    }, icon = Ic.Power, focusRequester = primaryFocus)
+                    }, icon = Ic.Power, primary = true, focusRequester = primaryFocus)
                     TvButton("Edit profile", edit, icon = Ic.Pencil, glass = true)
                 }
                 mode == Mode.On -> {
@@ -194,9 +197,9 @@ private fun Hero(
                     TvButton("Speed test", { nav.overlay = Overlay.Speed(c.id) }, icon = Ic.Gauge, glass = true)
                     TvButton("Details", { nav.overlay = Overlay.Details }, icon = Ic.Info, glass = true)
                 }
-                mode == Mode.Busy -> TvButton("Cancel", actions::disconnect, icon = Ic.Power, focusRequester = primaryFocus)
+                mode == Mode.Busy -> TvButton("Cancel", actions::disconnect, icon = Ic.Close, focusRequester = primaryFocus)
                 mode == Mode.Paused -> {
-                    TvButton("Resume now", actions::resume, icon = Ic.Play, focusRequester = primaryFocus)
+                    TvButton("Resume now", actions::resume, icon = Ic.Play, primary = true, focusRequester = primaryFocus)
                     TvButton("15 more minutes", {
                         actions.pauseMore()
                         nav.toast("15 more minutes")
@@ -204,7 +207,7 @@ private fun Hero(
                     TvButton("Disconnect", actions::disconnect, icon = Ic.Power, glass = true)
                 }
                 mode == Mode.Error -> {
-                    TvButton("Try again", { connect(c.id) }, icon = Ic.Swap, focusRequester = primaryFocus)
+                    TvButton("Try again", { connect(c.id) }, icon = Ic.Swap, primary = true, focusRequester = primaryFocus)
                     TvButton("View log", { nav.openLog(from = Screen.Connect) }, icon = Ic.Log, glass = true, focusRequester = logFocus)
                     // Three buttons at most: while blocked, letting traffic out matters more than editing.
                     if (blocked) {
@@ -217,7 +220,7 @@ private fun Hero(
                     }
                 }
                 else -> {
-                    TvButton("Connect", { connect(c.id) }, icon = Ic.Power, focusRequester = primaryFocus)
+                    TvButton("Connect", { connect(c.id) }, icon = Ic.Power, primary = true, focusRequester = primaryFocus)
                     TvButton("Edit profile", edit, icon = Ic.Pencil, glass = true)
                 }
             }
@@ -230,9 +233,9 @@ private fun Hero(
 private fun FirstProfile(state: VpnUiState, nav: Nav, actions: TunnelActions, primaryFocus: FocusRequester) {
     val session = rememberImportSession(state, nav, actions)
     Column(horizontalAlignment = Alignment.Start) {
-        Title("Add your VPN profile", size = 72f)
+        Title("Add your VPN profile", size = TvType.HeroCompact, maxWidth = 1100f)
         Lede(null, "Scan the code with your phone and send the .ovpn file.")
-        PhoneBlock(session, PhoneBlockSize.Wide, Modifier.padding(top = 26.dp), steps = listOf("Scan the code with your phone’s camera", "Pick the .ovpn file, paste it or type a link", "Check it here and save it"))
+        PhoneBlock(session, PhoneBlockSize.Wide, Modifier.padding(top = 24.dp), steps = listOf("Scan the code with your phone’s camera", "Pick the .ovpn file, paste it or type a link", "Check it here and save it"))
         Actions {
             TvButton("Other ways", {
                 nav.importMethod = if (actions.hasFilePicker) ImportMethod.Files else ImportMethod.Link
@@ -242,17 +245,20 @@ private fun FirstProfile(state: VpnUiState, nav: Nav, actions: TunnelActions, pr
     }
 }
 
-/** .ttl */
+/**
+ * .ttl: a profile's name, a size smaller when it is long. It stops short of the drawing on the
+ * right, where the path to the server rises.
+ */
 @Composable
-private fun Title(text: String, size: Float = 104f) {
-    Text(text, style = TvType.title(size), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 1100.dp))
+private fun Title(text: String, size: Float = if (text.length > 14) TvType.HeroCompact else TvType.Hero, maxWidth: Float = 680f) {
+    Text(text, style = TvType.title(size), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = maxWidth.dp))
 }
 
 /** How long the tunnel has been up. Only this line ticks each second, not the whole hero. */
 @Composable
 private fun ConnectedFor(since: Long?) {
     val now = rememberNow()
-    Lede("Connected", " · ${fmtDuration((now - (since ?: now)).coerceAtLeast(0) / 1000)}")
+    Lede("Connected", " · ${fmtDuration((now - (since ?: now)).coerceAtLeast(0) / 1000)}", Tv.tone(Mode.On))
 }
 
 /** How long it has been trying, from when the attempt began, on every screen alike. */
@@ -261,7 +267,7 @@ private fun ConnectingFor(since: Long?) {
     val fallback = remember { System.currentTimeMillis() }
     val start = since ?: fallback
     val now = rememberNow()
-    Lede("Connecting", " · ${fmtDuration(((now - start) / 1000).coerceAtLeast(0))}")
+    Lede("Connecting", " · ${fmtDuration(((now - start) / 1000).coerceAtLeast(0))}", Tv.tone(Mode.Busy))
 }
 
 /**
@@ -269,15 +275,15 @@ private fun ConnectingFor(since: Long?) {
  * in the words its card uses ([ProfileStatus]).
  */
 @Composable
-private fun Idle(state: VpnUiState, c: Connection) {
+private fun Idle(state: VpnUiState, c: Connection, tone: Color?) {
     val now = minuteTick.longValue
     val ps = ProfileStatus.of(c, null, state.asksForLogin(c), now)
     val failed = c.lastError
     if (failed != null) {
-        Lede(ps.word, " · ${firstSentence(failed)}")
+        Lede(ps.word, " · ${firstSentence(failed)}", tone)
         Live(whatToCheck(failed))
     } else {
-        Lede(ps.word, "")
+        Lede(ps.word, "", tone)
         Live(ps.detail ?: Words.lastConnected(c.lastUsed, now))
     }
 }
@@ -315,15 +321,15 @@ private fun whatToCheck(why: String): String = Words.whatToCheck(why)
 @Composable
 private fun PausedFor(until: Long?) {
     val now = rememberNow()
-    Lede("Paused", " · connects again in ${fmtMinutes(((until ?: now) - now).coerceAtLeast(0) / 1000)}")
+    Lede("Paused", " · connects again in ${fmtMinutes(((until ?: now) - now).coerceAtLeast(0) / 1000)}", Tv.tone(Mode.Paused))
 }
 
-/** .lede: the state in bold, then what it means. */
+/** .lede: the state in bold, in its [tone] when it is the tunnel's, then what it means. */
 @Composable
-private fun Lede(bold: String?, rest: String) {
+private fun Lede(bold: String?, rest: String, tone: Color? = null) {
     Text(
         buildAnnotatedString {
-            if (bold != null) withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = Color.White)) { append(bold) }
+            if (bold != null) withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = tone ?: Color.White)) { append(bold) }
             append(rest)
         },
         style = TvType.ui(21f, color = Tv.soft(0.8f)).copy(lineHeight = 29.sp),
@@ -373,7 +379,8 @@ private fun QuickRow(state: VpnUiState, nav: Nav, connect: (String) -> Unit, pri
     val quick = quickProfiles(state)
     Column(
         modifier = modifier
-            .padding(start = 64.dp, end = 64.dp, bottom = 36.dp)
+            // 40 from the bottom: a focused card grows 4 past its edge, and stays inside the screen's margin.
+            .padding(start = 64.dp, end = 64.dp, bottom = 40.dp)
             .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -389,17 +396,22 @@ private fun QuickRow(state: VpnUiState, nav: Nav, connect: (String) -> Unit, pri
                     iconPath = look.icon.path,
                     iconSize = 30f,
                     title = c.name,
-                    subtitle = statusText(state, c),
-                    tone = if (current && mode != Mode.Off) Tv.tone(mode) else null,
+                    subtitle = cardStatus(state, c),
+                    // A profile that failed last time says so in red: its line is only the reason.
+                    tone = when {
+                        current && mode != Mode.Off -> Tv.tone(mode)
+                        profileStatus(state, c).tone == ProfileStatus.Tone.Bad -> Tv.Red
+                        else -> null
+                    },
                     onFocus = {
                         nav.preview = if (current) null else c.id
                         nav.focusedPid = c.id
                     },
                     onBlur = { if (nav.focusedPid == c.id) nav.focusedPid = null },
                     onClick = {
-                        // While a tunnel is up or paused, a card's OK never drops it: focus goes to the
-                        // button above, Disconnect for this profile or "Connect instead" for another.
-                        val live = state.status.isActive || state.pausedUntil != null
+                        // A card connects its profile, switching from another one if it is up. The card of
+                        // the profile that is up or connecting goes to Disconnect instead.
+                        val live = current && (mode == Mode.On || mode == Mode.Busy)
                         if (live) primaryFocus.tryFocus() else connect(c.id)
                     },
                     modifier = Modifier.weight(1f),

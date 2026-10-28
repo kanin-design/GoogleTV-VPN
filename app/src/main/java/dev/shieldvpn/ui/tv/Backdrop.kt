@@ -385,7 +385,7 @@ private class BackdropScene(private val measurer: TextMeasurer, private val mesh
     private var labels: List<TextLayoutResult>? = null
 
     private fun labels(): List<TextLayoutResult> = labels ?: run {
-        val style = TextStyle(fontFamily = TvType.Ui, fontSize = 14.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.01.em, color = Color.White)
+        val style = TextStyle(fontFamily = TvType.Ui, fontSize = 15.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.01.em, color = Color.White)
         listOf("This device", "VPN server", "Internet").map { measurer.measure(it, style, density = Density(1f)) }.also { labels = it }
     }
 
@@ -558,8 +558,8 @@ private class BackdropScene(private val measurer: TextMeasurer, private val mesh
         if (!named) return
         val names = labels()
         label(names[0], mesh.device.x, mesh.device.y + 34f, 1f)
-        // Held steady: a label that pulses with the VPN reads as flicker.
-        label(names[1], mesh.vpn.x, mesh.vpn.y - 36f - names[1].size.height, if (st == Mode.Off) 0.55f else 0.85f)
+        // Held steady: a label that pulses with the VPN reads as flicker. Above the first ring's reach.
+        label(names[1], mesh.vpn.x, mesh.vpn.y - 44f - names[1].size.height, if (st == Mode.Off) 0.55f else 0.85f)
         label(names[2], mesh.net.x, mesh.net.y + 34f, 1f)
     }
 

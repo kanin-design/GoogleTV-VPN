@@ -46,6 +46,9 @@ object Tv {
     val GlassDeep = Color(0xE00A0E15)
     val GlassEdge = Color.White.copy(alpha = 0.1f)
 
+    /** The shade over the screen behind every sheet, one strength for all of them. */
+    val Scrim = Color(0xFF020407).copy(alpha = 0.58f)
+
     /** The light text tone at a given strength: rgba(235,242,248,a). */
     fun soft(a: Float) = Color(0xFFEBF2F8).copy(alpha = a)
 
@@ -63,8 +66,10 @@ object Tv {
 }
 
 /**
- * Corners: [Small] for icons and keys, [Medium] for rows, cards and fields, [Large] for panels
- * and sheets. Buttons, tabs and chips are pills.
+ * Corners: [Large] for panels and sheets, [Medium] for cards on the screen itself (Quick connect),
+ * and [Small] for everything inside a panel or a sheet: rows, fields, boxes, codes, icons and keys.
+ * A corner inside another is smaller than the outer one, by about the gap between them. Buttons,
+ * tabs, chips and switches are pills.
  */
 object TvRadius {
     const val Small = 12f
@@ -73,12 +78,92 @@ object TvRadius {
 }
 
 /**
+ * Sizes, in design units (0.75 dp each, so 52 is Google's 40 dp TV button). Spacing is on a grid
+ * of 4: 4, 8, 12, 16, 24, 32, and 64 for the screen's sides. Only a title and its subtitle sit
+ * closer, 2 apart.
+ */
+object TvSize {
+    /** The buttons on a screen and in a sheet. */
+    const val Button = 52f
+
+    /**
+     * The one small size, for what sits inside a panel, a row or the bar: small buttons, the tabs
+     * and the Settings categories.
+     */
+    const val Small = 40f
+    const val ButtonSmall = Small
+    const val Chip = 32f
+    const val Icon = 40f
+
+    /** A row of words, and a row with an icon or a profile's picture. */
+    const val Row = 60f
+    const val RowTall = 72f
+
+    /** From a panel's side to its words; the top and bottom take [PanelInsetY]. */
+    const val PanelInset = 32f
+    const val PanelInsetY = 24f
+
+    /**
+     * The box every panel fills, under the tabs: from 124 to 36 above the screen's bottom, 560
+     * high. Sheets go in it too, centred; one with a keyboard, taller, is centred on the screen.
+     */
+    const val PanelTop = 124f
+    const val PanelBottom = 36f
+    const val PanelHeight = 560f
+
+    /** Panel widths: the Settings categories, and a list beside the panel it opens. */
+    const val NavWidth = 320f
+    const val ListWidth = 440f
+
+    /**
+     * Sheet widths: small (a menu, the PIN), side (Details, at the screen's right), medium (a
+     * file, a question, a phone's code), large (the speed test, a form) and a form with the
+     * phone's code beside it.
+     */
+    const val SheetSmall = 460f
+    const val SheetSide = 540f
+    const val SheetMedium = 760f
+    const val SheetLarge = 820f
+    const val SheetForm = 1100f
+}
+
+/**
+ * Focus: what has it turns white and grows, by how wide it is. Buttons, tabs and cards grow by
+ * [Grow], the Settings categories by [GrowNav], and rows across a panel by [GrowRow], which keeps
+ * them inside their 16 inset. Each takes [Ms] with [FocusEase]; not the 300 ms Google suggests,
+ * so focus keeps up with a held arrow key.
+ */
+object TvFocus {
+    const val Grow = 1.06f
+    const val GrowNav = 1.03f
+    const val GrowRow = 1.02f
+    const val Ms = 240
+}
+
+/**
  * Type from the design. Sizes are the design's pixels on its 1280 × 720 canvas; [TvStage]
- * scales them with everything else. Android's own sans (Roboto) and monospace, in three
- * weights: Normal for reading, Medium for quiet labels and big names, SemiBold for what is
- * pressed or titled. Focus never changes a weight, so nothing shifts as it moves.
+ * scales them with everything else. One scale: 15 for notes and labels (the smallest, about
+ * 11 dp), 17 for rows and reading, 19 for buttons and the live line, 21 for a lede, [Heading] for
+ * the app's name and a narrow column's title, 32 for a panel's title, and the big names below.
+ * Monospace goes at 17 for data, [MonoUrl] for an address and [MonoCode] for a code to type.
+ * Android's own sans (Roboto) and monospace, in three weights: Normal for reading, Medium for
+ * quiet labels and big names, SemiBold for what is pressed or titled. Focus never changes a
+ * weight, so nothing shifts as it moves.
  */
 object TvType {
+    const val Heading = 24f
+    const val MonoUrl = 20f
+    const val MonoCode = 24f
+
+    /** A profile's name on Connect. */
+    const val Hero = 104f
+
+    /** A long name on Connect, a name on Profiles, and the first run's title. */
+    const val HeroCompact = 88f
+
+    /** The speed test's number. */
+    const val Gauge = 58f
+
     val Display: FontFamily = FontFamily.SansSerif
     val Ui: FontFamily = FontFamily.SansSerif
     val Mono: FontFamily = FontFamily.Monospace

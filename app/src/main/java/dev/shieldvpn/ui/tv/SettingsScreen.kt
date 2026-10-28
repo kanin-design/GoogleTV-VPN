@@ -156,7 +156,7 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
     }
 
     Box(Modifier.fillMaxSize()) {
-        val navWidth by animateDpAsState(if (picking) 84.dp else 320.dp, tween(380, easing = PickEase), label = "navW")
+        val navWidth by animateDpAsState(if (picking) 84.dp else TvSize.NavWidth.dp, tween(380, easing = PickEase), label = "navW")
         val panelLeft by animateDpAsState(if (picking) 172.dp else 408.dp, tween(380, easing = PickEase), label = "panelL")
         val panelWidth by animateDpAsState(if (picking) 528.dp else 808.dp, tween(380, easing = PickEase), label = "panelW")
         val pickAlpha by animateFloatAsState(if (picking) 1f else 0f, tween(280), label = "pickA")
@@ -164,15 +164,16 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
 
         // Categories.
         Glass(Modifier.placed({ 64.dp }, 124.dp, { navWidth }).height(560.dp)) {
-            Column(Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 22.dp, bottom = 16.dp)) {
+            Column(Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = TvSize.PanelInsetY.dp, bottom = 16.dp)) {
                 val labelAlpha by animateFloatAsState(if (picking) 0f else 1f, tween(200), label = "labels")
                 Text("Settings", style = TvType.display(32f), maxLines = 1, modifier = Modifier.padding(start = 16.dp, bottom = 8.dp).fade { labelAlpha })
-                Column(modifier = Modifier.enterAt { req["cat-${nav.settingsCat.name}"] }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                // Row against row, so all ten fit at the small size above Advanced.
+                Column(modifier = Modifier.enterAt { req["cat-${nav.settingsCat.name}"] }) {
                     val shown = Category.entries.filter { !it.advanced || state.settings.advanced }
                     shown.forEachIndexed { i, cat ->
                         // .cat-sep: a line before the advanced categories.
                         if (cat.advanced && i > 0 && !shown[i - 1].advanced) {
-                            Box(Modifier.padding(horizontal = 14.dp, vertical = 6.dp).fillMaxWidth().height(1.dp).background(Tv.white(0.1f)))
+                            Box(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().height(1.dp).background(Tv.white(0.1f)))
                         }
                         CategoryRow(
                             cat,
@@ -210,7 +211,7 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
 
         // The category's settings. Coming in from the categories lands on the first row.
         Glass(Modifier.placed({ panelLeft }, 124.dp, { panelWidth }).height(560.dp).enterAt { req["panel-first"] }) {
-            Column(Modifier.fillMaxSize().padding(horizontal = 34.dp, vertical = 30.dp)) {
+            Column(Modifier.fillMaxSize().padding(start = TvSize.PanelInset.dp, end = TvSize.PanelInset.dp, top = TvSize.PanelInsetY.dp, bottom = TvSize.PanelInsetY.dp)) {
                 val locked = state.settings.pinMode != "Off" && state.hasPin && !nav.unlocked
                 if (locked) {
                     LockedPanel(nav, req)
@@ -245,7 +246,7 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
                         translationX = pickShift * density
                     },
             ) {
-                Column(Modifier.fillMaxSize().padding(start = 28.dp, end = 28.dp, top = 28.dp, bottom = 18.dp)) {
+                Column(Modifier.fillMaxSize().padding(start = TvSize.PanelInset.dp, end = TvSize.PanelInset.dp, top = TvSize.PanelInsetY.dp, bottom = TvSize.PanelInsetY.dp)) {
                     when (val pick = nav.pick) {
                         Pick.Startup -> StartupPick(state, nav, actions, req) { closePick(pick.rowKey) }
                         is Pick.Value -> ValuePick(state, nav, actions, req, pick.key) { closePick(pick.rowKey) }
@@ -260,7 +261,7 @@ fun SettingsScreen(state: VpnUiState, nav: Nav, actions: TunnelActions, connect:
 @Composable
 private fun CategoryRow(cat: Category, selected: Boolean, labelAlpha: Float, focusRequester: androidx.compose.ui.focus.FocusRequester, onFocus: () -> Unit, onClick: () -> Unit) {
     val f = rememberFocusState()
-    val scale by animateFloatAsState(if (f.focused) 1.03f else 1f, tween(180, easing = FocusEase), label = "cat")
+    val scale by animateFloatAsState(if (f.focused) TvFocus.GrowNav else 1f, tween(TvFocus.Ms, easing = FocusEase), label = "cat")
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -268,8 +269,8 @@ private fun CategoryRow(cat: Category, selected: Boolean, labelAlpha: Float, foc
                 scaleX = scale
                 scaleY = scale
             }
-            .height(36.dp)
-            .clip(RoundedCornerShape(TvRadius.Medium.dp))
+            .height(TvSize.Small.dp)
+            .clip(RoundedCornerShape(TvRadius.Small.dp))
             .background(
                 when {
                     f.focused -> Tv.Focus
@@ -341,6 +342,8 @@ private val Values = mapOf(
 private val ValueLabel = Schema.phoneReach.associate { it.value to it.label } + mapOf(
     AppSettings.APPS_SKIP to "All apps, except the ones you choose",
     AppSettings.APPS_ONLY to "Only the apps you choose",
+    // The log levels keep OpenVPN's numbers where they are saved; the TV says only the word.
+    "1 · quiet" to "Quiet", "3 · normal" to "Normal", "4 · detailed" to "Detailed",
 )
 
 /** The shorter form for the value chip on the row. */
@@ -349,6 +352,7 @@ private val ValueChipLabel = mapOf(
     AppSettings.APPS_ONLY to "Only chosen",
     AppSettings.REACH_OPEN to "While the app is open",
     AppSettings.REACH_VPN to "Also while the VPN is on",
+    "1 · quiet" to "Quiet", "3 · normal" to "Normal", "4 · detailed" to "Detailed",
 )
 
 /** The line under each choice (the design's OPT_SUB). */
@@ -408,7 +412,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
         Category.Automation -> "Automation" to if (s.automation) "For home automation apps and ADB. On: they can connect and disconnect." else "For home automation apps and ADB. Off until you turn it on."
         Category.About -> "About" to "${APP_NAME} ${actions.versionName} · build ${BuildConfig.VERSION_CODE} · OpenVPN 3 and WireGuard."
     }
-    PanelHeading("Settings", title, sub)
+    PanelHeading(null, title, sub)
     // A change that only takes effect on the next connect: one line here while a tunnel is up, not a toast per switch.
     val later = cat in setOf(Category.Protection, Category.Startup, Category.Apps, Category.OpenVpn, Category.Dns)
     if (later && state.status.let { it is VpnStatus.Connected || it is VpnStatus.Connecting }) {
@@ -441,8 +445,8 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
         state = list,
         // Rows reach past the heading by their own padding, so their words start where its words do.
         modifier = Modifier.padding(top = 16.dp).weight(1f, fill = false).bleed(28.dp).scrollFade(list),
-        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         when (cat) {
             Category.Protection -> {
@@ -453,7 +457,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                     actions.changeSettings { it.copy(allowLan = !it.allowLan) }
                 }
                 value(scope, "s-pin", "settings.pinMode", s.pinMode, selected = nav.pick == Pick.Value("pin")) { pickValue("pin") }
-                action(scope, "s-always", Ic.Shield, "Always-on VPN", "Set in Android TV system settings") {
+                action(scope, "s-always", "Always-on VPN", "Set in Android TV system settings") {
                     if (!actions.openVpnSettings()) nav.toast("This device has no VPN settings screen")
                 }
                 if (s.advanced) {
@@ -495,17 +499,17 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                             Text(
                                 "Nothing is chosen yet, so every app still uses the VPN.",
                                 style = TvType.ui(15f, color = Tv.soft(0.62f)),
-                                modifier = Modifier.padding(start = 10.dp, bottom = 6.dp),
+                                modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
                             )
                         }
                     }
                 }
                 if (found == null) {
-                    item { Text("Finding the apps on this device…", style = TvType.ui(16f, color = Tv.soft(0.6f)), modifier = Modifier.padding(10.dp)) }
+                    item { Text("Finding the apps on this device…", style = TvType.ui(17f, color = Tv.soft(0.6f)), modifier = Modifier.padding(12.dp)) }
                 } else {
                     found.chunked(2).forEachIndexed { r, line ->
                         item("apps-$r") {
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 line.forEach { app ->
                                     val picked = app.pkg in s.apps
                                     ListRow(
@@ -536,32 +540,31 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                 item("s-log") {
                     val log by actions.log.collectAsState()
                     ListRow(
-                        "Connection log", { nav.showLog = true }, subtitle = "${log.size} lines from this session", focusRequester = logKey,
-                        leading = { IconSquare(Ic.Log, it) },
+                        "Connection log", { nav.showLog = true }, subtitle = if (log.isEmpty()) "Nothing logged yet this session" else "${log.size} lines from this session", focusRequester = logKey,
                         trailing = { Chevron(it) },
                     )
                 }
-                action(scope, "s-test", Ic.Pulse, "Run a connection test", "Checks the tunnel, DNS and IPv6 leaks") { nav.showTest = true }
+                action(scope, "s-test", "Run a connection test", "Checks the tunnel, DNS and IPv6 leaks") { nav.showTest = true }
                 val active = state.active
                 if (active != null) {
                     action(
-                        scope, "s-speed", Ic.Gauge, "Speed test",
+                        scope, "s-speed", "Speed test",
                         state.speeds[active.id]?.let { "${active.name}: ${fmtMbps(it.downMbps)} Mbps down, ${ago(it.at)}" } ?: "Is the VPN fast enough for 4K?",
                     ) { nav.overlay = Overlay.Speed(active.id, "Settings › Diagnostics") }
                 }
-                action(scope, "s-send", Ic.Phone, "Send the log to your phone", "Download it on the phone") { nav.overlay = logSheet() }
+                action(scope, "s-send", "Send the log to your phone", "Download it on the phone") { nav.overlay = logSheet() }
                 if (s.advanced) {
                     item { SectionLabel("Advanced") }
-                    value(scope, "s-verb", "settings.verb", s.verb, selected = nav.pick == Pick.Value("verb")) { pickValue("verb") }
+                    value(scope, "s-verb", "settings.verb", ValueChipLabel[s.verb] ?: s.verb, selected = nav.pick == Pick.Value("verb")) { pickValue("verb") }
                 }
             }
             Category.Backup -> {
                 val last = Words.lastBackup(state.lastBackup)
-                action(scope, "s-bk", Ic.Archive, "Back up to your phone", last) {
+                action(scope, "s-bk", "Back up to your phone", last) {
                     // Without a passphrase, it is chosen first and the backup follows straight on.
                     nav.overlay = if (state.hasBackupPassphrase || !s.backupPassword) backupSheet(s.backupPassword) else Overlay.Form(passphraseSpec(state, nav, actions, thenBackup = true))
                 }
-                action(scope, "s-rs", Ic.Phone, "Restore a backup", "Send the backup file from your phone") {
+                action(scope, "s-rs", "Restore a backup", "Send the backup file from your phone") {
                     nav.overlay = Overlay.Phone(
                         "backup", "Settings › Backup", "Restore a backup",
                         "Scan the code, choose the backup file and type its passphrase there, if it has one. Its profiles are added to this device; ones here already, exactly the same, are left alone.",
@@ -575,7 +578,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                     s.backupPassword,
                 ) { actions.changeSettings { it.copy(backupPassword = !it.backupPassword) } }
                 if (s.backupPassword) {
-                    action(scope, "s-bkpass", Ic.Lock, if (state.hasBackupPassphrase) "Change the backup passphrase" else "Choose a backup passphrase", "Backups are encrypted with it; restoring needs it") {
+                    action(scope, "s-bkpass", if (state.hasBackupPassphrase) "Change the backup passphrase" else "Choose a backup passphrase", "Backups are encrypted with it; restoring needs it") {
                         nav.overlay = Overlay.Form(passphraseSpec(state, nav, actions))
                     }
                 }
@@ -602,14 +605,13 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                             "Remove the backup passphrase", { nav.confirmRemovePass = true },
                             subtitle = "Backing up then asks for a new one", danger = true,
                             focusRequester = scope.key("s-bkrm"),
-                            leading = { IconSquare(Ic.Trash, it) },
                         )
                     }
                 }
             }
             Category.Phones -> {
                 val devices = scope.devices
-                action(scope, "s-pair", Ic.Phone, "Pair a phone", "Show a code to scan; the TV asks before it pairs") {
+                action(scope, "s-pair", "Pair a phone", "Show a code to scan; the TV asks before it pairs") {
                     nav.overlay = Overlay.PairPhone(Pairing.show().id)
                 }
                 value(scope, "s-reach", "settings.phoneReach", ValueChipLabel[s.phoneReach] ?: s.phoneReach, selected = nav.pick == Pick.Value("reach")) { pickValue("reach") }
@@ -639,9 +641,8 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                             ListRow(
                                 d.name, { nav.confirmRemovePhone = d.id },
                                 subtitle = deviceLine(d), focusRequester = fr,
-                                leading = { IconSquare(Ic.Phone, it) },
-                                // An action, not a value: red words, no chip.
-                                trailing = { focused -> Text("Remove", style = TvType.ui(16f, FontWeight.SemiBold, if (focused) Tv.OnFocus else Tv.Red)) },
+                                // An action, not a value: a pill in red where a value's chip would be.
+                                trailing = { focused -> ActionChip("Remove", focused, danger = true) },
                             )
                         }
                     }
@@ -690,7 +691,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                 toggle(scope, "s-auto", "settings.automation", s.automation) {
                     actions.changeSettings { it.copy(automation = !it.automation) }
                 }
-                action(scope, "s-cmds", Ic.Log, "Commands", "With your profiles’ names; copy them on your phone below") {
+                action(scope, "s-cmds", "Commands", "With your profiles’ names; copy them on your phone below") {
                     nav.overlay = Overlay.File("Settings › Automation", "Commands", commands(state), plain = true)
                 }
             }
@@ -711,7 +712,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                     update is UpdateState.Available -> "Install the update"
                     else -> "Updates"
                 }
-                action(scope, "s-upd", Ic.Download, updateTitle, updateSub) {
+                action(scope, "s-upd", updateTitle, updateSub) {
                     when (update) {
                         is UpdateState.Available, is UpdateState.Downloading, is UpdateState.Installing -> nav.overlay = Overlay.Update
                         UpdateState.Checking -> Unit
@@ -721,10 +722,10 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                 toggle(scope, "s-autoupd", "settings.autoUpdate", s.autoUpdate) {
                     actions.changeSettings { it.copy(autoUpdate = !it.autoUpdate) }
                 }
-                action(scope, "s-priv", Ic.Info, "What ${APP_NAME} stores", "Profiles and passwords, encrypted on this device. No accounts, no analytics") {
+                action(scope, "s-priv", "What ${APP_NAME} stores", "Profiles and passwords, encrypted on this device. No accounts, no analytics") {
                     nav.overlay = Overlay.File("Settings › About", "What ${APP_NAME} stores", PRIVACY, plain = true)
                 }
-                action(scope, "s-lic", Ic.File, "Open-source licenses", "OpenVPN 3 core (MPL 2.0), wireguard-go, OpenSSL, asio, fmt, lz4, xxHash, ZXing") {
+                action(scope, "s-lic", "Open-source licenses", "OpenVPN 3 core (MPL 2.0), wireguard-go, OpenSSL, asio, fmt, lz4, xxHash, ZXing") {
                     val text = runCatching { context.assets.open("licenses.txt").bufferedReader().use { it.readText() } }.getOrDefault("The license texts are missing from this build.")
                     nav.overlay = Overlay.File("Settings › About", "Open-source licenses", text, plain = true)
                 }
@@ -751,7 +752,6 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                             "Reset ${APP_NAME}", { nav.confirmReset = true },
                             subtitle = "Delete everything and start over", danger = true,
                             focusRequester = scope.key("s-reset"),
-                            leading = { IconSquare(Ic.Trash, it) },
                             trailing = { Chevron(it) },
                         )
                     }
@@ -762,7 +762,9 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
     // Diagnostics has too many rows for the code to fit under them; Send the log to your phone shows it.
     if (showPhone) {
         PhoneBlock(
-            phone!!, PhoneBlockSize.Compact, Modifier.padding(top = 12.dp, start = 10.dp, bottom = 6.dp),
+            phone!!, PhoneBlockSize.Compact, Modifier.padding(top = 12.dp, bottom = 8.dp),
+            // Backup's four rows and a 160 code don't both fit; a smaller code keeps every row in sight.
+            qr = if (cat == Category.Backup) 128f else null,
             title = when (cat) {
                 Category.Dns -> "Or change these on your phone"
                 Category.Backup -> "Or restore a backup on your phone"
@@ -785,7 +787,7 @@ private fun AppIcon(app: LauncherApp) {
         Image(icon, contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(TvRadius.Small.dp)))
     } else {
         Box(Modifier.size(40.dp).clip(RoundedCornerShape(TvRadius.Small.dp)).background(Tv.white(0.1f)), contentAlignment = Alignment.Center) {
-            Text(app.label.take(2).uppercase(), style = TvType.ui(13f, FontWeight.SemiBold))
+            Text(app.label.take(2).uppercase(), style = TvType.ui(15f, FontWeight.SemiBold))
         }
     }
 }
@@ -819,12 +821,11 @@ private fun LazyListScope.value(
     item(key) { ListRow(title, onClick, subtitle = sub, selected = selected, flash = scope.nav.flashKey == key, focusRequester = fr, trailing = { ValueChip(value, it) }) }
 }
 
-private fun LazyListScope.action(scope: PanelScope, key: String, icon: Ic, title: String, sub: String, onClick: () -> Unit) {
+private fun LazyListScope.action(scope: PanelScope, key: String, title: String, sub: String, onClick: () -> Unit) {
     val fr = scope.key(key)
     item(key) {
         ListRow(
             title, onClick, subtitle = sub, focusRequester = fr, flash = scope.nav.flashKey == key,
-            leading = { IconSquare(icon, it) },
             trailing = { Chevron(it) },
         )
     }
@@ -845,8 +846,8 @@ private fun LockedPanel(nav: Nav, req: Requesters) {
             nav.opener = req["cat-${nav.settingsCat.name}"]
         }
     }
-    PanelHeading("Settings", "Settings are locked", "Type the PIN to change settings on this device.")
-    Row(Modifier.padding(top = 22.dp)) {
+    PanelHeading(null, "Settings are locked", "Type the PIN to change settings on this device.")
+    Row(Modifier.padding(top = 24.dp)) {
         TvButton("Type the PIN", ask, icon = Ic.Lock, focusRequester = req["s-unlock"], onFocus = ask)
     }
 }
@@ -870,9 +871,9 @@ private fun ColumnScope.LogPanel(state: VpnUiState, nav: Nav, actions: TunnelAct
             .padding(top = 16.dp)
             .fillMaxWidth()
             .weight(1f)
-            .clip(RoundedCornerShape(TvRadius.Medium.dp))
+            .clip(RoundedCornerShape(TvRadius.Small.dp))
             .background(Color.Black.copy(alpha = 0.4f))
-            .border(2.dp, if (f.focused) Tv.Focus else Color.Transparent, RoundedCornerShape(TvRadius.Medium.dp))
+            .border(2.dp, if (f.focused) Tv.Focus else Color.Transparent, RoundedCornerShape(TvRadius.Small.dp))
             .onKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when {
@@ -892,19 +893,19 @@ private fun ColumnScope.LogPanel(state: VpnUiState, nav: Nav, actions: TunnelAct
     ) {
         LazyColumn(
             state = list,
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // Log detail › quiet keeps only errors and connection changes.
-            if (lines.isEmpty()) item { Text("The log is empty.", style = TvType.mono(14f, color = Tv.soft(0.82f))) }
+            if (lines.isEmpty()) item { Text("The log is empty.", style = TvType.mono(15f, color = Tv.soft(0.82f))) }
             items(lines.size) { i ->
                 val line = lines[i]
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text(line.time, style = TvType.mono(14f, color = Tv.soft(0.4f)))
+                    Text(line.time, style = TvType.mono(15f, color = Tv.soft(0.4f)))
                     Text(
                         line.text,
                         style = TvType.mono(
-                            14f,
+                            15f,
                             color = when (line.kind) {
                                 LogKind.Ok -> Tv.Mint
                                 LogKind.Err -> Tv.Red
@@ -1028,16 +1029,16 @@ private fun ColumnScope.TestPanel(state: VpnUiState, nav: Nav, actions: TunnelAc
     Column(Modifier.padding(top = 16.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         checks.forEach { c ->
             Row(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(TvRadius.Medium.dp)).background(Tv.white(0.05f)).padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(TvRadius.Small.dp)).background(Tv.white(0.05f)).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 when (c.result) {
-                    CheckState.Idle -> Box(Modifier.size(26.dp).clip(CircleShape).background(Tv.white(0.1f)))
+                    CheckState.Idle -> Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.white(0.1f)))
                     CheckState.Running -> Spinner()
-                    CheckState.Ok -> Box(Modifier.size(26.dp).clip(CircleShape).background(Tv.Mint), contentAlignment = Alignment.Center) { TvIcon(Ic.Check, 15f, Color(0xFF06140D), stroke = 3f) }
-                    CheckState.Warn -> Box(Modifier.size(26.dp).clip(CircleShape).background(Tv.Amber), contentAlignment = Alignment.Center) { TvIcon(Ic.Bang, 15f, Color(0xFF1A1200), stroke = 3f) }
-                    CheckState.Fail -> Box(Modifier.size(26.dp).clip(CircleShape).background(Tv.Red), contentAlignment = Alignment.Center) { TvIcon(Ic.Bang, 15f, Color(0xFF1A0503), stroke = 3f) }
+                    CheckState.Ok -> Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.Mint), contentAlignment = Alignment.Center) { TvIcon(Ic.Check, 15f, Color(0xFF06140D), stroke = 3f) }
+                    CheckState.Warn -> Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.Amber), contentAlignment = Alignment.Center) { TvIcon(Ic.Bang, 15f, Color(0xFF1A1200), stroke = 3f) }
+                    CheckState.Fail -> Box(Modifier.size(28.dp).clip(CircleShape).background(Tv.Red), contentAlignment = Alignment.Center) { TvIcon(Ic.Bang, 15f, Color(0xFF1A0503), stroke = 3f) }
                 }
                 Text(c.title, style = TvType.ui(17f, FontWeight.SemiBold), modifier = Modifier.weight(1f))
                 Text(c.detail, style = TvType.ui(15f, color = Tv.soft(0.62f)), maxLines = 1)
@@ -1090,7 +1091,7 @@ private fun ValuePick(state: VpnUiState, nav: Nav, actions: TunnelActions, req: 
     PickHeading(v.eyebrow, v.title, v.sub)
     val current = v.get(state.settings)
     val list = rememberLazyListState()
-    LazyColumn(state = list, modifier = Modifier.bleed(28.dp).scrollFade(list), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
+    LazyColumn(state = list, modifier = Modifier.bleed(28.dp).scrollFade(list), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
         items(v.options.size) { i ->
             val option = v.options[i]
             ListRow(
@@ -1120,7 +1121,6 @@ private fun ValuePick(state: VpnUiState, nav: Nav, actions: TunnelActions, req: 
                     },
                     subtitle = "Choose a new one; what it locks stays the same",
                     kind = RowKind.Pick,
-                    leading = { IconSquare(Ic.Lock, it) },
                 )
             }
         }
@@ -1133,7 +1133,7 @@ private fun StartupPick(state: VpnUiState, nav: Nav, actions: TunnelActions, req
     val current = if (state.settings.boot) state.settings.startupId else null
     // Opens scrolled to the chosen profile, with one row above it, so focus coming in lands on it.
     val list = rememberLazyListState(initialFirstVisibleItemIndex = state.connections.indexOfFirst { it.id == current }.coerceAtLeast(0))
-    LazyColumn(state = list, modifier = Modifier.bleed(28.dp).scrollFade(list), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
+    LazyColumn(state = list, modifier = Modifier.bleed(28.dp).scrollFade(list), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
         item {
             ListRow(
                 "Don’t connect at startup", {
@@ -1171,7 +1171,7 @@ private fun StartupPick(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 kind = RowKind.Pick,
                 selected = c.id == current,
                 focusRequester = if (c.id == current) req["pk-sel"] else null,
-                leading = { Avatar(lookOf(c), 44f) },
+                leading = { Avatar(lookOf(c), TvSize.Icon) },
                 trailing = {
                     if (!ok) TvIcon(Ic.Lock, 18f, if (it) Tv.dark(0.5f) else Tv.soft(0.5f))
                     if (c.id == current) CheckBadge(it)

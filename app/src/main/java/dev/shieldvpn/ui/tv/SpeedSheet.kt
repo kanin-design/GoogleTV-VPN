@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -153,12 +154,12 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
         else -> "Through the VPN to Cloudflare’s nearest server."
     }
 
-    Sheet(820f) {
+    Sheet(TvSize.SheetLarge) {
         // Where it was opened, as every other sheet's eyebrow says.
-        Text("${o.eyebrow} › Speed test", style = TvType.eyebrow(14f, 0.55f))
+        Text("${o.eyebrow} › Speed test", style = TvType.eyebrow(15f, 0.6f))
         Text(if (direct) "Without the VPN" else c.name, style = TvType.display(32f), modifier = Modifier.padding(top = 4.dp))
-        Text(sub, style = TvType.ui(17f, color = Tv.soft(0.62f)), maxLines = 1, modifier = Modifier.padding(top = 6.dp))
-        Row(Modifier.padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(34.dp)) {
+        Text(sub, style = TvType.ui(17f, color = Tv.soft(0.62f)), maxLines = 1, modifier = Modifier.padding(top = 8.dp))
+        Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(32.dp)) {
             val tone = if (phase == SpeedTest.Phase.Up) Tv.Blue else Tv.Mint
             val value = when {
                 phase == SpeedTest.Phase.Down || phase == SpeedTest.Phase.Up -> live
@@ -179,11 +180,11 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
                 Stat("Ping", (if (showLast) last!!.pingMs else ping)?.let { "$it ms" }, phase == SpeedTest.Phase.Ping)
                 Stat("Download", (if (showLast) last!!.downMbps else down)?.let { "${fmtMbps(it)} Mbps" }, phase == SpeedTest.Phase.Down)
                 Stat("Upload", (if (showLast) last!!.upMbps else up)?.let { "${fmtMbps(it)} Mbps" }, phase == SpeedTest.Phase.Up)
-                if (showLast) Text("From the last test, ${ago(last!!.at)}", style = TvType.ui(14f, color = Tv.soft(0.5f)), modifier = Modifier.padding(start = 4.dp))
+                if (showLast) Text("From the last test, ${ago(last!!.at)}", style = TvType.ui(15f, color = Tv.soft(0.6f)), modifier = Modifier.padding(start = 4.dp))
             }
         }
         Verdict(stage, down, up, error, if (direct) null else state.speeds[SpeedTest.DIRECT])
-        Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             val (label, icon, primary) = when (stage) {
                 // One button whose text changes, so focus stays on it as the test moves on.
                 Stage.Ask -> Triple<String, Ic?, () -> Unit>(if (other) "Switch to ${c.name} and test" else "Connect and test", Ic.Power) {
@@ -222,7 +223,7 @@ private fun Gauge(mbps: Double, tone: Color, centre: @Composable () -> Unit) {
     val shown by animateFloatAsState(target, tween(if (target == 0f) 420 else 240, easing = LinearEasing), label = "gauge")
     val measurer = rememberTextMeasurer()
     val labels = remember(measurer) {
-        val style = TextStyle(fontFamily = TvType.Ui, fontSize = TvType.ui(13f).fontSize, fontWeight = FontWeight.Medium, color = Tv.soft(0.42f))
+        val style = TextStyle(fontFamily = TvType.Ui, fontSize = TvType.ui(15f).fontSize, fontWeight = FontWeight.Medium, color = Tv.soft(0.42f))
         Scale.map { measurer.measure(if (it >= 500) "500+" else it.toInt().toString(), style) }
     }
     Box(Modifier.size(300.dp, 262.dp), contentAlignment = Alignment.Center) {
@@ -248,16 +249,16 @@ private fun Gauge(mbps: Double, tone: Color, centre: @Composable () -> Unit) {
                 drawText(label, topLeft = Offset(p.x - label.size.width / 2f, p.y - label.size.height / 2f))
             }
         }
-        Box(Modifier.padding(top = 18.dp), contentAlignment = Alignment.Center) { centre() }
+        Box(Modifier.padding(top = 16.dp), contentAlignment = Alignment.Center) { centre() }
     }
 }
 
 @Composable
 private fun GaugeReadout(label: String, value: String, unit: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, style = TvType.eyebrow(14f, 0.55f))
-        Text(value, style = TvType.display(58f), modifier = Modifier.padding(top = 2.dp))
-        Text(unit, style = TvType.ui(16f, FontWeight.SemiBold, Tv.soft(0.55f)))
+        Text(label, style = TvType.eyebrow(15f, 0.55f))
+        Text(value, style = TvType.display(TvType.Gauge), modifier = Modifier.padding(top = 2.dp))
+        Text(unit, style = TvType.ui(17f, FontWeight.SemiBold, Tv.soft(0.55f)))
     }
 }
 
@@ -266,16 +267,17 @@ private fun Stat(label: String, value: String?, running: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(TvRadius.Medium.dp))
+            .height(TvSize.Row.dp)
+            .clip(RoundedCornerShape(TvRadius.Small.dp))
             .background(Tv.white(if (running) 0.09f else 0.05f))
-            .padding(horizontal = 18.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = TvType.ui(17f, FontWeight.SemiBold, Tv.soft(if (value != null || running) 0.9f else 0.5f)), modifier = Modifier.weight(1f))
         if (running && value == null) {
             Spinner(size = 18f)
         } else {
-            Text(value ?: "—", style = TvType.ui(20f, FontWeight.SemiBold, if (value != null) Tv.Ink else Tv.soft(0.35f)))
+            Text(value ?: "—", style = TvType.ui(19f, FontWeight.SemiBold, if (value != null) Tv.Ink else Tv.soft(0.35f)))
         }
     }
 }
@@ -298,18 +300,19 @@ private fun Verdict(stage: Stage, down: Double?, up: Double?, error: String?, ba
     }
     Row(
         modifier = Modifier
-            .padding(top = 18.dp)
+            // Close under the gauge, whose box is taller than the arc: with it the sheet fits the panels' box.
+            .padding(top = 8.dp)
             .fillMaxWidth()
             // Two lines tall from the start, so the sheet does not grow when the result arrives.
-            .heightIn(min = 70.dp)
-            .clip(RoundedCornerShape(TvRadius.Medium.dp))
+            .heightIn(min = TvSize.RowTall.dp)
+            .clip(RoundedCornerShape(TvRadius.Small.dp))
             .background(if (title != null) tone.copy(alpha = 0.1f) else Tv.white(0.04f))
-            .padding(horizontal = 18.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (title != null) {
-            Box(Modifier.size(26.dp).clip(CircleShape).background(tone), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(28.dp).clip(CircleShape).background(tone), contentAlignment = Alignment.Center) {
                 TvIcon(if (tone == Tv.Mint) Ic.Check else Ic.Bang, 15f, Color(0xFF06140D), stroke = 3f)
             }
         }
