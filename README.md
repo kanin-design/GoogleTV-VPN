@@ -17,7 +17,7 @@ An OpenVPN and WireGuard client for Android TV and Google TV, made for the remot
 - **Speed test.** Ping, download and upload through the VPN, on a speedometer, with whether it is fast enough for 4K or HD and how much of your plain connection the VPN keeps.
 - **Everyday controls.** Pause for 15 minutes, connect when the device starts, and reconnect by itself after Wi-Fi changes. There are a connection test, a connection log and connection details.
 - **A control panel on your phone.** Pair a phone once from a QR code, and its browser shows the whole app: status and Connect, every profile and setting, import, backup and the log, also while you watch TV with the VPN on. Every change is previewed first, a tunnel setting can be applied and tested and is put back if the test fails, and anything risky waits for an OK on the remote. Requests are encrypted end to end with a key only the TV and that phone hold.
-- **Backups.** One file moves every profile, saved password and setting to a new device through your phone, encrypted with your backup passphrase (PBKDF2 and AES-GCM), or, with Settings › Backup › Use a password off, as a plain file. A restore shows what it adds and changes before it does.
+- **Backups.** One file moves every profile, saved password and setting to a new device through your phone, encrypted with a password you type for that backup (PBKDF2 and AES-GCM), or as a plain file if you leave it empty. The password is never kept on the device, so restoring needs the one you typed. A restore shows what it adds and changes before it does.
 - **Updates.** Each time it opens, it looks on GitHub for a newer build, by build number, so a build republished under the same version counts too. Settings › About downloads the APK for the device, checks its SHA-256 and installs it; Android asks you to confirm. If the VPN was on, it connects again once the new build is in.
 - **PIN lock** for settings or the whole app, and **automation intents** for home automation apps and ADB.
 - **Remote, keyboard or mouse.** Everything works with the remote; a keyboard types into fields (Enter moves on, as Done does), and a mouse can click anything.
@@ -95,7 +95,7 @@ python3 tools/banner.py Archivo-ExpandedBlack.ttf
 
 ## Privacy
 
-What stays on the device: your profiles and settings, in the app's private storage. Saved passwords and the backup passphrase are encrypted with a key in the device's keystore, and the PIN is kept as a salted hash. A saved password is only sent to the servers its profile's file trusts: a new file that trusts others (another CA) takes it off, and it is typed again.
+What stays on the device: your profiles and settings, in the app's private storage. Saved passwords are encrypted with a key in the device's keystore, and the PIN is kept as a salted hash. A saved password is only sent to the servers its profile's file trusts: a new file that trusts others (another CA) takes it off, and it is typed again.
 
 What leaves the device:
 - the VPN traffic itself, to the servers named in your profiles;

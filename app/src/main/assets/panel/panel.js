@@ -252,7 +252,7 @@
     go.type = 'button';
     add(card, f, add(el('div', 'actions'), go), status);
     main.append(card);
-    add(main, el('p', 'foot', 'The code in the link works once, for five minutes. It never leaves this phone.'));
+    add(main, el('p', 'foot', 'The code in the link works once, for five minutes, and never leaves this phone.'));
     const k = keysOf(secret, 'pair');
     const claim = b64(crypto.getRandomValues(new Uint8Array(16)));
     let n = 0;
@@ -325,7 +325,7 @@
     $('tray').hidden = true;
     $('live').hidden = true;
     add(main, el('h1', null, why === 'new' ? 'Pair this phone first' : why === 'self' ? 'This phone is unpaired' : 'This phone isn’t paired any more'),
-      el('p', 'lede', why === 'removed' ? 'It was removed on the TV, or it wasn’t used for 90 days.' : why === 'self' ? 'You unpaired it. Pair it again to use the panel.' : 'The panel works on phones paired with the TV.'));
+      el('p', 'lede', why === 'removed' ? 'The TV removed this phone, or it went unused for 90 days.' : why === 'self' ? 'You unpaired it. Pair it again to use the panel.' : 'The panel works on phones paired with the TV.'));
     add(main, add(el('section', 'card'), el('h2', null, 'To pair it'),
       add(el('ol', 'lede'), el('li', null, 'On the TV, open ' + APP + ' › Settings › Phone access.'), el('li', null, 'Choose Pair a phone.'), el('li', null, 'Scan the code with this phone’s camera.'))));
   }
@@ -628,7 +628,7 @@
     back.onclick = () => { location.hash = '#/profiles'; };
     main.append(back);
     if (!p) {
-      add(main, el('h1', null, 'That profile is gone'), el('p', 'lede', 'It was deleted on the TV.'));
+      add(main, el('h1', null, 'That profile is gone'), el('p', 'lede', 'The profile was deleted on the TV.'));
       return;
     }
     const t = S.tunnel;
@@ -658,7 +658,7 @@
     dl.querySelector('.ico').append(svg(ICON.doc));
     dl.onclick = () => download({ what: 'profile', profile: p.id });
     const del = el('button', 'row');
-    add(del, add(el('div', 'txt'), el('b', null, 'Delete this profile'), el('small', null, p.signIn.summary.startsWith('Password saved') ? 'It goes with its saved password. The TV asks first' : 'The TV asks first')));
+    add(del, add(el('div', 'txt'), el('b', null, 'Delete this profile'), el('small', null, p.signIn.summary.startsWith('Password saved') ? 'The saved password is deleted too. The TV asks first' : 'The TV asks first')));
     del.querySelector('b').style.color = 'var(--red)';
     del.onclick = () => review([{ op: 'delete', path: 'profiles.' + p.id }], { title: 'Delete ' + p.name + '?', done: () => { location.hash = '#/profiles'; toast('Deleted ' + p.name); } });
     add(rows, dl, del);
@@ -810,8 +810,7 @@
     }
     const advanced = valueOf('settings.advanced') === true;
     SCHEMA.groups.forEach((g) => {
-      // Backup's switch goes in its own card, below.
-      if (g.advanced && !advanced || g.id === 'backup') return;
+      if (g.advanced && !advanced) return;
       const items = g.items.filter((i) => advanced || !i.advanced);
       if (!items.length) return;
       main.append(el('div', 'section', g.label === 'General' ? 'General' : g.label));
@@ -846,7 +845,7 @@
       pin = await askPin('Type it to remove ' + d.name + '.');
       if (pin == null) return;
     }
-    if (d.you && !(await confirmSheet('Unpair this phone?', 'It can’t reach the TV until it is paired again.', 'Unpair'))) return;
+    if (d.you && !(await confirmSheet('Unpair this phone?', 'This phone can’t reach the TV until you pair it again.', 'Unpair'))) return;
     if (!d.you) toast('Press Remove on the TV');
     try {
       const r = await api('devices/remove', { id: d.id, pin });
@@ -858,44 +857,33 @@
 
   function backupCard() {
     const card = el('section', 'card');
-    // As the TV has it now: a switch changed here applies with the review.
-    const password = settingValue('settings.backupPassword') !== false;
-    const item = schemaItem('settings.backupPassword');
-    card.append(el('p', 'lede', S.backup.last + (password
-      ? '. Backups are encrypted with your passphrase and hold every profile, saved password and setting.'
-      : '. Backups hold every profile, saved password and setting, not encrypted: anyone with the file can read them.')));
-    if (item) card.append(field(item.path, item));
-    if (!password) {
-      add(card, add(el('div', 'actions'),
-        button('Download a backup', '', () => download({ what: 'backup' })),
-        button('Restore a backup', 'ghost', () => { location.hash = '#/add/restore'; })));
-      return card;
-    }
+    card.append(el('p', 'lede', S.backup.last + '. A backup is one file with every profile, saved password and setting.'));
+    // Typed for each backup and never kept: restoring needs the same one.
     const pass = keepTyped(el('input', 'input'), 'backup:new');
     pass.type = 'password';
     pass.autocomplete = 'new-password';
-    pass.placeholder = S.backup.passphrase ? 'A new passphrase' : 'A passphrase: 6 characters or more';
+    pass.placeholder = 'Password, if you want one';
     const again = keepTyped(el('input', 'input'), 'backup:again');
     again.type = 'password';
     again.autocomplete = 'new-password';
     again.placeholder = 'The same again';
-    const current = keepTyped(el('input', 'input'), 'backup:current');
-    current.type = 'password';
-    current.autocomplete = 'off';
-    current.placeholder = 'The current passphrase';
     const err = el('p', 'err');
     err.hidden = true;
-    // The TV's words for the same thing.
-    const set = button(S.backup.passphrase ? 'Change the backup passphrase' : 'Choose a backup passphrase', 'ghost', async () => {
+    // The TV's words for the same checks.
+    const get = button('Download a backup', '', async () => {
       err.hidden = true;
-      if (pass.value.length < 6) { err.hidden = false; err.textContent = 'At least 6 characters'; return; }
+      if (pass.value && pass.value.length < 6) { err.hidden = false; err.textContent = 'At least 6 characters'; return; }
       if (pass.value !== again.value) { err.hidden = false; err.textContent = 'Not the same as the first. Type it again'; return; }
-      await review([Object.assign({ op: 'set', path: 'backup.passphrase', value: pass.value }, S.backup.passphrase ? { current: current.value } : {})], { done: () => forgetTyped('backup:') });
+      if (await download({ what: 'backup', password: pass.value })) {
+        forgetTyped('backup:');
+        pass.value = again.value = '';
+      }
     });
-    add(card, S.backup.passphrase ? current : null, pass, again, err, add(el('div', 'actions'),
-      S.backup.passphrase ? button('Download a backup', '', () => download({ what: 'backup' })) : null,
-      set,
-      S.backup.passphrase ? button('Remove the passphrase', 'danger', () => review([{ op: 'set', path: 'backup.passphrase', value: null }])) : null,
+    const help = el('span', 'help', 'Without a password, anyone with the file can read its keys.');
+    // As a field's help line (.field .help), which this card has no field for.
+    Object.assign(help.style, { display: 'block', color: 'var(--faint)', fontSize: '13px', margin: '8px 0 4px' });
+    add(card, pass, again, help, err, add(el('div', 'actions'),
+      get,
       button('Restore a backup', 'ghost', () => { location.hash = '#/add/restore'; })));
     return card;
   }
@@ -909,7 +897,7 @@
     const back = el('button', 'link', restore ? '‹ Settings' : '‹ Profiles');
     back.onclick = () => { arrived = null; forgetTyped('add:'); location.hash = restore ? '#/settings' : '#/profiles'; };
     add(main, back, el('h1', null, restore ? 'Restore a backup' : 'Add a profile'), el('p', 'lede', restore
-      ? 'Choose the backup file. Type its passphrase next; you see what it adds and changes before anything happens.'
+      ? 'Choose the backup file. If it has a password, you type it next. You see what it adds and changes before anything happens.'
       : 'A .ovpn or WireGuard .conf, a picture of a WireGuard QR code, a .zip, a backup, or a .p12 certificate. The TV works out what it is.'));
     if (arrived) {
       main.append(arrivedCard(arrived));
@@ -1003,7 +991,7 @@
         f.style.padding = '12px 0 0';
         card.append(f);
       }
-      if (!rv.canSignIn) card.append(el('p', 'info warn', 'This profile has no way to sign in: no password, certificate or key. It may not connect.'));
+      if (!rv.canSignIn) card.append(el('p', 'info warn', 'This profile has no password, certificate or key to sign in with, so it may not connect.'));
       rv.warnings.forEach((w) => card.append(el('p', 'info warn', w)));
       const ops = (test) => [{ op: 'import', file: a.file, name: name.value.trim(), username: user ? user.value.trim() : '', password: pw ? pw.value : '' }];
       const acts = el('div', 'actions');
@@ -1018,10 +1006,10 @@
     if (a.what === 'backup') {
       // A backup made without a password restores without one.
       const locked = a.encrypted !== false;
-      add(card, el('h2', null, 'A backup: ' + a.name), el('p', 'lede', (locked ? 'Type its passphrase. ' : '') + 'You see what it adds and changes before anything happens.'));
+      add(card, el('h2', null, 'A backup: ' + a.name), el('p', 'lede', (locked ? 'Type its password. ' : '') + 'You see what it adds and changes before anything happens.'));
       const pass = keepTyped(el('input', 'input'), k + 'pass');
       pass.type = 'password';
-      pass.placeholder = 'The backup’s passphrase';
+      pass.placeholder = 'The backup’s password';
       pass.hidden = !locked;
       // The narrower choice first: settings come along only when asked for.
       const what = segmented([['profiles', 'Profiles only'], ['all', 'Profiles and settings']], 'profiles', k + 'what');
@@ -1075,7 +1063,7 @@
   }
 
   async function clearLog() {
-    if (!(await confirmSheet('Clear the log?', 'Its lines go on the TV too, including what phones changed. The log then starts with who cleared it.', 'Clear'))) return;
+    if (!(await confirmSheet('Clear the log?', 'This clears the log on the TV too, with what phones changed. The new log starts with who cleared it.', 'Clear'))) return;
     act('clearLog');
   }
 
@@ -1112,6 +1100,7 @@
       if (!r.ok) return toast(r.text, true);
       save(r.name, unb64(r.data), 'application/octet-stream');
       toast('Downloaded ' + r.name);
+      return true;
     } catch (e) { if (!(e instanceof Unpaired)) toast(e.message, true); } finally {
       clearInterval(tick);
       if (sheetEl && sheetEl.contains(s)) closeSheet();
@@ -1220,7 +1209,6 @@
       const op = ops[i];
       const item = op && op.path ? schemaItem(op.path) : null;
       if (op && op.path === 'lock.pin') return 'PIN';
-      if (op && op.path === 'backup.passphrase') return 'Backup passphrase';
       return item ? item.label : op ? ({ import: 'The new profile', update: 'The file', restore: 'The backup', certificate: 'The certificate', delete: 'Delete' }[op.op] || 'This change') : 'This change';
     };
     if (p.conflicts.length) {

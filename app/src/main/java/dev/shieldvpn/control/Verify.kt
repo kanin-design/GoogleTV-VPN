@@ -83,7 +83,7 @@ object Verify {
         val connected = end is VpnStatus.Connected
         val checks = mutableListOf(
             if (connected) ConnectionTest.tunnel(true, VpnController.tunnel.value)
-            else ConnectionTest.Check(ConnectionTest.TUNNEL, ConnectionTest.Result.Fail, (end as? VpnStatus.Failed)?.message ?: "It didn’t connect in time"),
+            else ConnectionTest.Check(ConnectionTest.TUNNEL, ConnectionTest.Result.Fail, (end as? VpnStatus.Failed)?.message ?: "The tunnel didn’t connect in time"),
         )
         if (connected) {
             step("Checking DNS")
@@ -106,7 +106,7 @@ object Verify {
         Control.rollBack()
         back(beforeId)
         val what = when (failed.title) {
-            ConnectionTest.TUNNEL -> "It didn’t connect: ${failed.detail.trimEnd('.').replaceFirstChar { it.lowercase() }}."
+            ConnectionTest.TUNNEL -> "The tunnel didn’t connect: ${failed.detail.trimEnd('.').replaceFirstChar { it.lowercase() }}."
             ConnectionTest.DNS -> "DNS didn’t answer through the tunnel."
             else -> "Traffic didn’t reach the internet through the tunnel."
         }
@@ -114,7 +114,7 @@ object Verify {
     }
 
     /** How a rollback ends: a new profile isn't kept; a change is undone. */
-    private fun undone(testId: String) = if (testId == "new") "It wasn’t saved." else "The old settings are back."
+    private fun undone(testId: String) = if (testId == "new") "The profile wasn’t saved." else "The old settings are back."
 
     /** Back to the tunnel that was up before, or none. */
     private fun back(id: String?) {

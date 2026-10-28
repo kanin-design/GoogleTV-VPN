@@ -33,7 +33,7 @@ $WEB
   <p class="lede" id="lede">Looking for the TV…</p>
   <section class="card" id="codecard"></section>
   <div id="view"></div>
-  <p class="foot">It stays on your home network, encrypted between this page and the TV. This page works while the TV shows its code.</p>
+  <p class="foot">Everything stays on your home network, encrypted between this page and the TV. The page works while the TV shows its code.</p>
 </main>
 <script>${noble.replace("</", "<\\/")}</script>
 <script>

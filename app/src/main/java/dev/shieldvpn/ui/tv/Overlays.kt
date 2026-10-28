@@ -201,7 +201,7 @@ private fun SignInSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                 o.save -> "Save the password for ${c.name}"
                 else -> "Sign in to ${c.name}"
             },
-            sub = if (o.save) "It stays in this device’s keystore, encrypted, never in the .ovpn file." else "This profile asks for a username and password. With Remember on, they stay in this device’s keystore.",
+            sub = if (o.save) "The password stays in this device’s keystore, encrypted, never in the .ovpn file." else "This profile asks for a username and password. With Remember on, they stay in this device’s keystore.",
             fields = listOf(FormField("user", "Username", login?.username.orEmpty()), FormField("pw", "Password", secret = true)),
             primary = if (o.save) "Save" else "Connect",
             primaryIcon = if (o.save) Ic.Check else Ic.Power,
@@ -457,7 +457,7 @@ private fun UpdateSheet(state: VpnUiState, actions: TunnelActions, req: Requeste
                 }
             }
             is UpdateState.Downloading -> {
-                PanelHeading("Update", "Downloading build ${u.build.number}", "${u.percent}%. It is checked before Android installs it.", titleSize = 32f)
+                PanelHeading("Update", "Downloading build ${u.build.number}", "${u.percent}%. The update is checked before Android installs it.", titleSize = 32f)
                 Progress(u.percent / 100f, Modifier.padding(top = 20.dp))
                 Row(Modifier.padding(top = 24.dp)) { TvButton("Hide", close, glass = true, focusRequester = req["ov-first"]) }
             }

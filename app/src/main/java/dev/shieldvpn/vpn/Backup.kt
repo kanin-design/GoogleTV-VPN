@@ -17,7 +17,7 @@ import javax.crypto.spec.SecretKeySpec
 /**
  * A .openvpnclientbackup file: every profile with its file and login, and the settings, encrypted
  * with a passphrase (PBKDF2-SHA256, then AES-256-GCM). Only someone with the passphrase can
- * read it, so it is safe to keep on a phone. With Settings › Backup › Use a password off, the same
+ * read it, so it is safe to keep on a phone. Made without a password, the same
  * contents go in plain, under "contents", and restore without a passphrase.
  *
  * WireGuard profiles go in an array of their own, "wireguard", so older builds, which read only

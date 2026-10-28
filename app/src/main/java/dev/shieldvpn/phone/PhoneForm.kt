@@ -121,7 +121,7 @@ class PhoneReply(
     val errors: Map<String, String> = emptyMap(),
     val clear: List<String> = emptyList(),
     val holdMs: Long = 0,
-    /** A file the phone downloads straight away, by id and name: the backup after its passphrase is chosen. */
+    /** A file the phone downloads straight away, by id and name: the backup after Download. */
     val download: Pair<String, String>? = null,
     /** What the TV's status line says after this, when not "Saved from your phone". */
     val tv: String? = null,

@@ -60,7 +60,7 @@ object CredentialStore {
             .apply()
     }
 
-    /** A secret of the app's own, such as the backup passphrase, kept like a password. */
+    /** A secret of the app's own, kept like a password. */
     fun putSecret(context: Context, name: String, value: String?) {
         val edit = prefs(context).edit()
         if (value == null) edit.remove("secret.$name") else edit.putString("secret.$name", encrypt(value))

@@ -760,7 +760,7 @@ private fun profileForm(state: VpnUiState, nav: Nav, c: Connection, fileSize: In
     val staged = nav.staged["profile-${c.id}"]
     val hasCert = info?.cert != null || c.keyAlias != null
     val certNote = when {
-        c.keyAlias != null -> "It signs in with a key in the TV’s keystore: ${Certificates.label(c.keyAlias)}."
+        c.keyAlias != null -> "This profile signs in with a key in the TV’s keystore: ${Certificates.label(c.keyAlias)}."
         info?.cert != null -> "The file has its own certificate, valid ${info.cert.validUntil}."
         else -> "There is no certificate in the file. Add one if the server asks for it."
     }
@@ -774,7 +774,7 @@ private fun profileForm(state: VpnUiState, nav: Nav, c: Connection, fileSize: In
                     PhoneField.Text("user", "Username", login?.username.orEmpty(), mirror = true),
                     PhoneField.Text("pw", "Password", secret = true, mirror = true, help = if (saved) "Leave it empty to keep the saved one." else "Saved on the TV, encrypted."),
                 ),
-                actions = if (saved) listOf(PhoneAction("forget", "Forget the saved password", danger = true, confirm = "Forget the saved password for ${c.name}? It is asked for at the next connect.", confirmLabel = "Forget")) else emptyList(),
+                actions = if (saved) listOf(PhoneAction("forget", "Forget the saved password", danger = true, confirm = "Forget the saved password for ${c.name}? The TV asks for it at the next connect.", confirmLabel = "Forget")) else emptyList(),
             )
         } else {
             null
@@ -797,7 +797,7 @@ private fun profileForm(state: VpnUiState, nav: Nav, c: Connection, fileSize: In
         if (info?.kind == VpnKind.WireGuard) null else PhoneSection(
             "cert", "Certificate", note = certNote,
             fields = listOf(
-                PhoneField.Upload("p12", "Add a .p12 or .pfx file", "Its certificate and key replace the profile’s", ".p12,.pfx,application/x-pkcs12,application/octet-stream", staged?.let { Staged(it.name, it.bytes.size, "Certificate") }),
+                PhoneField.Upload("p12", "Add a .p12 or .pfx file", "The certificate and key in it replace the profile’s", ".p12,.pfx,application/x-pkcs12,application/octet-stream", staged?.let { Staged(it.name, it.bytes.size, "Certificate") }),
             ) + if (staged != null) p12Fields(state, c) else emptyList(),
             actions = if (staged != null) {
                 listOf(PhoneAction("attach", "Add to ${c.name}", primary = true, needs = listOf("p12pass"), confirm = if (hasCert) "${c.name} has a certificate already. Replace it?" else null, confirmLabel = "Replace"))
@@ -809,7 +809,7 @@ private fun profileForm(state: VpnUiState, nav: Nav, c: Connection, fileSize: In
         if (fileSize != null && focus == "download") {
             PhoneSection("download", Words.fileTitle(info?.kind), fields = listOf(PhoneField.Download("ovpn", ovpnName(c, info?.kind), fileSize, note = keyNote(state, c))))
         } else {
-            PhoneSection("download", Words.fileTitle(info?.kind), note = "It is only sent after you press Send to phone in the profile on the TV.")
+            PhoneSection("download", Words.fileTitle(info?.kind), note = "The file is only sent after you press Send to phone in the profile on the TV.")
         },
     )
     return PhoneForm("the ${c.name} profile", "Edit ${c.name}", "Changes here go to ${c.name} on the TV. Save keeps only what you changed.", sections)
@@ -904,7 +904,7 @@ private suspend fun profileAction(session: PhoneSession, nav: Nav, actions: Tunn
             actions.resetServer(c.id)
             session.saved("server")
             nav.flash("pa-Server")
-            PhoneReply.done("It uses the file’s server again.")
+            PhoneReply.done("The profile uses the file’s server again.")
         }
         "attach" -> {
             val staged = nav.staged["profile-${c.id}"] ?: return PhoneReply.error("p12", "Send the certificate again.")
@@ -1144,7 +1144,7 @@ private fun SignInBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
                 item {
                     if (confirmForget) {
                         ConfirmBar(
-                            "Forget the saved password for ${c.name}? It is asked for at the next connect.", "Forget", req["sl-forget-no"],
+                            "Forget the saved password for ${c.name}? The TV asks for it at the next connect.", "Forget", req["sl-forget-no"],
                             onConfirm = {
                                 confirmForget = false
                                 actions.forgetPassword(c.id)
@@ -1159,7 +1159,7 @@ private fun SignInBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
                     } else {
                         ListRow(
                             "Forget the saved password", { confirmForget = true },
-                            subtitle = "It is asked for at the next connect", danger = true,
+                            subtitle = "The TV asks for it at the next connect", danger = true,
                             focusRequester = req["sl-forget"],
                             trailing = { Chevron(it) },
                         )
@@ -1192,9 +1192,9 @@ private fun SignInBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
         item {
             ListRow(
                 "Add a .p12 from your phone", {
-                    nav.overlay = profilePhone(c, "Add a certificate from your phone", "Scan the code, pick the .p12 or .pfx file and type its password there. Its certificate and key replace the profile’s.", section = "cert")
+                    nav.overlay = profilePhone(c, "Add a certificate from your phone", "Scan the code, pick the .p12 or .pfx file, and type its password there. The certificate and key in it replace the profile’s.", section = "cert")
                 },
-                subtitle = if (state.infoOf(c)?.clientCert == true) "Its certificate and key replace the ones in the file" else "Its certificate and key go into the file",
+                subtitle = if (state.infoOf(c)?.clientCert == true) "The certificate and key in it replace the ones in the file" else "The certificate and key in it go into the file",
                 focusRequester = if (needsLogin) req["sl-p12"] else req["sl-login"],
                 leading = { IconSquare(Ic.Phone, it) },
                 trailing = { Chevron(it) },

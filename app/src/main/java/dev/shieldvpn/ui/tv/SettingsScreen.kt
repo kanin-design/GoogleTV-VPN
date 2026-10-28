@@ -560,53 +560,14 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
             }
             Category.Backup -> {
                 val last = Words.lastBackup(state.lastBackup)
-                action(scope, "s-bk", "Back up to your phone", last) {
-                    // Without a passphrase, it is chosen first and the backup follows straight on.
-                    nav.overlay = if (state.hasBackupPassphrase || !s.backupPassword) backupSheet(s.backupPassword) else Overlay.Form(passphraseSpec(state, nav, actions, thenBackup = true))
-                }
+                action(scope, "s-bk", "Back up to your phone", last) { nav.overlay = backupSheet() }
                 action(scope, "s-rs", "Restore a backup", "Send the backup file from your phone") {
                     nav.overlay = Overlay.Phone(
                         "backup", "Settings › Backup", "Restore a backup",
-                        "Scan the code, choose the backup file and type its passphrase there, if it has one. Its profiles are added to this device; ones here already, exactly the same, are left alone.",
+                        "Scan the code, choose the backup file, and type its password if it has one. Profiles already on this TV are skipped.",
                         section = "restore",
                         extra = if (actions.hasFilePicker) "Pick it on a USB drive" to { nav.overlay = null; actions.pickFile() } else null,
                     )
-                }
-                toggle(
-                    scope, "s-bkpw", "Use a password",
-                    if (s.backupPassword) "Backups are encrypted with the backup passphrase" else "Backups are plain files: anyone with one can read its passwords and keys",
-                    s.backupPassword,
-                ) { actions.changeSettings { it.copy(backupPassword = !it.backupPassword) } }
-                if (s.backupPassword) {
-                    action(scope, "s-bkpass", if (state.hasBackupPassphrase) "Change the backup passphrase" else "Choose a backup passphrase", "Backups are encrypted with it; restoring needs it") {
-                        nav.overlay = Overlay.Form(passphraseSpec(state, nav, actions))
-                    }
-                }
-                // Its own row, so the passphrase sheet keeps to three buttons.
-                if (s.backupPassword && state.hasBackupPassphrase && nav.confirmRemovePass) {
-                    item {
-                        ConfirmBar(
-                            "Remove the backup passphrase? Backups made with it still need it.", "Remove", req["s-bkrm-no"],
-                            onConfirm = {
-                                nav.confirmRemovePass = false
-                                actions.setBackupPassphrase(null)
-                                nav.toast("The backup passphrase was removed")
-                                nav.refocus(req["s-bkpass"])
-                            },
-                            onKeep = {
-                                nav.confirmRemovePass = false
-                                nav.refocus(req["s-bkrm"])
-                            },
-                        )
-                    }
-                } else if (s.backupPassword && state.hasBackupPassphrase) {
-                    item {
-                        ListRow(
-                            "Remove the backup passphrase", { nav.confirmRemovePass = true },
-                            subtitle = "Backing up then asks for a new one", danger = true,
-                            focusRequester = scope.key("s-bkrm"),
-                        )
-                    }
                 }
             }
             Category.Phones -> {
@@ -621,7 +582,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                     if (nav.confirmRemovePhone == d.id) {
                         item(key + "-confirm") {
                             ConfirmBar(
-                                "Remove ${d.name}? It can’t reach the TV until it pairs again.", "Remove", req["$key-no"],
+                                "Remove ${d.name}? That phone can’t reach the TV until it pairs again.", "Remove", req["$key-no"],
                                 onConfirm = {
                                     nav.confirmRemovePhone = null
                                     Devices.remove(d.id)
@@ -1221,7 +1182,7 @@ private fun logFile(actions: TunnelActions) = dev.shieldvpn.phone.PhoneFile("$AP
 /** Diagnostics' phone code, pointing at the log. */
 fun logSheet() = Overlay.Phone(
     "diag", "Settings › Diagnostics", "Send the log to your phone",
-    "Scan the code and press Download the log. It has no keys, usernames or passwords in it.",
+    "Scan the code and press Download the log. The log has no keys, usernames or passwords.",
     section = "log",
 )
 
@@ -1236,7 +1197,7 @@ private fun diagnosticsPhone(state: VpnUiState, nav: Nav, actions: TunnelActions
             listOf(
                 // The size is left out: the log grows while it is open, and the page would be drawn again at every line.
                 PhoneSection(
-                    "log", "Connection log", note = "From this session, newest at the bottom. It has no keys, usernames or passwords in it.",
+                    "log", "Connection log", note = "From this session, newest at the bottom, with no keys, usernames or passwords.",
                     fields = listOf(PhoneField.Download("log", "$APP_FILE_NAME-log.txt", 0, label = "Download the log")),
                 ),
                 PhoneSection(
@@ -1271,33 +1232,28 @@ private fun automationPhone(state: VpnUiState, actions: TunnelActions): dev.shie
 )
 
 /**
- * Settings › Backup on the phone: the passphrase, the download, and a restore. The backup holds
- * every key and password, so the phone gets it only after Back up to your phone on the TV, and a
- * passphrase set already changes only with the current one.
+ * Settings › Backup on the phone: the download and a restore. The backup holds every key and
+ * password, so the phone gets it only after Back up to your phone on the TV. Its password is typed
+ * for each backup and never kept, so no backup is made with one nobody knows.
  */
 @Composable
 private fun backupPhone(state: VpnUiState, nav: Nav, actions: TunnelActions): dev.shieldvpn.phone.PhoneSession? {
     val name = "$APP_FILE_NAME-backup-${java.time.LocalDate.now()}.${Backup.EXTENSION}"
+    // The file made by Download, until the phone fetches it.
+    val made = remember { java.util.concurrent.atomic.AtomicReference<ByteArray?>(null) }
     return rememberPhoneSession(
         "backup", state, actions,
-        form = { s -> backupForm(s, nav, name, focus) },
+        form = { s -> backupForm(s, nav, focus) },
         locked = { locked(actions.stateNow(), nav) },
         onAction = { action, v ->
-            val now = actions.stateNow()
             when (action) {
-                "setpass" -> {
-                    // A first passphrase only when the TV asked for one; a change only with the one set now.
-                    if (!now.hasBackupPassphrase && focus != "pass") return@rememberPhoneSession PhoneReply.error(null, "Press Back up to your phone on the TV first.")
-                    val outcome = setPassphrase(now, actions, nav, v["pass1"].orEmpty(), v["pass2"].orEmpty(), current = v["old"].orEmpty())
-                    if (outcome !is Outcome.Done) return@rememberPhoneSession outcome.toReply()
-                    saved(if (now.hasBackupPassphrase) "change" else "pass")
-                    if (now.hasBackupPassphrase) {
-                        outcome.toReply(clear = listOf("old", "pass1", "pass2"))
-                    } else {
-                        // A first passphrase goes straight on to the backup, as it does on the TV.
-                        point("download")
-                        PhoneReply(clear = listOf("pass1", "pass2"), download = "backup" to name)
-                    }
+                "backup" -> {
+                    if (focus != "download") return@rememberPhoneSession PhoneReply.error(null, pressOnTv("Back up to your phone"))
+                    val first = v["pass1"].orEmpty()
+                    val again = v["pass2"].orEmpty()
+                    if (first.isNotEmpty() || again.isNotEmpty()) passphraseProblems(first, again)?.let { return@rememberPhoneSession it.toReply() }
+                    made.set(actions.backupFile(first))
+                    PhoneReply(clear = listOf("pass1", "pass2"), download = "backup" to name)
                 }
                 "restore" -> {
                     val file = nav.staged["backup"] ?: return@rememberPhoneSession PhoneReply.error("restorefile", "Choose the backup file again.")
@@ -1324,7 +1280,8 @@ private fun backupPhone(state: VpnUiState, nav: Nav, actions: TunnelActions): de
             when {
                 id != "backup" -> null
                 focus != "download" -> dev.shieldvpn.phone.PhoneFile.refused(pressOnTv("Back up to your phone"))
-                else -> actions.backupFile()?.let { dev.shieldvpn.phone.PhoneFile(name, "application/octet-stream", it) }
+                else -> made.getAndSet(null)?.let { dev.shieldvpn.phone.PhoneFile(name, "application/octet-stream", it) }
+                    ?: dev.shieldvpn.phone.PhoneFile.refused("Press Download the backup again.")
             }
         },
         onDownloaded = { _, file ->
@@ -1334,64 +1291,39 @@ private fun backupPhone(state: VpnUiState, nav: Nav, actions: TunnelActions): de
     )
 }
 
-private fun backupForm(state: VpnUiState, nav: Nav, name: String, focus: String?): PhoneForm {
+private fun backupForm(state: VpnUiState, nav: Nav, focus: String?): PhoneForm {
     val staged = nav.staged["backup"]
-    val password = state.settings.backupPassword
     // A backup made without a password restores without one.
     val locked = staged != null && Backup.encrypted(staged.bytes)
     val sections = buildList {
-        if (password && !state.hasBackupPassphrase) {
-            add(
-                if (focus == "pass") {
-                    PhoneSection(
-                        "pass", "Choose a passphrase", note = "Backups are encrypted with it, and restoring one needs it. Keep it somewhere safe.",
-                        fields = listOf(
-                            PhoneField.Text("pass1", "Passphrase", secret = true, required = true, help = "At least 6 characters."),
-                            PhoneField.Text("pass2", "Type it again", secret = true, required = true),
-                        ),
-                        actions = listOf(PhoneAction("setpass", "Save and download", primary = true, needs = listOf("pass1", "pass2"))),
-                    )
-                } else {
-                    PhoneSection("pass", "Back up the TV", note = "There is no backup passphrase yet. Press Back up to your phone on the TV, then choose one here.")
-                },
-            )
-        } else {
-            add(
-                if (focus == "download") {
-                    PhoneSection(
-                        "download", "Back up the TV",
-                        note = state.lastBackup?.let { (at, n) -> "The last backup was ${ago(at)}, with $n profile${if (n == 1) "" else "s"}." } ?: "There is no backup yet.",
-                        fields = listOf(PhoneField.Download("backup", name, 0, note = if (password) "Encrypted with your passphrase: every profile, saved password and setting." else "Every profile, saved password and setting, not encrypted: keep the file somewhere safe.", label = "Download the backup")),
-                    )
-                } else {
-                    PhoneSection("download", "Back up the TV", note = "The backup holds every key and password, so it is only sent after you press Back up to your phone on the TV.")
-                },
-            )
-            if (password) add(
+        add(
+            if (focus == "download") {
                 PhoneSection(
-                    "change", "Change the passphrase", folded = true,
+                    "download", "Back up the TV",
+                    note = state.lastBackup?.let { (at, n) -> "Last backup: ${ago(at)}, with $n profile${if (n == 1) "" else "s"}." } ?: "No backup yet.",
                     fields = listOf(
-                        PhoneField.Text("old", "Current passphrase", secret = true, required = true),
-                        PhoneField.Text("pass1", "New passphrase", secret = true, required = true, help = "At least 6 characters."),
-                        PhoneField.Text("pass2", "Type it again", secret = true, required = true),
+                        PhoneField.Text("pass1", "Password", secret = true, help = "At least 6 characters. Leave it empty for a file without one: anyone with that file can read its keys."),
+                        PhoneField.Text("pass2", "Type it again", secret = true),
                     ),
-                    actions = listOf(PhoneAction("setpass", "Change it", primary = true, needs = listOf("old", "pass1", "pass2"))),
-                ),
-            )
-        }
+                    actions = listOf(PhoneAction("backup", "Download the backup", primary = true)),
+                )
+            } else {
+                PhoneSection("download", "Back up the TV", note = "Press Back up to your phone on the TV first.")
+            },
+        )
         add(
             PhoneSection(
-                "restore", "Restore a backup", note = "From this TV or another one. Its profiles are added; ones here already, exactly the same, are left alone.",
+                "restore", "Restore a backup", note = "Profiles already on this TV are skipped.",
                 fields = listOfNotNull(
                     PhoneField.Upload("restorefile", "Choose the backup file", "The .${Backup.EXTENSION} file", ".${Backup.EXTENSION},application/octet-stream,application/json", staged?.let { Staged(it.name, it.bytes.size, "Backup") }),
-                    if (locked) PhoneField.Text("rpass", "Its passphrase", secret = true, required = true) else null,
+                    if (locked) PhoneField.Text("rpass", "Password", secret = true, required = true) else null,
                     if (staged != null) PhoneField.Choice("same", "When a profile with the same name is on the TV", listOf("both" to "Keep both", "replace" to "Replace it"), "both") else null,
                 ),
                 actions = if (staged != null) listOf(PhoneAction("restore", "Restore on the TV", primary = true, needs = if (locked) listOf("rpass") else emptyList())) else emptyList(),
             ),
         )
     }
-    return PhoneForm("Settings › Backup", "Back up the TV", "Download a backup of every profile and setting${if (password) ", encrypted," else ","} or restore one.", sections)
+    return PhoneForm("Settings › Backup", "Back up the TV", "Download a backup of every profile and setting, or restore one.", sections)
 }
 
 /** A reason short enough for a check's line. */

@@ -55,7 +55,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun VpnUiState.mirror(core: CoreState) = copy(
         connections = core.connections, servers = core.servers, logins = core.logins, infos = core.infos,
-        activeId = core.activeId, settings = core.settings, hasBackupPassphrase = core.hasBackupPassphrase,
+        activeId = core.activeId, settings = core.settings,
         hasPin = core.hasPin, lastBackup = core.lastBackup, speeds = core.speeds,
     )
 
@@ -171,7 +171,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Importing ------------------------------------------------------------
 
-    /** A file picked on the TV: a profile opens its review, a backup asks for its passphrase. */
+    /** A file picked on the TV: a profile opens its review, a backup asks for its password. */
     fun review(uri: Uri) {
         val name = runCatching { ServerStore.fileNameOf(app, uri) }.getOrDefault("")
         val bytes = runCatching { app.contentResolver.openInputStream(uri)?.use { ServerStore.readLimited(it) } }.getOrNull()
@@ -204,7 +204,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * A file or text from a phone or a link. A backup waits for its passphrase; anything else
+     * A file or text from a phone or a link. A backup waits for its password; anything else
      * opens the review. Returns what is wrong, for the phone to show, or null when it arrived.
      */
     fun receive(name: String, raw: ByteArray, username: String = "", password: String = ""): String? {

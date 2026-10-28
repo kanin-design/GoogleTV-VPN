@@ -63,7 +63,7 @@ fun PairSheet(nav: Nav, req: Requesters, o: Overlay.PairPhone, close: () -> Unit
     val done = result?.takeIf { it.first == o.offerId }?.second
     LaunchedEffect(done) {
         if (done is Pairing.Result.Paired) {
-            nav.toast("${done.device.name} is paired. It can open the panel from now on")
+            nav.toast("${done.device.name} is paired and can open the panel from now on")
             close()
         }
     }

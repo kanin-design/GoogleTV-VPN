@@ -17,6 +17,7 @@ import dev.shieldvpn.control.Option
 import dev.shieldvpn.control.PinTries
 import dev.shieldvpn.control.ProfileStatus
 import dev.shieldvpn.control.Schema
+import dev.shieldvpn.control.Validate
 import dev.shieldvpn.control.Verify
 import dev.shieldvpn.control.Words
 import dev.shieldvpn.http.HttpServer
@@ -265,7 +266,7 @@ object RemoteApi : HttpServer.Route {
                     // Not now first, as for every other question a phone causes: one OK hands it everything.
                     val ask = Asks.ask(
                         "Settings › Phone access", "Pair “$name”?",
-                        "From ${r.from}. It can see and change $APP_NAME from its browser, on your home network. Pair only a phone you know.", "Pair",
+                        "From ${r.from}. A paired phone can see and change $APP_NAME from its browser on your home network. Pair only a phone you know.", "Pair",
                         danger = true, paired = false,
                     )
                     val yes = Asks.await(ask, ASK_MS) == true
@@ -353,7 +354,7 @@ object RemoteApi : HttpServer.Route {
             .put("profiles", profiles)
             .put("settings", Schema.settingsJson(s))
             .put("lock", JSONObject().put("pin", s.hasPin).put("locks", pinLocks).put("mode", s.settings.pinMode))
-            .put("backup", JSONObject().put("passphrase", s.hasBackupPassphrase).put("last", Words.lastBackup(s.lastBackup)))
+            .put("backup", JSONObject().put("last", Words.lastBackup(s.lastBackup)))
             .put("you", JSONObject().put("device", device.id).put("name", device.name))
             .put("devices", devices)
             .put("vpnAllowed", VpnService.prepare(app) == null)
@@ -503,7 +504,7 @@ object RemoteApi : HttpServer.Route {
                 applyNow(device, id, p, test, pin)
             } catch (t: Throwable) {
                 // Nothing an apply does may end the app's process: the phone hears what went wrong.
-                push(JSONObject().put("t", "change").put("change", id).put("state", "failed").put("text", "It stopped part way: ${t.message ?: "something went wrong"}."))
+                push(JSONObject().put("t", "change").put("change", id).put("state", "failed").put("text", "The change stopped part way: ${t.message ?: "something went wrong"}."))
             } finally {
                 applying.decrementAndGet()
             }
@@ -647,10 +648,11 @@ object RemoteApi : HttpServer.Route {
         pinProblem(req)?.let { return fail(it) }
         val (question, file) = when (what) {
             "backup" -> {
-                val s = Control.state.value
-                if (s.settings.backupPassword && !s.hasBackupPassphrase) return fail("Choose a backup passphrase first, in Settings › Backup.")
-                "download a backup of every profile and saved password${if (s.settings.backupPassword) "" else ", not encrypted"}" to suspend {
-                    Control.backupFile()?.let { "$APP_FILE_NAME-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date())}.${dev.shieldvpn.vpn.Backup.EXTENSION}" to it }
+                // Typed on the phone for this backup; without one the file is plain.
+                val password = req.optString("password")
+                if (password.isNotEmpty()) Validate.passphraseProblem(password, password)?.let { return fail(it.second) }
+                "download a backup of every profile and saved password${if (password.isEmpty()) ", not encrypted" else ""}" to suspend {
+                    "$APP_FILE_NAME-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date())}.${dev.shieldvpn.vpn.Backup.EXTENSION}" to Control.backupFile(password)
                 }
             }
             "profile" -> {

@@ -44,7 +44,6 @@ data class CoreState(
     /** The profile Connect shows. */
     val activeId: String? = null,
     val settings: AppSettings = AppSettings(),
-    val hasBackupPassphrase: Boolean = false,
     val hasPin: Boolean = false,
     /** When the last backup was downloaded, and of how many profiles. */
     val lastBackup: Pair<Long, Int>? = null,
@@ -74,7 +73,8 @@ object Control {
     private var link: VpnLink.Client? = null
     private var linkUsers = 0
 
-    private const val BACKUP_SECRET = "backup"
+    // Where builds up to 0.2.4 kept a backup passphrase. Backups now ask for a password each time.
+    private const val OLD_BACKUP_SECRET = "backup"
     private const val PAUSE_MILLIS = 15 * 60 * 1000L
 
     /** Called once by the Application; later calls do nothing. */
@@ -90,6 +90,7 @@ object Control {
         PinTries.misses = pinPrefs.getInt("misses", 0)
         PinTries.waitUntil = pinPrefs.getLong("waitUntil", 0)
         PinTries.keep = { misses, until -> pinPrefs.edit().putInt("misses", misses).putLong("waitUntil", until).apply() }
+        if (CredentialStore.hasSecret(app, OLD_BACKUP_SECRET)) CredentialStore.putSecret(app, OLD_BACKUP_SECRET, null)
         refresh(preferActive = SettingsStore.activeConnection(app))
         if (cutOff) scope.launch { note("A change from a phone was cut off part way. The settings from before it are back.") }
         scope.launch { VpnController.status.collect(::onStatus) }
@@ -583,25 +584,9 @@ object Control {
         refresh()
     }
 
-    /** [passphrase] is the one set now, compared in constant time. */
-    fun checkBackupPassphrase(passphrase: String): Boolean {
-        val set = CredentialStore.secret(app, BACKUP_SECRET) ?: return false
-        return java.security.MessageDigest.isEqual(set.toByteArray(), passphrase.toByteArray())
-    }
-
-    fun setBackupPassphrase(passphrase: String?) {
-        CredentialStore.putSecret(app, BACKUP_SECRET, passphrase?.takeIf { it.isNotEmpty() })
-        refresh()
-    }
-
-    /**
-     * The backup to send to a phone: encrypted with the backup passphrase, or plain with Use a
-     * password off. Null while a password is used and none is chosen yet.
-     */
-    suspend fun backupFile(): ByteArray? {
-        val passphrase = if (!_state.value.settings.backupPassword) null else CredentialStore.secret(app, BACKUP_SECRET) ?: return null
-        return withContext(Dispatchers.Default) { Backup.create(app, passphrase) }
-    }
+    /** A backup to send to a phone: encrypted with [password], typed for this backup, or plain without one. */
+    suspend fun backupFile(password: String?): ByteArray =
+        withContext(Dispatchers.Default) { Backup.create(app, password?.takeIf { it.isNotEmpty() }) }
 
     // ---- Links ------------------------------------------------------------------------
 
@@ -711,7 +696,7 @@ object Control {
         val active = connections.firstOrNull { it.id == wanted } ?: connections.firstOrNull()
         val next = s.copy(
             connections = connections, servers = servers, logins = logins, infos = infos, activeId = active?.id,
-            hasBackupPassphrase = CredentialStore.hasSecret(app, BACKUP_SECRET), hasPin = SettingsStore.hasPin(app),
+            hasPin = SettingsStore.hasPin(app),
             lastBackup = SettingsStore.lastBackup(app), revision = s.revision + 1,
         )
         if (next.activeId != s.activeId) SettingsStore.setActiveConnection(app, next.activeId)

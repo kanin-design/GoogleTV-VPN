@@ -112,23 +112,9 @@ fun saveCustomDns(actions: TunnelActions, nav: Nav, text: String, flash: String)
 
 // ---- Backup -----------------------------------------------------------------------------
 
-/** What is wrong with a new passphrase typed twice, by field, or null. */
+/** What is wrong with a new password typed twice, by field, or null. */
 fun passphraseProblems(first: String, again: String, firstId: String = "pass1", againId: String = "pass2"): Outcome.Problems? =
     Validate.passphraseProblem(first, again)?.let { (which, text) -> Outcome.Problems(if (which == 0) firstId else againId, text) }
-
-/**
- * Sets the backup passphrase to [first], typed twice. From a phone, a passphrase that is set
- * already is only changed with the [current] one, so a phone with the code can't take it over.
- */
-fun setPassphrase(state: VpnUiState, actions: TunnelActions, nav: Nav, first: String, again: String, current: String? = null): Outcome {
-    if (current != null && state.hasBackupPassphrase && !actions.checkBackupPassphrase(current)) {
-        return Outcome.Problems("old", "That isn’t the current passphrase")
-    }
-    passphraseProblems(first, again)?.let { return it }
-    actions.setBackupPassphrase(first)
-    nav.flash("s-bkpass")
-    return Outcome.Done(if (state.hasBackupPassphrase) "The passphrase is changed." else "The passphrase is set.")
-}
 
 /**
  * Restores a backup: the one waiting on the TV when [bytes] is null. The TV shows the profiles

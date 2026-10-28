@@ -21,7 +21,7 @@ import org.json.JSONObject
  * A change set is a list of operations:
  * - {"op":"set","path":"settings.customDns","value":["1.1.1.1"],"from":[]}
  * - {"op":"set","path":"profiles.<id>.killMode","value":"Always on","from":"App setting"}
- * - {"op":"set","path":"lock.pin","value":"1234"} and {"op":"set","path":"backup.passphrase","value":"…","current":"…"}
+ * - {"op":"set","path":"lock.pin","value":"1234"}
  * - {"op":"delete","path":"profiles.<id>"}
  * - {"op":"import","file":"f_…","name":"Home","username":"…","password":"…"}
  * - {"op":"update","file":"f_…","path":"profiles.<id>"}
@@ -359,7 +359,6 @@ object Changes {
     /** The item a path names, with its profile for a profile's option. */
     private fun target(s: CoreState, path: String): Pair<Item, Connection?>? {
         if (path == "lock.pin") return Item("lock.pin", Item.Type.Secret, "PIN", "4 to 8 digits", askTv = { "set a new PIN" }, check = { v -> if (v is String) Validate.pinProblem(v) else "Type a new PIN" }) to null
-        if (path == "backup.passphrase") return Item("backup.passphrase", Item.Type.Secret, "Backup passphrase", "", askTv = { if (it == null) "remove the backup passphrase" else null }, check = { v -> (v as? String)?.let { Validate.passphraseProblem(it, it)?.second } }) to null
         if (path.startsWith("profiles.")) {
             val c = profileOf(s, path) ?: return null
             val item = Schema.profileItem(path.substringAfter("${c.id}.")) ?: return null
@@ -378,7 +377,6 @@ object Changes {
 
     private fun currentValue(s: CoreState, path: String): Any? = when (path) {
         "lock.pin" -> if (s.hasPin) "saved" else null
-        "backup.passphrase" -> if (s.hasBackupPassphrase) "saved" else null
         else -> Schema.value(s, path)
     }
 
@@ -390,7 +388,6 @@ object Changes {
         }
         c != null && item.path == "startup" && value == true && s.infos[c.serverId]?.needsLogin == true && s.logins[c.id]?.hasPassword != true ->
             "${c.name} can only connect by itself with its password saved. Save it first."
-        item.path == "backup.passphrase" && value != null && s.hasBackupPassphrase && !Control.checkBackupPassphrase(op.o.optString("current")) -> "That isn’t the current passphrase"
         else -> null
     }
 
@@ -464,7 +461,7 @@ object Changes {
                     val username = o.optString("username").trim().ifEmpty { review.username }
                     val password = o.optString("password").ifEmpty { review.password }
                     added = Control.addProfile(review.copy(name = o.optString("name").trim().ifEmpty { review.name }, username = username, password = password))
-                        ?: return null to "It couldn’t be saved."
+                        ?: return null to "The profile couldn’t be saved."
                 }
                 "update" -> {
                     val review = (uploads[o.optString("file")]?.what as? Inspected.Profile)?.review ?: return added to "The file is gone. Send it again."
@@ -514,7 +511,6 @@ object Changes {
         }
         when (path) {
             "lock.pin" -> Control.setPin(value as String)
-            "backup.passphrase" -> Control.setBackupPassphrase(value as String?)
             "settings.startup" -> Control.setStartup((value as String).ifEmpty { null })
             "settings.pinMode" -> if (value == "Off") Control.setPin(null) else Control.changeSettings { it.copy(pinMode = value as String) }
             else -> Control.changeSettings { st ->
@@ -541,7 +537,6 @@ object Changes {
                     "settings.phoneReach" -> st.copy(phoneReach = value as String)
                     "settings.advanced" -> st.copy(advanced = value as Boolean)
                     "settings.autoUpdate" -> st.copy(autoUpdate = value as Boolean)
-                    "settings.backupPassword" -> st.copy(backupPassword = value as Boolean)
                     else -> st
                 }
             }
@@ -554,7 +549,6 @@ object Changes {
             l.path == "import" -> "$who added the profile ${l.to.substringBefore(" · ")}"
             l.to == "Deleted" -> "$who deleted ${l.label}"
             l.path == "lock.pin" -> "$who changed the PIN"
-            l.path == "backup.passphrase" -> if (l.to == "None") "$who removed the backup passphrase" else "$who changed the backup passphrase"
             l.path.endsWith(".password") -> if (l.to == "None") "$who forgot the password of ${l.label.substringBefore(" › ")}" else "$who changed the password of ${l.label.substringBefore(" › ")}"
             l.path == "restore" -> "$who restored ${l.label} from a backup"
             else -> "$who set ${l.label} to ${l.to}"

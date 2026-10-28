@@ -181,15 +181,9 @@ object Schema {
         Group(
             "automation", "Automation", "For home automation apps and ADB. Off until you turn it on.",
             listOf(
-                Item("settings.automation", Item.Type.Switch, "Let other apps control $APP_NAME", "They can connect and disconnect profiles"),
+                Item("settings.automation", Item.Type.Switch, "Let other apps control $APP_NAME", "Other apps can connect and disconnect profiles"),
             ),
             advanced = true,
-        ),
-        Group(
-            "backup", "Backup", "",
-            listOf(
-                Item("settings.backupPassword", Item.Type.Switch, "Use a password", "Backups are encrypted with the backup passphrase", askTv = { if (it == false) "make backups without a password" else null }),
-            ),
         ),
         Group(
             "general", "General", "",
@@ -227,7 +221,7 @@ object Schema {
             options = { choices("App setting" to "The server’s DNS, or 1.1.1.1 if it sends none", "Server only" to "Only the DNS servers this server pushes", "Custom" to "Your own DNS servers") }),
         Item("username", Item.Type.Text, "Username", "For signing in to the server", tunnel = true, kind = VpnKind.OpenVpn,
             shows = { s, c -> openVpnOnly(s, c) && s.infos[c.serverId]?.needsLogin == true }, checkName = "username", check = { Validate.usernameProblem(it as String) }),
-        Item("password", Item.Type.Secret, "Password", "Saved encrypted on the TV. It never comes back to the phone", tunnel = true, kind = VpnKind.OpenVpn,
+        Item("password", Item.Type.Secret, "Password", "Saved encrypted on the TV, and never sent back to a phone", tunnel = true, kind = VpnKind.OpenVpn,
             shows = { s, c -> openVpnOnly(s, c) && s.infos[c.serverId]?.needsLogin == true },
             askTv = { if (it == null) "forget a saved password" else null }),
         Item("pinned", Item.Type.Switch, "Pin to Quick connect", "Show it first on the Connect screen"),
@@ -276,7 +270,6 @@ object Schema {
             "settings.phoneReach" -> st.phoneReach
             "settings.advanced" -> st.advanced
             "settings.autoUpdate" -> st.autoUpdate
-            "settings.backupPassword" -> st.backupPassword
             else -> null
         }
     }

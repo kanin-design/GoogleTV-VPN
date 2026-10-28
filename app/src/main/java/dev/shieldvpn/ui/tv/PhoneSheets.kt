@@ -188,7 +188,7 @@ fun P12TargetSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Req
     LaunchedEffect(Unit) { req["p12-first"].focusWhenReady() }
     Sheet(TvSize.SheetLarge) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            PanelHeading("Import › Certificates", "Add the certificate to a profile", "Its certificate and key go into the profile’s file, in place of any it had.", titleSize = 32f)
+            PanelHeading("Import › Certificates", "Add the certificate to a profile", "The certificate and key go into the profile’s file, in place of any it had.", titleSize = 32f)
             val list = rememberLazyListState()
             LazyColumn(
                 state = list,
@@ -303,33 +303,12 @@ fun PickProfileSheet(state: VpnUiState, req: Requesters, o: Overlay.PickProfile,
 
 // ---- Shared forms -----------------------------------------------------------------
 
-/** Settings › Backup › Backup passphrase, typed twice; with [thenBackup], the backup follows straight on. */
-fun passphraseSpec(state: VpnUiState, nav: Nav, actions: TunnelActions, thenBackup: Boolean = false): FormSpec {
-    val change = state.hasBackupPassphrase
-    val next: (Outcome) -> FormResult = { o -> if (o is Outcome.Done && thenBackup) FormResult.Open(backupSheet()) else o.toForm() }
-    return FormSpec(
-        eyebrow = "Settings › Backup",
-        title = if (change) "Change the backup passphrase" else "Choose a backup passphrase",
-        sub = "At least 6 characters, typed twice. Backups are encrypted with it, and restoring one needs it, so keep it somewhere safe.",
-        fields = listOf(FormField("pass1", "Passphrase", secret = true), FormField("pass2", "Type it again", secret = true)),
-        primary = if (thenBackup) "Save and back up" else "Save",
-        phone = "backup",
-        phoneSection = if (change) "change" else "pass",
-        // Chosen on the phone, the backup goes straight on there too; the TV shows its code.
-        phoneSaved = { if (thenBackup) FormResult.Open(backupSheet()) else FormResult.Done },
-    ) { v, _ -> next(setPassphrase(state, actions, nav, v["pass1"].orEmpty(), v["pass2"].orEmpty())) }
-}
-
-/** The Backup screen's phone code, pointing at the download; [encrypted] unless Use a password is off. */
-fun backupSheet(encrypted: Boolean = true): Overlay.Phone = Overlay.Phone(
+/** The Backup screen's phone code, pointing at the download. */
+fun backupSheet(): Overlay.Phone = Overlay.Phone(
     key = "backup",
     eyebrow = "Settings › Backup",
     title = "Back up to your phone",
-    lede = if (encrypted) {
-        "Scan the code and press Download. Your phone gets one encrypted file with every profile and setting; restoring it needs the backup passphrase."
-    } else {
-        "Scan the code and press Download. Your phone gets one file with every profile and setting, not encrypted: anyone with it can read its passwords and keys."
-    },
+    lede = "Scan the code, type a password for this backup if you want one, and press Download. Restoring it needs the same password.",
     section = "download",
 )
 
@@ -350,12 +329,12 @@ fun restoredText(r: Backup.Restored.Done): String {
     return parts.joinToString(", ")
 }
 
-/** A backup picked on the TV: its passphrase, when it was made with one ([encrypted]). */
+/** A backup picked on the TV: its password, when it was made with one ([encrypted]). */
 fun restoreSpec(nav: Nav, actions: TunnelActions, encrypted: Boolean = true): FormSpec = FormSpec(
     eyebrow = "Import › Restore",
     title = "Restore a backup",
-    sub = (if (encrypted) "Type the passphrase it was made with. " else "") + "Its profiles are added to this device; ones already here, exactly the same, are left alone.",
-    fields = if (encrypted) listOf(FormField("passphrase", "Passphrase", secret = true)) else emptyList(),
+    sub = (if (encrypted) "Type the backup’s password. " else "") + "The backup’s profiles are added to this TV. Profiles already here are skipped.",
+    fields = if (encrypted) listOf(FormField("passphrase", "Password", secret = true)) else emptyList(),
     primary = "Restore",
     busyLabel = "Restoring…",
     toggle = FormToggle("Replace", "Profiles with the same name", false),
@@ -369,7 +348,7 @@ fun restoreSpec(nav: Nav, actions: TunnelActions, encrypted: Boolean = true): Fo
 fun p12PasswordSpec(nav: Nav, actions: TunnelActions): FormSpec = FormSpec(
     eyebrow = "Import › Certificates",
     title = "Certificate password",
-    sub = "The password the .p12 file was exported with. It is used once and not kept.",
+    sub = "The password the .p12 file was exported with, used once and not kept.",
     fields = listOf(FormField("p12pass", "Password", secret = true)),
     primary = "Open",
     primaryIcon = Ic.Lock,
@@ -384,7 +363,7 @@ fun p12PasswordSpec(nav: Nav, actions: TunnelActions): FormSpec = FormSpec(
 
 /** The phone fields for a .p12: its password, the profile it is for (unless [only] is given), and where its key goes. */
 fun p12Fields(state: VpnUiState, only: Connection?): List<PhoneField> = listOfNotNull(
-    PhoneField.Text("p12pass", "Its password", secret = true, required = true, help = "The password it was exported with. It is used once and not kept."),
+    PhoneField.Text("p12pass", "Its password", secret = true, required = true, help = "The password the file was exported with, used once and not kept."),
     if (only == null) {
         PhoneField.Select(
             "target", "Use it for",

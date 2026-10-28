@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
     // A system screen answers this activity later: the VPN consent, a file picker, the certificate chooser.
     private var waitingForAnswer = false
 
-    // The screens hold a file a phone sent, waiting for its passphrase or password.
+    // The screens hold a file a phone sent, waiting for its password.
     private var holdingFile = false
 
     // Android asks the user once to allow this app to create a VPN.
@@ -362,11 +362,7 @@ class MainActivity : ComponentActivity(), TunnelActions {
 
     override fun openReview(review: ImportReview) = viewModel.openReview(review)
 
-    override fun setBackupPassphrase(passphrase: String?) = Control.setBackupPassphrase(passphrase)
-
-    override fun checkBackupPassphrase(passphrase: String): Boolean = Control.checkBackupPassphrase(passphrase)
-
-    override suspend fun backupFile(): ByteArray? = Control.backupFile()
+    override suspend fun backupFile(password: String?): ByteArray = Control.backupFile(password)
 
     override fun profileFile(id: String): ByteArray? = Control.profileFile(id)
 

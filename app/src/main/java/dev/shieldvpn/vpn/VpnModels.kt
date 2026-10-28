@@ -209,8 +209,6 @@ data class AppSettings(
     val automation: Boolean = false,
     /** Look for a newer build on GitHub each time the app opens. */
     val autoUpdate: Boolean = true,
-    /** Backups are encrypted with the backup passphrase; off, they are plain files. Not in backups. */
-    val backupPassword: Boolean = true,
     /** When paired phones can reach the TV: [REACH_OPEN] or [REACH_VPN]. Not in backups. */
     val phoneReach: String = REACH_VPN,
 ) {
@@ -251,11 +249,10 @@ data class VpnUiState(
     /** Set while the tunnel is paused, until it comes back by itself. */
     val pausedUntil: Long? = null,
     val review: ImportReview? = null,
-    /** A backup file that arrived and waits for its passphrase. */
+    /** A backup file that arrived and waits for its password. */
     val pendingRestore: ByteArray? = null,
     /** A .p12 certificate that arrived and waits for its password. */
     val pendingP12: ByteArray? = null,
-    val hasBackupPassphrase: Boolean = false,
     val hasPin: Boolean = false,
     /** When a phone last downloaded a backup, and how many profiles it held. */
     val lastBackup: Pair<Long, Int>? = null,

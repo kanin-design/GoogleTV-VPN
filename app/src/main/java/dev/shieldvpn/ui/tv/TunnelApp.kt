@@ -146,11 +146,9 @@ interface TunnelActions {
 
     /** A phone downloaded a backup. */
     fun backupDownloaded()
-    fun setBackupPassphrase(passphrase: String?)
 
-    /** [passphrase] is the backup passphrase set now. */
-    fun checkBackupPassphrase(passphrase: String): Boolean
-    suspend fun backupFile(): ByteArray?
+    /** A backup encrypted with [password], typed for this one, or plain without. */
+    suspend fun backupFile(password: String?): ByteArray
     fun profileFile(id: String): ByteArray?
     fun logText(): String
 
@@ -296,7 +294,6 @@ class Nav {
     /** The Settings row focus goes back to when Back closes what it opened. */
     var settingsReturn: String? = null
     var confirmReset by mutableStateOf(false)
-    var confirmRemovePass by mutableStateOf(false)
 
     /** Settings › Phone access: the paired phone whose Remove bar is open. */
     var confirmRemovePhone by mutableStateOf<String?>(null)
@@ -439,7 +436,6 @@ class Nav {
                 pick = null
                 showLog = false
                 confirmReset = false
-                confirmRemovePass = false
                 logReturn = null
             }
             screen = to
@@ -517,7 +513,7 @@ fun TunnelApp(state: VpnUiState, actions: TunnelActions) {
     LaunchedEffect(state.review) {
         if (state.review != null) nav.go(Screen.Import)
     }
-    // A backup picked on the TV asks for its passphrase, and a certificate for its password.
+    // A backup picked on the TV asks for its password, and so does a certificate.
     LaunchedEffect(state.pendingRestore) {
         if (state.pendingRestore != null) nav.overlay = Overlay.Form(restoreSpec(nav, actions, Backup.encrypted(state.pendingRestore)))
     }
