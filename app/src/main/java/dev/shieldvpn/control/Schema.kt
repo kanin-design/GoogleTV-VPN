@@ -162,7 +162,7 @@ object Schema {
             listOf(
                 Item("settings.proto", Item.Type.Choice, "Preferred protocol", "Tried first when a profile lists UDP and TCP", tunnel = true, kind = VpnKind.OpenVpn, options = { choices("From file" to "Use what the profile says", "UDP" to "Faster. The usual choice", "TCP" to "Gets through strict networks") }),
                 Item("settings.timeout", Item.Type.Choice, "Connection timeout", "Move on to the next server after this long", tunnel = true, options = { listOf(Option("30", "30 s", "Quick to give up on a dead server"), Option("60", "60 s", "Recommended"), Option("120", "120 s", "For slow or distant servers")) }),
-                Item("settings.mtu", Item.Type.Choice, "Tunnel MTU", "Lower it if video stalls on some networks", tunnel = true, options = { choices("Auto" to "Recommended", "1400" to "Try this if video stalls", "1300" to "For networks that drop large packets") }),
+                Item("settings.mtu", Item.Type.Choice, "Tunnel MTU", "Lower the MTU if video stalls on some networks", tunnel = true, options = { choices("Auto" to "Recommended", "1400" to "Try this if video stalls", "1300" to "For networks that drop large packets") }),
                 Item("settings.tlsMin", Item.Type.Choice, "Minimum TLS version", "Refuse servers that only offer older TLS", tunnel = true, kind = VpnKind.OpenVpn, options = { choices("TLS 1.2" to "Works with almost every server", "TLS 1.3" to "Stricter. Newer servers only") }),
                 Item("settings.legacyCiphers", Item.Type.Switch, "Allow legacy ciphers", "BF-CBC and others removed in OpenVPN 2.6", tunnel = true, kind = VpnKind.OpenVpn),
                 Item("settings.compress", Item.Type.Switch, "Compress what this device sends", "Can leak data (VORACLE). Compression the server sends is always accepted", tunnel = true, kind = VpnKind.OpenVpn),
@@ -179,7 +179,7 @@ object Schema {
             advanced = true,
         ),
         Group(
-            "automation", "Automation", "For home automation apps and ADB. Off until you turn it on.",
+            "automation", "Automation", "For home automation apps and ADB. Off until you turn automation on.",
             listOf(
                 Item("settings.automation", Item.Type.Switch, "Let other apps control $APP_NAME", "Other apps can connect and disconnect profiles"),
             ),
@@ -213,7 +213,7 @@ object Schema {
             options = { choices("From file" to "Use what the profile says", "UDP" to "Faster. The usual choice", "TCP" to "Gets through strict networks") }),
         Item("order", Item.Type.Choice, "Server order", "When the file lists several servers, which one to try first", tunnel = true, kind = VpnKind.OpenVpn,
             shows = { s, c -> openVpnOnly(s, c) && (s.infos[c.serverId]?.remotes ?: 1) > 1 },
-            options = { choices("In order" to "Try them as they are written", "Random" to "Spread the load across servers") }),
+            options = { choices("In order" to "Try the servers as they are written", "Random" to "Spread the load across servers") }),
         Item("killMode", Item.Type.Choice, "Kill switch", "For this profile only. App setting follows Settings › Protection", tunnel = true,
             options = { choices("App setting" to "Follow Settings › Protection", "Always on" to "Block traffic whenever this tunnel is down", "Off" to "Never block for this profile") },
             askTv = { if (it == "Off") "turn off the kill switch for this profile" else null }),
@@ -224,7 +224,7 @@ object Schema {
         Item("password", Item.Type.Secret, "Password", "Saved encrypted on the TV, and never sent back to a phone", tunnel = true, kind = VpnKind.OpenVpn,
             shows = { s, c -> openVpnOnly(s, c) && s.infos[c.serverId]?.needsLogin == true },
             askTv = { if (it == null) "forget a saved password" else null }),
-        Item("pinned", Item.Type.Switch, "Pin to Quick connect", "Show it first on the Connect screen"),
+        Item("pinned", Item.Type.Switch, "Pin to Quick connect", "Show this profile first on the Connect screen"),
         Item("startup", Item.Type.Switch, "Connect when the device starts", "Connects before you open the app"),
     )
 

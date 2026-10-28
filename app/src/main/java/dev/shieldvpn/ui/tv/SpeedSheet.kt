@@ -148,7 +148,7 @@ fun SpeedSheet(state: VpnUiState, actions: TunnelActions, req: Requesters, o: Ov
     val last = state.speeds[if (direct) SpeedTest.DIRECT else c.id]
     val sub = when {
         stage == Stage.Ask && other -> "You are connected to ${state.active?.name ?: "another profile"}. ${APP_NAME} switches to ${c.name} for the test."
-        stage == Stage.Ask -> "Connect to see how fast it is. The test takes about 20 seconds."
+        stage == Stage.Ask -> "Connect to see how fast the VPN is. The test takes about 20 seconds."
         stage == Stage.Connecting -> "Connecting to ${c.name}…"
         direct -> "Your connection without the VPN, to compare with."
         else -> "Through the VPN to Cloudflare’s nearest server."

@@ -409,7 +409,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
         Category.Phones -> Schema.groups.first { it.id == "phones" }.let { it.label to it.help }
         Category.OpenVpn -> "OpenVPN" to "Applied on top of every profile. A setting inside the .ovpn file wins unless noted."
         Category.Dns -> "DNS" to "Where name lookups go while the tunnel is up."
-        Category.Automation -> "Automation" to if (s.automation) "For home automation apps and ADB. On: they can connect and disconnect." else "For home automation apps and ADB. Off until you turn it on."
+        Category.Automation -> "Automation" to if (s.automation) "For home automation apps and ADB. On: other apps can connect and disconnect." else "For home automation apps and ADB. Off until you turn automation on."
         Category.About -> "About" to "${APP_NAME} ${actions.versionName} · build ${BuildConfig.VERSION_CODE} · OpenVPN 3 and WireGuard."
     }
     PanelHeading(null, title, sub)
@@ -552,7 +552,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                         state.speeds[active.id]?.let { "${active.name}: ${fmtMbps(it.downMbps)} Mbps down, ${ago(it.at)}" } ?: "Is the VPN fast enough for 4K?",
                     ) { nav.overlay = Overlay.Speed(active.id, "Settings › Diagnostics") }
                 }
-                action(scope, "s-send", "Send the log to your phone", "Download it on the phone") { nav.overlay = logSheet() }
+                action(scope, "s-send", "Send the log to your phone", "Download the log on your phone") { nav.overlay = logSheet() }
                 if (s.advanced) {
                     item { SectionLabel("Advanced") }
                     value(scope, "s-verb", "settings.verb", ValueChipLabel[s.verb] ?: s.verb, selected = nav.pick == Pick.Value("verb")) { pickValue("verb") }
@@ -566,7 +566,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                         "backup", "Settings › Backup", "Restore a backup",
                         "Scan the code, choose the backup file, and type its password if it has one. Profiles already on this TV are skipped.",
                         section = "restore",
-                        extra = if (actions.hasFilePicker) "Pick it on a USB drive" to { nav.overlay = null; actions.pickFile() } else null,
+                        extra = if (actions.hasFilePicker) "Pick the backup on a USB drive" to { nav.overlay = null; actions.pickFile() } else null,
                     )
                 }
             }
@@ -637,7 +637,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                 value(scope, "s-dnssearch", "settings.searchDomains", s.searchDomains.joinToString(", ").ifEmpty { "None" }) {
                     nav.overlay = Overlay.Form(
                         FormSpec(
-                            "Settings › DNS", "Search domains", "Short names like nas resolve as nas.home.lan. Separate them with spaces.",
+                            "Settings › DNS", "Search domains", "Short names like nas resolve as nas.home.lan. Separate the domains with spaces.",
                             listOf(FormField("search", "Domains", s.searchDomains.joinToString(" "), mono = true, max = 400, optional = true)),
                             primary = "Save", phone = "dns", phoneSection = "dns",
                         ) { v, _ ->
@@ -652,7 +652,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                 toggle(scope, "s-auto", "settings.automation", s.automation) {
                     actions.changeSettings { it.copy(automation = !it.automation) }
                 }
-                action(scope, "s-cmds", "Commands", "With your profiles’ names; copy them on your phone below") {
+                action(scope, "s-cmds", "Commands", "With your profiles’ names; copy the commands on your phone below") {
                     nav.overlay = Overlay.File("Settings › Automation", "Commands", commands(state), plain = true)
                 }
             }
@@ -665,7 +665,7 @@ private fun ColumnScope.Panel(state: VpnUiState, nav: Nav, actions: TunnelAction
                     is UpdateState.Available -> if (update.newKey) "Build ${update.build.number} is signed with a new key and installs by hand" to "How"
                     else "Build ${update.build.number} is ready (${update.build.version}, ${update.build.size / 100_000 / 10f} MB)" to "Update"
                     is UpdateState.Downloading -> "Downloading build ${update.build.number}… ${update.percent}%" to "Wait"
-                    is UpdateState.Installing -> "Installing build ${update.build.number}. Confirm it when Android asks" to "Wait"
+                    is UpdateState.Installing -> "Installing build ${update.build.number}. Confirm the install when Android asks" to "Wait"
                     is UpdateState.Failed -> update.message to "Try again"
                 }
                 val updateTitle = when {
@@ -1080,7 +1080,7 @@ private fun ValuePick(state: VpnUiState, nav: Nav, actions: TunnelActions, req: 
                         done()
                         nav.overlay = Overlay.Pin(setting = true)
                     },
-                    subtitle = "Choose a new one; what it locks stays the same",
+                    subtitle = "Choose a new PIN; what it locks stays the same",
                     kind = RowKind.Pick,
                 )
             }
@@ -1124,10 +1124,10 @@ private fun StartupPick(state: VpnUiState, nav: Nav, actions: TunnelActions, req
                     }
                 },
                 subtitle = when {
-                    !ok -> "Save its password first"
+                    !ok -> "Save the profile’s password first"
                     needs -> "Password saved · connects by itself"
                     cert -> "Certificate · connects by itself"
-                    else -> "No certificate or password in its file"
+                    else -> "No certificate or password in the profile’s file"
                 },
                 kind = RowKind.Pick,
                 selected = c.id == current,
@@ -1227,7 +1227,7 @@ private fun automationPhone(state: VpnUiState, actions: TunnelActions): dev.shie
             add(PhoneField.Copy("disconnect", "Disconnect", "adb shell am start -n dev.shieldvpn/.Disconnect"))
             add(PhoneField.Info("intents", text = "Home automation apps send the same intents: component dev.shieldvpn/.Connect or dev.shieldvpn/.Disconnect, with an optional string extra \"profile\"."))
         }
-        PhoneForm("Settings › Automation", "Automation commands", "Copy them for ADB or a home automation app.", listOf(PhoneSection("commands", fields = fields)))
+        PhoneForm("Settings › Automation", "Automation commands", "Copy the commands for ADB or a home automation app.", listOf(PhoneSection("commands", fields = fields)))
     },
 )
 
@@ -1302,8 +1302,8 @@ private fun backupForm(state: VpnUiState, nav: Nav, focus: String?): PhoneForm {
                     "download", "Back up the TV",
                     note = state.lastBackup?.let { (at, n) -> "Last backup: ${ago(at)}, with $n profile${if (n == 1) "" else "s"}." } ?: "No backup yet.",
                     fields = listOf(
-                        PhoneField.Text("pass1", "Password", secret = true, help = "At least 6 characters. Leave it empty for a file without one: anyone with that file can read its keys."),
-                        PhoneField.Text("pass2", "Type it again", secret = true),
+                        PhoneField.Text("pass1", "Password", secret = true, help = "At least 6 characters. Leave the password empty for a plain file, which anyone can read."),
+                        PhoneField.Text("pass2", "Type the password again", secret = true),
                     ),
                     actions = listOf(PhoneAction("backup", "Download the backup", primary = true)),
                 )
@@ -1317,7 +1317,7 @@ private fun backupForm(state: VpnUiState, nav: Nav, focus: String?): PhoneForm {
                 fields = listOfNotNull(
                     PhoneField.Upload("restorefile", "Choose the backup file", "The .${Backup.EXTENSION} file", ".${Backup.EXTENSION},application/octet-stream,application/json", staged?.let { Staged(it.name, it.bytes.size, "Backup") }),
                     if (locked) PhoneField.Text("rpass", "Password", secret = true, required = true) else null,
-                    if (staged != null) PhoneField.Choice("same", "When a profile with the same name is on the TV", listOf("both" to "Keep both", "replace" to "Replace it"), "both") else null,
+                    if (staged != null) PhoneField.Choice("same", "When a profile with the same name is on the TV", listOf("both" to "Keep both", "replace" to "Replace the old one"), "both") else null,
                 ),
                 actions = if (staged != null) listOf(PhoneAction("restore", "Restore on the TV", primary = true, needs = if (locked) listOf("rpass") else emptyList())) else emptyList(),
             ),

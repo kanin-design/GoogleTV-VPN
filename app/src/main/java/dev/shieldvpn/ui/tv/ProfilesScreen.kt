@@ -374,7 +374,7 @@ private fun ProfileHero(state: VpnUiState, c: Connection) {
         MetaLine(facts)
         Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             // One key, two ways to press it.
-            Hint("OK", "Open · hold it for the quick menu")
+            Hint("OK", "Open · hold OK for the quick menu")
         }
     }
 }
@@ -583,7 +583,7 @@ private fun ProfileColumn(
                         if (stepBackTo(nav, index, "pe-pin")) return@ListRow
                         actions.setPinned(c.id, !c.pinned)
                     },
-                    subtitle = "Show it first on the Connect screen", mini = mini,
+                    subtitle = "Show this profile first on the Connect screen", mini = mini,
                     focusRequester = req["pe-pin"],
                     trailing = { TvSwitch(c.pinned, it) },
                 )
@@ -604,7 +604,7 @@ private fun ProfileColumn(
                         if (!stepBackTo(nav, index, "pe-speed")) nav.overlay = Overlay.Speed(c.id, "Profiles › ${c.name}")
                     },
                     subtitle = last?.let { "${fmtMbps(it.downMbps)} Mbps ${ago(it.at)} · ${speedVerdict(it.downMbps).first.replaceFirstChar(Char::lowercase)}" }
-                        ?: if (live) "Is it fast enough for 4K?" else "Connects, then measures it",
+                        ?: if (live) "Is the VPN fast enough for 4K?" else "Connects, then measures the speed",
                     mini = mini,
                     focusRequester = req["pe-speed"],
                     trailing = { Chevron(it) },
@@ -772,7 +772,7 @@ private fun profileForm(state: VpnUiState, nav: Nav, c: Connection, fileSize: In
                 note = "${Words.signIn(info, login, c.keyAlias).summary}.",
                 fields = listOf(
                     PhoneField.Text("user", "Username", login?.username.orEmpty(), mirror = true),
-                    PhoneField.Text("pw", "Password", secret = true, mirror = true, help = if (saved) "Leave it empty to keep the saved one." else "Saved on the TV, encrypted."),
+                    PhoneField.Text("pw", "Password", secret = true, mirror = true, help = if (saved) "Leave the password empty to keep the saved one." else "Saved on the TV, encrypted."),
                 ),
                 actions = if (saved) listOf(PhoneAction("forget", "Forget the saved password", danger = true, confirm = "Forget the saved password for ${c.name}? The TV asks for it at the next connect.", confirmLabel = "Forget")) else emptyList(),
             )
@@ -1000,18 +1000,18 @@ private fun protocolMode(state: VpnUiState, c: Connection): String {
 // ---- One setting ------------------------------------------------------------------------
 
 private val LeafText = mapOf(
-    LeafKind.Look to ("Icon" to "Shown on its card on Connect and in your profile list."),
+    LeafKind.Look to ("Icon" to "Shown on the profile’s card on Connect and in your profile list."),
     LeafKind.SignIn to ("Sign-in" to "How this profile proves who you are: a password, a certificate, or both."),
     LeafKind.Protocol to ("Protocol" to "Override the protocol in the file."),
     LeafKind.Order to ("Server order" to "When the file lists several servers, which one to try first."),
     LeafKind.Kill to ("Kill switch" to "For this profile only. App setting follows Settings › Protection."),
     LeafKind.Dns to ("DNS" to "For this profile only. Custom uses the servers in Settings › DNS, which every profile set to Custom shares."),
-    LeafKind.File to ("The .ovpn file" to "As it is used, with the server from Server and port. Import the file again to change anything else."),
+    LeafKind.File to ("The .ovpn file" to "The file as it is used, with the server from Server and port. Import the file again to change anything else."),
 )
 
 private val Options = mapOf(
     LeafKind.Protocol to listOf("From file" to "Use what the profile says", "UDP" to "Faster. The usual choice", "TCP" to "Gets through strict networks"),
-    LeafKind.Order to listOf("In order" to "Try them as they are written", "Random" to "Spread the load across servers"),
+    LeafKind.Order to listOf("In order" to "Try the servers as they are written", "Random" to "Spread the load across servers"),
     LeafKind.Kill to listOf("App setting" to "Follow Settings › Protection", "Always on" to "Block traffic whenever this tunnel is down", "Off" to "Never block for this profile"),
     LeafKind.Dns to listOf("App setting" to "The server's DNS, or 1.1.1.1 if it sends none", "Server only" to "Only the DNS servers this server pushes", "Custom" to "Your own DNS servers"),
 )
@@ -1159,7 +1159,7 @@ private fun SignInBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
                     } else {
                         ListRow(
                             "Forget the saved password", { confirmForget = true },
-                            subtitle = "The TV asks for it at the next connect", danger = true,
+                            subtitle = "The TV asks for the password at the next connect", danger = true,
                             focusRequester = req["sl-forget"],
                             trailing = { Chevron(it) },
                         )
@@ -1171,7 +1171,7 @@ private fun SignInBody(state: VpnUiState, nav: Nav, actions: TunnelActions, req:
         item {
             Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                 when {
-                    c.keyAlias != null -> DetailGrid(listOf("Certificate" to Certificates.label(c.keyAlias), "Stored" to "In this device’s keystore. The key can’t be copied off it"), columns = 1)
+                    c.keyAlias != null -> DetailGrid(listOf("Certificate" to Certificates.label(c.keyAlias), "Stored" to "In this device’s keystore. The key can’t be copied off the device"), columns = 1)
                     cert == null -> Text(
                         if (needsLogin) "There is no client certificate in this file. The username and password sign you in." else "There is no client certificate in this file, and no password either.",
                         style = TvType.ui(17f, color = Tv.soft(0.7f)),

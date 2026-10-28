@@ -36,7 +36,7 @@ object Validate {
     /** A new passphrase typed twice: which of the two is wrong, and why. */
     fun passphraseProblem(first: String, again: String): Pair<Int, String>? = when {
         first.length < 6 -> 0 to "At least 6 characters"
-        first != again -> 1 to "Not the same as the first. Type it again"
+        first != again -> 1 to "Not the same as the first one. Type the same twice"
         else -> null
     }
 

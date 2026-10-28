@@ -47,7 +47,7 @@ class AutomationActivity : Activity() {
         // Android asks the user once before any app may run a VPN; that needs the app itself.
         if (VpnService.prepare(this) != null) {
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            say("Open ${APP_NAME} and connect once, so Android allows it")
+            say("Open ${APP_NAME} and connect once, so Android allows the VPN")
             return
         }
         when (val plan = Tunnels.plan(this, target.id)) {

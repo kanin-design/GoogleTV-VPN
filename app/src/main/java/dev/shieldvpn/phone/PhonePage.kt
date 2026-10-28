@@ -644,7 +644,7 @@ function fieldEl(f, sec) {
       const sendIt = () => { if (t.value.trim()) upload(f, sec, new Blob([t.value], { type: 'text/plain' }), 'pasted.ovpn'); };
       t.oninput = () => { local[f.id] = t.value; dirty[f.id] = true; clearTimeout(timer); timer = setTimeout(sendIt, 700); readiness(); };
       t.onblur = () => { clearTimeout(timer); if (dirty[f.id]) sendIt(); };
-      if (f.file) wrap.appendChild(el('p', 'help', 'The TV has it: ' + size(f.file.size) + (f.file.sub ? ' · ' + f.file.sub : '')));
+      if (f.file) wrap.appendChild(el('p', 'help', 'The TV has the text: ' + size(f.file.size) + (f.file.sub ? ' · ' + f.file.sub : '')));
     }
     wrap.appendChild(t);
   } else if (f.type === 'switch') {
@@ -949,7 +949,7 @@ function copyText(text, b) {
     let ok = false;
     try { ok = document.execCommand('copy'); } catch (e) {}
     t.remove();
-    if (ok) done(); else b.textContent = 'Select it and copy';
+    if (ok) done(); else b.textContent = 'Select the text and copy it';
   };
   if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, old); return; }
   old();

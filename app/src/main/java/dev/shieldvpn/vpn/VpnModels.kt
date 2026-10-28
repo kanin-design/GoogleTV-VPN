@@ -184,7 +184,7 @@ data class AppSettings(
     val stayAwake: Boolean = false,
     /** With the local network allowed, still send DNS lookups into the tunnel. */
     val blockDns: Boolean = true,
-    /** "Selected apps skip the VPN" or "Only selected apps use it". */
+    /** "Selected apps skip the VPN" or "Only selected apps use the VPN". */
     val appMode: String = APPS_SKIP,
     /** Package names of the selected apps. */
     val apps: Set<String> = emptySet(),
@@ -214,7 +214,7 @@ data class AppSettings(
 ) {
     companion object {
         const val APPS_SKIP = "Selected apps skip the VPN"
-        const val APPS_ONLY = "Only selected apps use it"
+        const val APPS_ONLY = "Only selected apps use the VPN"
         const val REACH_OPEN = "While the app is open"
         const val REACH_VPN = "While the app is open or the VPN is on"
     }

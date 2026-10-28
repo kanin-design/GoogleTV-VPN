@@ -169,14 +169,14 @@ fun Sheet(width: Float, content: @Composable () -> Unit) {
 private fun signInForm(c: Connection, login: Login?, o: Overlay.SignIn) = PhoneForm(
     place = "the sign-in",
     title = if (o.save) "Save the password for ${c.name}" else "Sign in to ${c.name}",
-    lede = if (o.save) "The TV keeps it in its keystore, encrypted." else "The TV connects as soon as you press Connect.",
+    lede = if (o.save) "The TV keeps the password in its keystore, encrypted." else "The TV connects as soon as you press Connect.",
     sections = listOf(
         PhoneSection(
             "login",
             fields = listOfNotNull(
                 PhoneField.Text("user", "Username", login?.username.orEmpty(), required = true, mirror = true),
                 PhoneField.Text("pw", "Password", secret = true, required = true, mirror = true),
-                if (!o.save) PhoneField.Switch("remember", "Remember on the TV", "Then it connects without asking next time", true) else null,
+                if (!o.save) PhoneField.Switch("remember", "Remember on the TV", "Then the profile connects without asking next time", true) else null,
             ),
             actions = listOf(PhoneAction("go", if (o.save) "Save" else "Connect", primary = true, needs = listOf("user", "pw"))),
         ),
@@ -286,7 +286,7 @@ private fun DetailsSheet(state: VpnUiState, nav: Nav, req: Requesters, close: ()
                         // The name and the address it reached, one a line: joined, a long name broke the address in two.
                         "Server" to listOfNotNull(server?.host, t?.remote?.takeIf { it != server?.host }).joinToString("\n"),
                         "Protocol" to (server?.let { "${Words.kind(info?.kind ?: VpnKind.OpenVpn)} · ${it.protocol.label} ${it.port}" } ?: "—"),
-                        "VPN IP (what sites see)" to (t?.publicIp ?: if (since != null) "Looking it up…" else "—"),
+                        "VPN IP (what sites see)" to (t?.publicIp ?: if (since != null) "Looking up…" else "—"),
                         "Tunnel IP" to (t?.address ?: "—"),
                         "DNS servers" to (t?.dns?.joinToString(", ")?.ifEmpty { null } ?: "—"),
                         "Routes" to (t?.routes?.lastOrNull() ?: "—"),
@@ -356,7 +356,7 @@ private fun MenuSheet(
             ListRow(
                 "Speed test",
                 { nav.overlay = Overlay.Speed(c.id, "Quick menu") },
-                subtitle = state.speeds[c.id]?.let { "Last: ${fmtMbps(it.downMbps)} Mbps, ${ago(it.at)}" } ?: "Is it fast enough for 4K?",
+                subtitle = state.speeds[c.id]?.let { "Last: ${fmtMbps(it.downMbps)} Mbps, ${ago(it.at)}" } ?: "Is the VPN fast enough for 4K?",
                 focusRequester = if (tunnelUp) req["ov-first"] else null,
             )
             ListRow(
@@ -462,7 +462,7 @@ private fun UpdateSheet(state: VpnUiState, actions: TunnelActions, req: Requeste
                 Row(Modifier.padding(top = 24.dp)) { TvButton("Hide", close, glass = true, focusRequester = req["ov-first"]) }
             }
             is UpdateState.Installing -> {
-                PanelHeading("Update", "Installing build ${u.build.number}", "Confirm it when Android asks. The app closes and opens again on the new build.", titleSize = 32f)
+                PanelHeading("Update", "Installing build ${u.build.number}", "Confirm the install when Android asks. The app closes and opens again on the new build.", titleSize = 32f)
                 Row(Modifier.padding(top = 24.dp)) { TvButton("Hide", close, glass = true, focusRequester = req["ov-first"]) }
             }
             is UpdateState.Failed -> {

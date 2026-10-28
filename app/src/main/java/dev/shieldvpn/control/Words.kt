@@ -21,14 +21,14 @@ object Words {
 
     const val DUPLICATE_HELP = "A copy to try other settings"
 
-    fun deleteHelp(hasPassword: Boolean) = if (hasPassword) "Removes it and its saved password" else "Removes it from this device"
+    fun deleteHelp(hasPassword: Boolean) = if (hasPassword) "Removes the profile and its saved password" else "Removes the profile from this device"
 
     /**
      * The red bar's question. When [name] is the startup profile, [startupGoesTo] is the profile
      * that gets the slot back, or null when startup turns off.
      */
     fun deleteQuestion(name: String, hasPassword: Boolean, isStartup: Boolean = false, startupGoesTo: String? = null, connected: Boolean = false): String {
-        val q = (if (hasPassword) "Delete $name and its saved password?" else "Delete $name?") + if (connected) " It disconnects first." else ""
+        val q = (if (hasPassword) "Delete $name and its saved password?" else "Delete $name?") + if (connected) " The profile disconnects first." else ""
         if (!isStartup) return q
         return q + if (startupGoesTo != null) " $startupGoesTo connects at startup instead." else " Nothing connects at startup then."
     }

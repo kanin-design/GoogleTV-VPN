@@ -496,7 +496,7 @@ object RemoteApi : HttpServer.Route {
     // ---- Changes -------------------------------------------------------------------------
 
     private fun apply(device: Device, id: String, test: Boolean, pin: String?): JSONObject {
-        val p = onMain { Changes.take(id) } ?: return fail("This change has run out, or it was applied already. Check it again.")
+        val p = onMain { Changes.take(id) } ?: return fail("This change has run out, or was applied already. Check the change again.")
         synchronized(lock) { remember(JSONObject().put("t", "change").put("change", id).put("state", "started")) }
         applying.incrementAndGet()
         applier.execute {
@@ -536,7 +536,7 @@ object RemoteApi : HttpServer.Route {
             progress("asking") { put("step", "Press Allow on the TV") }
             val ask = Asks.ask(
                 "From ${device.name}", "${device.name} wants to ${Words.and(p.ask)}.",
-                "Allow it only if you are making this change on the phone yourself.", "Allow", danger = true,
+                "Allow this only if you are making the change on the phone yourself.", "Allow", danger = true,
             )
             when (Asks.await(ask, ASK_MS)) {
                 true -> Unit
@@ -665,7 +665,7 @@ object RemoteApi : HttpServer.Route {
             else -> return fail("The TV doesn’t know that file.")
         }
         if (device.id in asking) return fail("The TV is already asking something from this phone. Answer that first.")
-        val ask = Asks.ask("From ${device.name}", "${device.name} wants to $question.", "The file goes to the phone. Allow it only if you asked for it there.", "Allow", danger = true)
+        val ask = Asks.ask("From ${device.name}", "${device.name} wants to $question.", "The file goes to the phone. Allow this only if you asked for the file there.", "Allow", danger = true)
         when (askTv(device, ask)) {
             true -> Unit
             false -> return fail("Not allowed: the TV said Not now.")
@@ -683,7 +683,7 @@ object RemoteApi : HttpServer.Route {
             pinProblem(req)?.let { return fail(it) }
             if (device.id in asking) return fail("The TV is already asking something from this phone. Answer that first.")
             val ask = Asks.ask("From ${device.name}", "${device.name} wants to remove ${other.name}.", "${other.name} then can’t reach the TV until it pairs again.", "Remove", danger = true)
-            if (askTv(device, ask) != true) return fail("Not removed: allow it on the TV.")
+            if (askTv(device, ask) != true) return fail("Not removed: allow the removal on the TV.")
         }
         Devices.remove(other.id)
         onMain {

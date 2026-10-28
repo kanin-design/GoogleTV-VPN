@@ -235,9 +235,9 @@
     main.replaceChildren();
     $('tabs').hidden = true;
     $('tray').hidden = true;
-    add(main, el('h1', null, 'Pair this phone with the TV'), el('p', 'lede', 'Then it can see and change everything on the TV from here: profiles, settings, the log. Only on your home network.'));
+    add(main, el('h1', null, 'Pair this phone with the TV'), el('p', 'lede', 'Then this phone can see and change everything on the TV from here: profiles, settings, the log. Only on your home network.'));
     const card = add(el('section', 'card'));
-    const f = add(el('div', 'field'), el('label', null, 'This phone’s name'), el('span', 'help', 'The TV shows it when it asks, and in its list of phones.'));
+    const f = add(el('div', 'field'), el('label', null, 'This phone’s name'), el('span', 'help', 'The TV shows this name when it asks, and in its list of phones.'));
     f.style.padding = '0';
     const input = el('input', 'input');
     input.id = 'pair-name';
@@ -325,7 +325,7 @@
     $('tray').hidden = true;
     $('live').hidden = true;
     add(main, el('h1', null, why === 'new' ? 'Pair this phone first' : why === 'self' ? 'This phone is unpaired' : 'This phone isn’t paired any more'),
-      el('p', 'lede', why === 'removed' ? 'The TV removed this phone, or it went unused for 90 days.' : why === 'self' ? 'You unpaired it. Pair it again to use the panel.' : 'The panel works on phones paired with the TV.'));
+      el('p', 'lede', why === 'removed' ? 'The TV removed this phone, or it went unused for 90 days.' : why === 'self' ? 'You unpaired this phone. Pair it again to use the panel.' : 'The panel works on phones paired with the TV.'));
     add(main, add(el('section', 'card'), el('h2', null, 'To pair it'),
       add(el('ol', 'lede'), el('li', null, 'On the TV, open ' + APP + ' › Settings › Phone access.'), el('li', null, 'Choose Pair a phone.'), el('li', null, 'Scan the code with this phone’s camera.'))));
   }
@@ -472,7 +472,7 @@
       case 'connected': return ['on', 'Connected', ''];
       case 'connecting': return ['busy', 'Connecting…', p && p.server ? 'Reaching ' + p.server.split(' · ')[0] : 'Reaching the server'];
       case 'paused': return ['busy', 'Paused', 'Until ' + clock(t.pausedUntil) + '. Traffic goes directly to the internet until then.'];
-      case 'blocked': return ['bad', 'Blocking traffic', 'The tunnel dropped. The kill switch holds traffic back until it is back.'];
+      case 'blocked': return ['bad', 'Blocking traffic', 'The tunnel dropped. The kill switch holds traffic back until the tunnel is back.'];
       case 'failed': return ['bad', 'Couldn’t connect', [t.error, t.advice && !(t.error || '').includes(t.advice) ? t.advice + '.' : ''].filter(Boolean).join(' ')];
       default: return ['', 'Not connected', p ? p.status.line : ''];
     }
@@ -494,7 +494,7 @@
     // The kind of VPN goes with its server, the one place it says something.
     const server = p.kindLabel + ' server';
     if (t.status === 'connected') {
-      add(facts, fact('VPN IP', t.ip || 'Looking it up…'), fact('Tunnel IP', t.address || '–'),
+      add(facts, fact('VPN IP', t.ip || 'Looking up…'), fact('Tunnel IP', t.address || '–'),
         fact(server, p.server || '–', true), fact('Traffic', '–', true, 'bytes'));
     } else {
       add(facts, fact(server, p.server || '–', true), fact('Sign-in', p.signIn.summary, true, null, true));
@@ -684,7 +684,7 @@
       ta.select();
       let ok = false;
       try { ok = document.execCommand('copy'); } catch (x) { /* not allowed */ }
-      if (ok) toast('Copied'); else toast('Select it and copy it by hand', true);
+      if (ok) toast('Copied'); else toast('Select the text and copy it by hand', true);
       ta.remove();
     }
   }
@@ -762,7 +762,7 @@
         i.id = id;
         i.type = 'password';
         i.autocomplete = 'new-password';
-        i.placeholder = value ? 'Saved on the TV. Type a new one to change it' : 'Not saved';
+        i.placeholder = value ? 'Saved on the TV. Type a new password to change it' : 'Not saved';
         const d = draft.get(path);
         if (d && d.value) i.value = d.value;
         i.oninput = () => { if (i.value) setDraft(path, i.value); else { draft.delete(path); updateTray(); } };
@@ -803,7 +803,7 @@
 
   // ---- Settings ------------------------------------------------------------------------------
   function settingsView(main) {
-    add(main, el('h1', null, 'Settings'), el('p', 'lede', 'The same settings as on the TV. Change what you like, then review it.'));
+    add(main, el('h1', null, 'Settings'), el('p', 'lede', 'The same settings as on the TV. Change what you like, then review the changes.'));
     if (!SCHEMA) {
       main.append(el('p', 'info', 'Loading the settings…'));
       return;
@@ -842,7 +842,7 @@
   async function removeDevice(d) {
     let pin = '';
     if (!d.you && S.lock.locks) {
-      pin = await askPin('Type it to remove ' + d.name + '.');
+      pin = await askPin('Type the PIN to remove ' + d.name + '.');
       if (pin == null) return;
     }
     if (d.you && !(await confirmSheet('Unpair this phone?', 'This phone can’t reach the TV until you pair it again.', 'Unpair'))) return;
@@ -873,7 +873,7 @@
     const get = button('Download a backup', '', async () => {
       err.hidden = true;
       if (pass.value && pass.value.length < 6) { err.hidden = false; err.textContent = 'At least 6 characters'; return; }
-      if (pass.value !== again.value) { err.hidden = false; err.textContent = 'Not the same as the first. Type it again'; return; }
+      if (pass.value !== again.value) { err.hidden = false; err.textContent = 'Not the same as the first one. Type the same twice'; return; }
       if (await download({ what: 'backup', password: pass.value })) {
         forgetTyped('backup:');
         pass.value = again.value = '';
@@ -898,7 +898,7 @@
     back.onclick = () => { arrived = null; forgetTyped('add:'); location.hash = restore ? '#/settings' : '#/profiles'; };
     add(main, back, el('h1', null, restore ? 'Restore a backup' : 'Add a profile'), el('p', 'lede', restore
       ? 'Choose the backup file. If it has a password, you type it next. You see what it adds and changes before anything happens.'
-      : 'A .ovpn or WireGuard .conf, a picture of a WireGuard QR code, a .zip, a backup, or a .p12 certificate. The TV works out what it is.'));
+      : 'A .ovpn or WireGuard .conf, a picture of a WireGuard QR code, a .zip, a backup, or a .p12 certificate. The TV works out what the file is.'));
     if (arrived) {
       main.append(arrivedCard(arrived));
       return;
@@ -987,7 +987,7 @@
         // The VPN's password, not this page's: the browser shouldn't offer to save it.
         pw.autocomplete = 'off';
         keepTyped(pw, k + 'pw');
-        const f = add(el('div', 'field'), el('label', null, 'Sign-in'), el('span', 'help', 'Saved on the TV, encrypted. Leave them empty to type them on the TV when it connects.'), user, pw);
+        const f = add(el('div', 'field'), el('label', null, 'Sign-in'), el('span', 'help', 'Saved on the TV, encrypted. Leave both empty to type them on the TV when the profile connects.'), user, pw);
         f.style.padding = '12px 0 0';
         card.append(f);
       }
@@ -999,28 +999,28 @@
         card.append(el('p', 'info', a.same.name + ' is for the same server. Update it with this file, or add this as a new profile.'));
         acts.append(button('Update ' + a.same.name, '', () => review([{ op: 'update', file: a.file, path: 'profiles.' + a.same.id }], { done: finished })));
       }
-      add(acts, button(a.same ? 'Add as a new profile' : 'Add it', a.same ? 'ghost' : '', () => review(ops(), { title: 'Add ' + (name.value.trim() || rv.name) + '?', publicKey: rv.publicKey, done: () => { finished(); location.hash = '#/profiles'; } })));
+      add(acts, button(a.same ? 'Add as a new profile' : 'Add the profile', a.same ? 'ghost' : '', () => review(ops(), { title: 'Add ' + (name.value.trim() || rv.name) + '?', publicKey: rv.publicKey, done: () => { finished(); location.hash = '#/profiles'; } })));
       add(card, acts, again);
       return card;
     }
     if (a.what === 'backup') {
       // A backup made without a password restores without one.
       const locked = a.encrypted !== false;
-      add(card, el('h2', null, 'A backup: ' + a.name), el('p', 'lede', (locked ? 'Type its password. ' : '') + 'You see what it adds and changes before anything happens.'));
+      add(card, el('h2', null, 'A backup: ' + a.name), el('p', 'lede', (locked ? 'Type its password. ' : '') + 'You see what the backup adds and changes before anything happens.'));
       const pass = keepTyped(el('input', 'input'), k + 'pass');
       pass.type = 'password';
       pass.placeholder = 'The backup’s password';
       pass.hidden = !locked;
       // The narrower choice first: settings come along only when asked for.
       const what = segmented([['profiles', 'Profiles only'], ['all', 'Profiles and settings']], 'profiles', k + 'what');
-      const sameName = segmented([['both', 'Keep both'], ['replace', 'Replace it']], 'both', k + 'same');
+      const sameName = segmented([['both', 'Keep both'], ['replace', 'Replace the old one']], 'both', k + 'same');
       add(card, pass, el('span', 'help', 'What to restore'), what.el, el('span', 'help', 'When a profile with the same name is on the TV'), sameName.el,
         add(el('div', 'actions'), button('Check the backup', '', () => review([{ op: 'restore', file: a.file, passphrase: pass.value, settings: what.value() === 'all', replace: sameName.value() === 'replace' }], { title: 'Restore this backup?', done: () => { finished(); location.hash = '#/profiles'; } }))), again);
       card.querySelectorAll('.help').forEach((h) => { h.style.margin = '14px 0 8px'; h.style.display = 'block'; });
       return card;
     }
     if (a.what === 'p12') {
-      add(card, el('h2', null, 'A certificate: ' + a.name), el('p', 'lede', 'Type the password it was exported with. The TV finds the profile it belongs to.'));
+      add(card, el('h2', null, 'A certificate: ' + a.name), el('p', 'lede', 'Type the password the certificate was exported with. The TV finds the profile it belongs to.'));
       const pass = keepTyped(el('input', 'input'), k + 'pass');
       pass.type = 'password';
       pass.placeholder = 'The certificate’s password';
@@ -1028,7 +1028,7 @@
       [{ id: '', name: 'The profile it belongs to' }].concat(a.targets).forEach((t) => { const o = el('option', null, t.name); o.value = t.id; sel.append(o); });
       keepTyped(sel, k + 'profile');
       const keep = segmented([['file', 'In the profile'], ['keystore', 'In Android’s keystore']], 'file', k + 'keep');
-      add(card, pass, sel, el('span', 'help', 'Where the key is kept'), keep.el, add(el('div', 'actions'), button('Check it', '', () => review([{ op: 'certificate', file: a.file, password: pass.value, path: sel.value ? 'profiles.' + sel.value : '', keep: keep.value() }], { done: () => { finished(); location.hash = '#/profiles'; } }))), again);
+      add(card, pass, sel, el('span', 'help', 'Where the key is kept'), keep.el, add(el('div', 'actions'), button('Check the certificate', '', () => review([{ op: 'certificate', file: a.file, password: pass.value, path: sel.value ? 'profiles.' + sel.value : '', keep: keep.value() }], { done: () => { finished(); location.hash = '#/profiles'; } }))), again);
       return card;
     }
     add(card, el('p', 'info bad', a.text || 'The TV couldn’t read that.'), again);
@@ -1085,7 +1085,7 @@
 
   async function download(req) {
     if (S.lock.locks && !req.pin) {
-      const pin = await askPin('Type it to download this file.');
+      const pin = await askPin('Type the PIN to download this file.');
       if (pin == null) return;
       req = Object.assign({}, req, { pin });
     }
@@ -1369,7 +1369,7 @@
       case 'conflict':
         sheetWatch = null;
         closeSheet();
-        toast('The TV changed some of this meanwhile. Check it again.', true);
+        toast('The TV changed some of this meanwhile. Check the changes again.', true);
         review(w.ops, w.opts);
         break;
       default:
@@ -1398,7 +1398,7 @@
 
   haveNoble().then((ok) => {
     const m = location.hash.match(/pair=([\w-]+)\.([\w-]+)/);
-    if (!ok) $('main').replaceChildren(el('p', 'info bad', 'This page didn’t load completely. Check the Wi-Fi, then reload it.'));
+    if (!ok) $('main').replaceChildren(el('p', 'info bad', 'This page didn’t load completely. Check the Wi-Fi, then reload the page.'));
     else if (m) pairView(m[1], unb64(m[2]));
     else if (me) start();
     else unpaired('new');

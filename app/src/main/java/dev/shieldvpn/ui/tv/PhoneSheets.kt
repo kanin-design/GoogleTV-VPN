@@ -81,7 +81,7 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
     }
     val title = when {
         !o.setting -> "Type your PIN"
-        first != null -> "Type it again"
+        first != null -> "Type the PIN again"
         o.mode == null -> "Choose a new PIN"
         else -> "Choose a PIN"
     }
@@ -122,7 +122,7 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
             else -> {
                 first = null
                 digits = ""
-                problem = "The two were different. Choose it again"
+                problem = "The two PINs were different. Choose one again"
             }
         }
     }
@@ -136,7 +136,7 @@ fun PinSheet(nav: Nav, actions: TunnelActions, req: Requesters, o: Overlay.Pin, 
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(title, style = TvType.display(32f))
             Text(
-                if (o.setting) "4 to 8 digits. Without it, Connect still works." else "Profiles and settings are locked on this device.",
+                if (o.setting) "4 to 8 digits. Connect works without the PIN." else "Profiles and settings are locked on this device.",
                 style = TvType.ui(15f, color = Tv.soft(0.7f)).copy(textAlign = TextAlign.Center),
                 modifier = Modifier.padding(top = 8.dp),
             )
@@ -224,7 +224,7 @@ fun P12TargetSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Req
                         ListRow(
                             c.name,
                             { if (hasCert) replacing = c.id else attach() },
-                            subtitle = if (hasCert) "Has its own certificate, which this one would replace" else state.serverOf(c)?.host,
+                            subtitle = if (hasCert) "Has a certificate already, which this one would replace" else state.serverOf(c)?.host,
                             focusRequester = if (i == 0) req["p12-first"] else req["p12-${c.id}"],
                             leading = { Avatar(lookOf(c), 40f) },
                         )
@@ -239,7 +239,7 @@ fun P12TargetSheet(state: VpnUiState, nav: Nav, actions: TunnelActions, req: Req
                                     nav.toast("Android could not keep this key")
                                 } else {
                                     nav.overlay = Overlay.PickProfile(
-                                        "Use it for which profile?", "The key stays in the device’s keystore and can’t be copied off it.",
+                                        "Which profile is this certificate for?", "The key stays in the device’s keystore and can’t be copied off the device.",
                                         cancelled = { Certificates.forget(alias) },
                                     ) { id ->
                                         actions.setKeyAlias(id, alias)
@@ -308,7 +308,7 @@ fun backupSheet(): Overlay.Phone = Overlay.Phone(
     key = "backup",
     eyebrow = "Settings › Backup",
     title = "Back up to your phone",
-    lede = "Scan the code, type a password for this backup if you want one, and press Download. Restoring it needs the same password.",
+    lede = "Scan the code, type a password for this backup if you want one, and press Download. Restoring the backup needs the same password.",
     section = "download",
 )
 
@@ -363,16 +363,16 @@ fun p12PasswordSpec(nav: Nav, actions: TunnelActions): FormSpec = FormSpec(
 
 /** The phone fields for a .p12: its password, the profile it is for (unless [only] is given), and where its key goes. */
 fun p12Fields(state: VpnUiState, only: Connection?): List<PhoneField> = listOfNotNull(
-    PhoneField.Text("p12pass", "Its password", secret = true, required = true, help = "The password the file was exported with, used once and not kept."),
+    PhoneField.Text("p12pass", "Certificate password", secret = true, required = true, help = "The password the file was exported with, used once and not kept."),
     if (only == null) {
         PhoneField.Select(
-            "target", "Use it for",
+            "target", "Profile",
             // The TV finds the profile from who issued the certificate; picking one is for a tie.
-            listOf(PhoneOption("", "The profile it belongs to", sub = "The TV finds it from who issued the certificate")) + state.connections.filter { state.infoOf(it)?.kind != dev.shieldvpn.vpn.VpnKind.WireGuard }.map { c ->
+            listOf(PhoneOption("", "The profile the certificate belongs to", sub = "The TV picks the profile from who issued the certificate")) + state.connections.filter { state.infoOf(it)?.kind != dev.shieldvpn.vpn.VpnKind.WireGuard }.map { c ->
                 val has = state.infoOf(c)?.cert != null
                 PhoneOption(
                     c.id, c.name,
-                    sub = if (has) "Has its own certificate, which this one replaces" else state.serverOf(c)?.host,
+                    sub = if (has) "Has a certificate already, which this one replaces" else state.serverOf(c)?.host,
                     confirm = if (has) "${c.name} has its own certificate and key. Replace them?" else null,
                 )
             },

@@ -141,7 +141,7 @@ private fun Hero(
             !current -> Idle(state, c, null)
             mode == Mode.On -> {
                 ConnectedFor((state.status as? VpnStatus.Connected)?.sinceMillis)
-                LiveTraffic(state.tunnel?.publicIp?.let { "VPN IP $it" } ?: state.tunnel?.address?.substringBefore('/')?.let { "Tunnel IP $it" } ?: "VPN IP: looking it up")
+                LiveTraffic(state.tunnel?.publicIp?.let { "VPN IP $it" } ?: state.tunnel?.address?.substringBefore('/')?.let { "Tunnel IP $it" } ?: "VPN IP: looking up")
             }
             mode == Mode.Busy -> {
                 ConnectingFor((state.status as? VpnStatus.Connecting)?.sinceMillis)
@@ -159,7 +159,7 @@ private fun Hero(
                     Live("The kill switch holds traffic back. Try again, or allow internet")
                 } else {
                     Lede("Blocked", " · the tunnel dropped and the kill switch is on", tone)
-                    Live("Nothing reaches the internet until it connects again, or you allow it")
+                    Live("Nothing reaches the internet until the VPN connects again, or you let traffic out without it")
                 }
             }
             mode == Mode.Error -> {
@@ -235,7 +235,7 @@ private fun FirstProfile(state: VpnUiState, nav: Nav, actions: TunnelActions, pr
     Column(horizontalAlignment = Alignment.Start) {
         Title("Add your VPN profile", size = TvType.HeroCompact, maxWidth = 1100f)
         Lede(null, "Scan the code with your phone and send the .ovpn file.")
-        PhoneBlock(session, PhoneBlockSize.Wide, Modifier.padding(top = 24.dp), steps = listOf("Scan the code with your phone’s camera", "Pick the .ovpn file, paste it or type a link", "Check it here and save it"))
+        PhoneBlock(session, PhoneBlockSize.Wide, Modifier.padding(top = 24.dp), steps = listOf("Scan the code with your phone’s camera", "Pick the .ovpn file, paste it or type a link", "Check the profile here and save it"))
         Actions {
             TvButton("Other ways", {
                 nav.importMethod = if (actions.hasFilePicker) ImportMethod.Files else ImportMethod.Link

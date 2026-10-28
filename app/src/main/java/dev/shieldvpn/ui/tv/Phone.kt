@@ -43,7 +43,7 @@ val LocalPhoneServer = staticCompositionLocalOf<PhoneServer?> { null }
 /** The one sentence for a TV the phone can't reach. */
 const val NO_HOME_NETWORK = "This device isn’t on a home network, so your phone can’t reach it."
 
-private const val SAME_WIFI = "Your phone must be on the same Wi-Fi. Turn off mobile data or a VPN on it."
+private const val SAME_WIFI = "Your phone must be on the same Wi-Fi, with mobile data and any VPN off."
 
 /** Where a phone page's actions are refused while the PIN locks profiles and settings. */
 const val LOCKED_ON_TV = "Profiles and settings are locked with a PIN on the TV. Unlock them there first."

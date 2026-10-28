@@ -148,7 +148,7 @@ suspend fun attachCertificate(state: VpnUiState, actions: TunnelActions, nav: Na
         val fits = Control.profilesForCertificate(bytes, password)
         when (fits.size) {
             1 -> fits.single().id
-            0 -> return Outcome.Problems("target", "No profile here trusts who issued this certificate. Pick the profile it is for.")
+            0 -> return Outcome.Problems("target", "No profile here trusts who issued this certificate. Pick the profile this certificate is for.")
             else -> return Outcome.Problems("target", "${fits.joinToString(" and ") { it.name }} could both use it. Pick one.")
         }
     }

@@ -802,7 +802,7 @@ class ShieldVpnService : VpnService() {
         // These run on the core's thread, which KeyChain needs: it must not be the main thread.
         override fun pkiCertificate(alias: String): String? =
             Certificates.entry(this@ShieldVpnService, alias)?.second?.firstOrNull()?.let { Certificates.pem("CERTIFICATE", it.encoded) }
-                ?: null.also { VpnController.log("The certificate for this profile could not be read. Pick it again in Client certificate.", LogKind.Err) }
+                ?: null.also { VpnController.log("The certificate for this profile could not be read. Pick the certificate again in Client certificate.", LogKind.Err) }
 
         override fun pkiChain(alias: String): String? =
             Certificates.entry(this@ShieldVpnService, alias)?.second?.drop(1)?.joinToString("\n") { Certificates.pem("CERTIFICATE", it.encoded) }

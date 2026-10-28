@@ -65,7 +65,7 @@ object Detect {
     private fun isZip(b: ByteArray): Boolean = b.size > 4 && b[0] == 'P'.code.toByte() && b[1] == 'K'.code.toByte() && b[2] == 3.toByte() && b[3] == 4.toByte()
 
     private fun fromPicture(name: String, bytes: ByteArray): Unwrapped {
-        val text = readQr(bytes) ?: return Unwrapped.Problem("There is no QR code that can be read in this picture. Take it straight on, close enough that the code fills most of it.")
+        val text = readQr(bytes) ?: return Unwrapped.Problem("There is no QR code that can be read in this picture. Take the picture straight on, close enough that the code fills most of it.")
         // A WireGuard config, or a link to a profile: either way it is text from here on.
         val ext = if (text.lines().any { it.trim().equals("[Interface]", ignoreCase = true) }) "conf" else "ovpn"
         // A plain name, so the profile is named after its server.

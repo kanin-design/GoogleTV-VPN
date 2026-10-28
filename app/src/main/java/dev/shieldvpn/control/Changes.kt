@@ -282,7 +282,7 @@ object Changes {
                     }
                     val c = profileOf(s, op.path) ?: Control.profilesForCertificate(u.bytes, password).singleOrNull()
                     if (c == null) {
-                        problems["$key.path"] = "Pick the profile it is for."
+                        problems["$key.path"] = "Pick the profile this certificate is for."
                         continue
                     }
                     op.o.put("path", "profiles.${c.id}")
@@ -313,7 +313,7 @@ object Changes {
             notes += "${holder.name} stops connecting at startup."
         }
         // Said once: an update or a restore that changes nothing has said so already.
-        if (lines.isEmpty() && problems.isEmpty() && conflicts.isEmpty() && notes.isEmpty()) notes += "Nothing would change: this is how the TV has it already."
+        if (lines.isEmpty() && problems.isEmpty() && conflicts.isEmpty() && notes.isEmpty()) notes += "Nothing would change: the TV has these settings already."
         // When it takes effect: now, or with a reconnect of the tunnel that is up.
         val status = VpnController.status.value
         val liveId = status.connectionId?.takeIf { status.isActive || VpnController.pausedUntil.value != null }
@@ -341,7 +341,7 @@ object Changes {
         if (lines.any { it.path == "settings.killSwitch" }) notes += "The kill switch changes at once, also on a tunnel that is up."
         if (ops.any { it.op == "delete" && profileOf(s, it.path)?.id == liveId }) notes += "Deleting ${live?.name} disconnects it."
         val pin = s.settings.pinMode != "Off" && s.hasPin
-        if (pin) notes += "The TV is locked with a PIN. Type it to apply."
+        if (pin) notes += "The TV is locked with a PIN. Type the PIN to apply."
         if (ask.isNotEmpty()) notes += "The TV asks before this happens: press Allow there."
         val test = when {
             testProfile != null -> testProfile
@@ -384,10 +384,10 @@ object Changes {
     private fun extraChecks(s: CoreState, op: Op, item: Item, c: Connection?, value: Any?): String? = when {
         item.path == "settings.startup" && value is String && value.isNotEmpty() -> {
             val p = s.connections.firstOrNull { it.id == value }
-            if (p != null && s.infos[p.serverId]?.needsLogin == true && s.logins[p.id]?.hasPassword != true) "${p.name} can only connect by itself with its password saved. Save it first." else null
+            if (p != null && s.infos[p.serverId]?.needsLogin == true && s.logins[p.id]?.hasPassword != true) "${p.name} can only connect by itself with its password saved. Save the password first." else null
         }
         c != null && item.path == "startup" && value == true && s.infos[c.serverId]?.needsLogin == true && s.logins[c.id]?.hasPassword != true ->
-            "${c.name} can only connect by itself with its password saved. Save it first."
+            "${c.name} can only connect by itself with its password saved. Save the password first."
         else -> null
     }
 
