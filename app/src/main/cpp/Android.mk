@@ -3,6 +3,9 @@ LOCAL_PATH := $(call my-dir)
 # Project root and vendored sources (see third_party/).
 ROOT := $(LOCAL_PATH)/../../../..
 TP   := $(ROOT)/third_party
+# Source paths compiled into the library (asserts' __FILE__) start at the project, not at the
+# folders of the machine that built it.
+PREFIX_MAP := -ffile-prefix-map=$(abspath $(ROOT))=.
 OVPN := $(TP)/openvpn3
 # OpenSSL is built once per ABI (third_party/OPENSSL-BUILD.md).
 ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
@@ -49,7 +52,7 @@ LOCAL_CFLAGS := -O2 -DASIO_STANDALONE -DUSE_ASIO -DHAVE_LZ4 -DUSE_OPENSSL -DFMT_
 LOCAL_CPPFLAGS := -std=c++20 -fexceptions -frtti -Wno-unused-parameter -Wno-deprecated-declarations
 # Size: each function and constant in its own section, hidden unless JNI needs it, and the
 # linker drops whatever nothing reaches, including unused parts of the static OpenSSL.
-LOCAL_CFLAGS += -ffunction-sections -fdata-sections -fvisibility=hidden
+LOCAL_CFLAGS += -ffunction-sections -fdata-sections -fvisibility=hidden $(PREFIX_MAP)
 LOCAL_CPPFLAGS += -fvisibility-inlines-hidden
 LOCAL_LDFLAGS := -Wl,--gc-sections -Wl,--icf=all -Wl,--exclude-libs,ALL -Wl,--version-script=$(LOCAL_PATH)/exports.map
 LOCAL_LDLIBS := -llog -landroid
@@ -61,6 +64,6 @@ include $(BUILD_SHARED_LIBRARY)
 include $(CLEAR_VARS)
 LOCAL_MODULE := shieldwg
 LOCAL_SRC_FILES := wg_jni.c
-LOCAL_CFLAGS := -O2 -fvisibility=hidden -Wall
+LOCAL_CFLAGS := -O2 -fvisibility=hidden -Wall $(PREFIX_MAP)
 LOCAL_LDLIBS := -ldl
 include $(BUILD_SHARED_LIBRARY)
